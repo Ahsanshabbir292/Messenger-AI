@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-\\.]+@?[a-zA-Z0-9_\\-\\.]*$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // User validation
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'ip', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.email is string &&
+             data.ip is string &&
+             data.createdAt is timestamp;
+    }
+
+    // TokenSession validation
+    function isValidTokenSession(data) {
+      return data.keys().hasAll(['userAccessToken', 'pages', 'selectedPageIds']) &&
+             data.keys().size() == 3 &&
+             data.userAccessToken is string &&
+             data.pages is list &&
+             data.selectedPageIds is list;
+    }
+
+    // VerificationCode validation
+    function isValidVerificationCode(data) {
+      return data.keys().hasAll(['email', 'code', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.email is string &&
+             data.code is string &&
+             data.createdAt is timestamp;
+    }
+
+    // Rules for collections
+    
+    match /users/{email} {
+      allow read, write: if true;
+    }
+
+    match /sessions/{sessionId} {
+      allow read, write: if true;
+    }
+
+    match /verificationCodes/{email} {
+      allow read, write: if true;
+    }
+    
+    match /trialIPs/{ip} {
+      allow read, write: if true;
+    }
+
+    match /_connectivity_test/{doc} {
+      allow read, write: if true;
+    }
+  }
+}

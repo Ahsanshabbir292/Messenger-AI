@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "ip": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "ip", "createdAt"]
+    },
+    "TokenSession": {
+      "title": "TokenSession",
+      "description": "Facebook OAuth tokens and session data",
+      "type": "object",
+      "properties": {
+        "userAccessToken": { "type": "string" },
+        "pages": { "type": "array" },
+        "selectedPageIds": { "type": "array" }
+      },
+      "required": ["userAccessToken", "pages", "selectedPageIds"]
+    },
+    "VerificationCode": {
+      "title": "VerificationCode",
+      "description": "Temporary verification codes for email sign-up",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "code": { "type": "string" },
+        "password": { "type": "string" },
+        "fullName": { "type": "string" },
+        "workspaceName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "code", "createdAt"]
+    },
+    "TrialIP": {
+      "title": "TrialIP",
+      "description": "Tracked IPs for trial abuse prevention",
+      "type": "object",
+      "properties": {
+        "used": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["used"]
+    }
+  },
+  "firestore": {
+    "/users/{email}": {
+      "schema": "User",
+      "description": "Collection of registered users indexed by email"
+    },
+    "/sessions/{sessionId}": {
+      "schema": "TokenSession",
+      "description": "Collection of active Facebook sessions"
+    },
+    "/verificationCodes/{email}": {
+      "schema": "VerificationCode",
+      "description": "Collection of pending verification codes"
+    },
+    "/trialIPs/{ip}": {
+      "schema": "TrialIP",
+      "description": "Anti-abuse registry for trial accounts"
+    }
+  }
+}

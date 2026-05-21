@@ -1,0 +1,11 @@
+{
+  "name": "MessengerAI",
+  "description": "Enterprise-grade automation for Facebook Messenger. Deploy hyper-intelligent AI agents to your Facebook Pages and transform customer engagement.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

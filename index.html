@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Defensive check to avoid "Cannot set property fetch of #<Window> which has only a getter"
+      // Some libraries (like gaxios/node-fetch polyfills) try to assign to window.fetch
+      try {
+        const desc = Object.getOwnPropertyDescriptor(window, 'fetch');
+        if (desc && !desc.writable && !desc.set) {
+          console.warn('[App] window.fetch is read-only. Protecting against polyfill override.');
+          const original = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: () => original,
+            set: () => {} // Silently ignore assignment
+          });
+        }
+      } catch (e) {
+        console.error('[App] Error in fetch protector:', e);
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
