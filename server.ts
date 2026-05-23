@@ -45,6 +45,33 @@ if (fs.existsSync(configPath)) {
   }
 }
 
+// Enable fallbacks to standard environment variables for production deployments
+firebaseConfig.projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+firebaseConfig.appId = process.env.FIREBASE_APP_ID || firebaseConfig.appId;
+firebaseConfig.apiKey = process.env.FIREBASE_API_KEY || firebaseConfig.apiKey;
+firebaseConfig.authDomain = process.env.FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain;
+firebaseConfig.firestoreDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+firebaseConfig.storageBucket = process.env.FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket;
+firebaseConfig.messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId;
+firebaseConfig.measurementId = process.env.FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId;
+
+// Helper to format Cloud Firestore common errors gracefully (e.g. API disabled, permission denied)
+function formatDbError(error: any): string {
+  const msg = error?.message || String(error);
+  if (msg.includes("PERMISSION_DENIED") || msg.includes("firestore.googleapis.com") || msg.toLowerCase().includes("permission-denied") || msg.includes("7")) {
+    const projId = firebaseConfig.projectId || "messengerai-a87aa";
+    return `Firebase Firestore Setup Error (API Disabled or Database Missing):\n` +
+           `1. Enable the Firestore API: https://console.cloud.google.com/apis/library/firestore.googleapis.com?project=${projId}\n` +
+           `2. Create a Cloud Firestore Database in Native/Test mode: https://console.firebase.google.com/project/${projId}/firestore\n\n` +
+           `Urdu: Apne Google Cloud / Firebase project me Firestore API enable nahi ki, ya abhi tak Firestore Database console se create nahi kiya. Upar diye link par ja kar please API enable karein aur database create karein.`;
+  }
+  if (msg.includes("client is offline") || msg.includes("Could not reach Cloud Firestore backend")) {
+    return `Firebase Firestore Connection Error (Offline/Connectivity Issue):\n` +
+           `Failed to reach Firestore. Please check your hosting network environment, API keys, or security rules.`;
+  }
+  return msg;
+}
+
 // Compatibility wrapper classes for Web SDK to match Firestore Admin's collection/doc API
 class CompatDocumentReference {
   constructor(private firestore: any, private col: string, private id: string) {}
@@ -535,7 +562,7 @@ async function startServer() {
       res.json({ success: true, user: userWithoutPassword });
     } catch (err: any) {
       console.error("[AUTH] Signin database error:", err);
-      res.status(500).json({ error: "Database error: " + err.message });
+      res.status(500).json({ error: formatDbError(err) });
     }
   });
 
@@ -908,7 +935,7 @@ async function startServer() {
       }
     } catch (error: any) {
       console.error("[AUTH] Signup Error:", error);
-      res.status(500).json({ error: "Auth process error: " + error.message });
+      res.status(500).json({ error: formatDbError(error) });
     }
   });
 
@@ -962,7 +989,7 @@ async function startServer() {
       }
     } catch (err: any) {
       console.error("[AUTH] Verification database error:", err);
-      res.status(500).json({ error: "Database error during verification: " + err.message });
+      res.status(500).json({ error: formatDbError(err) });
     }
   });
 

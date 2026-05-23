@@ -157,7 +157,7 @@ export default function AuthPage({
             <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center">
               <X className="w-5 h-5 text-white" />
             </div>
-            <p className="text-sm font-bold text-red-900">{error}</p>
+            <p className="text-sm font-bold text-red-900 whitespace-pre-wrap max-w-lg break-words">{error}</p>
             <button onClick={() => setError(null)} className="ml-4 text-red-400 hover:text-red-900">
               <X className="w-4 h-4" />
             </button>
