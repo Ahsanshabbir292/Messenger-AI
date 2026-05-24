@@ -9,13 +9,15 @@ import LandingPage from './components/LandingPage';
 import AuthPage from './components/AuthPage';
 import Dashboard from './components/Dashboard';
 import ChatWidget from './components/ChatWidget';
-import LegalPages from './components/LegalPages';
+import PrivacyPage from './components/PrivacyPage';
+import TermsPage from './components/TermsPage';
+import DeletionPage from './components/DeletionPage';
+import SupportFAQPage from './components/SupportFAQPage';
 
-type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'legal';
+type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support';
 
 export default function App() {
-  const [view, setView] = useState<ViewMode>('landing');
-  const [legalTab, setLegalTab] = useState<'privacy' | 'terms' | 'deletion' | 'faq-support'>('privacy');
+  const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const [inviteData, setInviteData] = useState<any>(null);
   const [appUser, setAppUser] = useState<any>(() => {
     try {
@@ -34,6 +36,20 @@ export default function App() {
   });
   const [loading, setLoading] = useState(true);
 
+  // Synchronize state with history PopState (back/forward browser buttons)
+  React.useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateTo = (path: string) => {
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+  };
+
   React.useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const inviteToken = params.get('invite_token');
@@ -50,7 +66,7 @@ export default function App() {
         inviter: inviter || '',
         role: role || 'member'
       });
-      setView('signup');
+      navigateTo('/signup');
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
@@ -68,7 +84,9 @@ export default function App() {
           setAppUser(res.data.user);
           localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
           axios.defaults.headers.common['x-user-email'] = res.data.user.email;
-          setView('dashboard');
+          if (currentPath === '/' || currentPath === '/signin' || currentPath === '/signup') {
+            navigateTo('/dashboard');
+          }
         }
       } catch (err) {
         // Fallback: check if we have a robust local storage user we can trust
@@ -79,38 +97,31 @@ export default function App() {
             if (parsed && parsed.email) {
               setAppUser(parsed);
               axios.defaults.headers.common['x-user-email'] = parsed.email;
-              setView('dashboard');
+              if (currentPath === '/' || currentPath === '/signin' || currentPath === '/signup') {
+                navigateTo('/dashboard');
+              }
               setLoading(false);
               return;
             }
           } catch (e) {}
         }
 
-        // Not logged in or error
-        const savedView = localStorage.getItem('app_view') as ViewMode;
-        if (savedView === 'dashboard') {
-           setView('landing'); // Force back to landing if session is gone
-        } else {
-           setView(savedView || 'landing');
+        // If trying to access protected dashboard, redirect to signin
+        if (currentPath === '/dashboard') {
+          navigateTo('/signin');
         }
       } finally {
         setLoading(false);
       }
     };
     checkSession();
-  }, [appUser?.email]);
+  }, [appUser?.email, currentPath]);
 
-  const updateView = (newView: ViewMode) => {
-    setView(newView);
-    localStorage.setItem('app_view', newView);
-  };
-
-  const goToLanding = () => updateView('landing');
-  const goToSignIn = () => updateView('signin');
-  const goToSignUp = () => updateView('signup');
+  const goToLanding = () => navigateTo('/');
+  const goToSignIn = () => navigateTo('/signin');
+  const goToSignUp = () => navigateTo('/signup');
   const goToLegal = (tab: 'privacy' | 'terms' | 'deletion' | 'faq-support') => {
-    setLegalTab(tab);
-    updateView('legal');
+    navigateTo(`/${tab}`);
   };
   const handleLoginSuccess = async () => {
     try {
@@ -120,9 +131,9 @@ export default function App() {
         localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
         axios.defaults.headers.common['x-user-email'] = res.data.user.email;
       }
-      updateView('dashboard');
+      navigateTo('/dashboard');
     } catch (err) {
-      updateView('dashboard');
+      navigateTo('/dashboard');
     }
   };
 
@@ -142,6 +153,24 @@ export default function App() {
         <div className="w-12 h-12 border-4 border-indigo-600/20 border-t-indigo-600 rounded-full animate-spin"></div>
       </div>
     );
+  }
+
+  // Derive active view mode from pathname
+  let view: ViewMode = 'landing';
+  if (currentPath === '/signin') {
+    view = 'signin';
+  } else if (currentPath === '/signup') {
+    view = 'signup';
+  } else if (currentPath === '/dashboard') {
+    view = 'dashboard';
+  } else if (currentPath === '/privacy') {
+    view = 'privacy';
+  } else if (currentPath === '/terms') {
+    view = 'terms';
+  } else if (currentPath === '/deletion') {
+    view = 'deletion';
+  } else if (currentPath === '/faq-support') {
+    view = 'faq-support';
   }
 
   return (
@@ -172,12 +201,26 @@ export default function App() {
         <Dashboard onLogout={handleLogout} appUser={appUser} />
       )}
 
-      {view === 'legal' && (
-        <LegalPages 
-          initialTab={legalTab} 
+      {view === 'privacy' && (
+        <PrivacyPage onBack={goToLanding} />
+      )}
+
+      {view === 'terms' && (
+        <TermsPage onBack={goToLanding} />
+      )}
+
+      {view === 'deletion' && (
+        <DeletionPage 
           onBack={goToLanding} 
           currentUserEmail={appUser?.email}
           onLogout={handleLogout}
+        />
+      )}
+
+      {view === 'faq-support' && (
+        <SupportFAQPage 
+          onBack={goToLanding} 
+          currentUserEmail={appUser?.email}
         />
       )}
 

@@ -180,7 +180,7 @@ export default function AuthPage({
                 <div className="w-14 h-14 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-2xl shadow-indigo-500/20">
                    <Facebook className="w-7 h-7 text-white" />
                 </div>
-                <span className="text-3xl font-black text-white tracking-tighter">Messenger<span className="text-indigo-500">AI</span></span>
+                <span className="text-3xl font-black text-white tracking-tighter">Perseus<span className="text-indigo-500"> Bot</span></span>
              </div>
              <h2 className="text-5xl font-black text-white tracking-tight leading-[0.95] mb-8">Elevate your customer <br /> conversations.</h2>
              <p className="text-slate-400 text-lg font-medium leading-relaxed max-w-sm italic">

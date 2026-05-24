@@ -172,7 +172,7 @@ async function getDb(): Promise<any> {
   try {
     const app = initializeApp(firebaseConfig);
     const dbId = firebaseConfig.firestoreDatabaseId;
-    const webDb = dbId && dbId !== "(default)" ? getWebFirestore(app, dbId) : getWebFirestore(app);
+    let webDb = dbId && dbId !== "(default)" ? getWebFirestore(app, dbId) : getWebFirestore(app);
     
     // Connectivity check on startup to verify setup
     try {
@@ -181,7 +181,29 @@ async function getDb(): Promise<any> {
       console.log(`[Firebase] Web SDK Connectivity check passed successfully!`);
       db = new CompatFirestore(webDb);
     } catch (err: any) {
-      console.error("[Firebase] Web SDK Connectivity check failed:", err.message);
+      console.error(`[Firebase] Web SDK Connectivity check failed with key "${dbId}":`, err.message);
+      
+      const isNotFoundErr = err.message?.includes("NOT_FOUND") || 
+                            err.message?.includes("not-found") || 
+                            err.message?.includes("5") ||
+                            err.code === "not-found";
+                            
+      if (dbId && dbId !== "(default)" && isNotFoundErr) {
+        console.log("[Firebase] Retrying connection with standard '(default)' database ID...");
+        try {
+          const fallbackDb = getWebFirestore(app);
+          const pingDocRef = doc(fallbackDb, "_connectivity_test", "ping");
+          await getDoc(pingDocRef);
+          console.log(`[Firebase] Web SDK Connectivity check passed successfully with '(default)' database!`);
+          webDb = fallbackDb;
+          db = new CompatFirestore(webDb);
+          isDbInitializing = false;
+          return db;
+        } catch (fallbackErr: any) {
+          console.error("[Firebase] Fallback connectivity check failed with '(default)' database ID as well:", fallbackErr.message);
+        }
+      }
+      
       db = new CompatFirestore(webDb); // Use it anyway as fallback
     }
     
@@ -478,10 +500,10 @@ async function startServer() {
 
     return res.json({
       success: true,
-      url: `https://messenger-ai.com/legal/deletion-status?id=${deletionConfirmationId}`,
+      url: `https://perseus-bot.com/legal/deletion-status?id=${deletionConfirmationId}`,
       confirmation_code: deletionConfirmationId,
       message: userFound 
-        ? "Apka account aur tamam data MessengerAI k database se permanent delete kr dya gya hai." 
+        ? "Apka account aur tamam data Perseus Bot k database se permanent delete kr dya gya hai." 
         : "Is email k sath koi account maujood nhi tha, lakin apka privacy request delete track record me record kr dya gya hai."
     });
   });
@@ -672,7 +694,7 @@ async function startServer() {
             <div style="background-color: #4f46e5; display: inline-block; padding: 12px; border-radius: 12px;">
               <span style="color: #ffffff; font-size: 20px; font-weight: bold;">M</span>
             </div>
-            <h1 style="font-size: 18px; font-weight: bold; color: #0f172a; margin-top: 12px;">Workspace Invitation - MessengerAI</h1>
+            <h1 style="font-size: 18px; font-weight: bold; color: #0f172a; margin-top: 12px;">Workspace Invitation - Perseus Bot</h1>
           </div>
           
           <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; line-height: 1.6;">
@@ -708,10 +730,10 @@ async function startServer() {
       }
 
       await transporter.sendMail({
-        from: process.env.FROM_EMAIL || '"Messenger AI Hub" <noreply@messengerai.com>',
+        from: process.env.FROM_EMAIL || '"Perseus Bot Hub" <noreply@perseusbot.com>',
         to: email,
         subject: `Verify your invite - Invited by ${inviterName}`,
-        text: `You have been invited to manage customer interactions on MessengerAI by ${inviterName}. Click this link to register: ${inviteLink}`,
+        text: `You have been invited to manage customer interactions on Perseus Bot by ${inviterName}. Click this link to register: ${inviteLink}`,
         html: emailHtml,
       });
 
@@ -907,14 +929,14 @@ async function startServer() {
 
       try {
         await transporter.sendMail({
-          from: process.env.FROM_EMAIL || '"Messenger Interact" <noreply@messengerinteract.com>',
+          from: process.env.FROM_EMAIL || '"Perseus Bot" <noreply@perseusbot.com>',
           to: email,
-          subject: "Verify your account - Messenger Interact",
+          subject: "Verify your account - Perseus Bot",
           text: `Your verification code is: ${code}`,
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
               <h2 style="color: #4f46e5;">Verify your account</h2>
-              <p>Welcome to Messenger Interact! Please use the following code to complete your registration:</p>
+              <p>Welcome to Perseus Bot! Please use the following code to complete your registration:</p>
               <div style="background: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; border-radius: 8px; color: #111827;">
                 ${code}
               </div>
@@ -1901,7 +1923,7 @@ async function startServer() {
         model: "gemini-3-flash-preview",
         contents: message,
         config: {
-          systemInstruction: "You are a helpful customer support bot for MessengerInteract. You specialize in helping users automate their Facebook Messenger conversations. Be professional, concise, and focus on Messenger automation solutions.",
+          systemInstruction: "You are a helpful customer support bot for Perseus Bot. You specialize in helping users automate their Facebook Messenger conversations. Be professional, concise, and focus on Messenger automation solutions.",
         }
       });
       

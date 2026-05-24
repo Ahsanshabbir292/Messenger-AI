@@ -681,7 +681,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
             <div className="bg-indigo-600 p-2 rounded-2xl shadow-lg shadow-indigo-100 group-hover:scale-105 transition-transform">
               <Facebook className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xl font-black text-slate-900 tracking-tight">MessengerAI</span>
+            <span className="text-xl font-black text-slate-900 tracking-tight">Perseus Bot</span>
           </div>
 
           {/* Workspace Switcher */}
@@ -1468,7 +1468,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                 <h4 className="font-black text-sm lg:text-xl text-slate-900 tracking-tight truncate max-w-[120px] sm:max-w-none">{selectedConversation.participants.data.find((p: any) => p.id !== selectedPage?.id)?.name || 'Conversation'}</h4>
                                 <div className="flex items-center gap-1.5 lg:mt-1">
                                    <div className="w-1.5 lg:w-2 h-1.5 lg:h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                                   <p className="text-[8px] lg:text-[10px] text-slate-400 font-bold uppercase tracking-widest whitespace-nowrap">Messenger AI</p>
+                                   <p className="text-[8px] lg:text-[10px] text-slate-400 font-bold uppercase tracking-widest whitespace-nowrap font-mono tracking-wider">Perseus Bot</p>
                                 </div>
                              </div>
                           </div>
