@@ -236,6 +236,16 @@ async function startServer() {
   const PORT = 3000;
 
   app.set("trust proxy", 1);
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,x-user-email,Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    if (req.method === "OPTIONS") {
+      return res.status(200).end();
+    }
+    next();
+  });
   app.use(express.json({
     verify: (req: any, res, buf) => {
       req.rawBody = buf;

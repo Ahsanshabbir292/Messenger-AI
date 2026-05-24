@@ -583,7 +583,8 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
   };
 
   useEffect(() => {
-    const newSocket = io();
+    const socketUrl = (window as any).__BACKEND_URL__ || undefined;
+    const newSocket = socketUrl ? io(socketUrl, { path: '/socket.io' }) : io();
     setSocket(newSocket);
     newSocket.on("new_message", (data) => {
       getConversations(selectedPage?.id);
