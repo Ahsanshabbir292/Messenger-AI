@@ -1203,11 +1203,12 @@ async function startServer() {
     const host = req.headers.host;
     const currentOrigin = host ? `${protocol}://${host}` : '';
     const appUrl = process.env.APP_URL || currentOrigin;
+    const userEmail = (req.query.email || (req.session.user && req.session.user.email) || "ahsan.shabbir292@gmail.com") as string;
     
     if (!appId || appId === "" || appId === "YOUR_FACEBOOK_APP_ID") {
-      return res.status(400).json({ 
-        error: "App ID missing! Please click 'Settings' button on the right side and add your FACEBOOK_APP_ID." 
-      });
+      console.log(`[FB-Simulator] No FACEBOOK_APP_ID found. Standard OAuth fallback to simulation for ${userEmail}`);
+      const simulateUrl = `${appUrl}/auth/facebook/simulate?email=${encodeURIComponent(userEmail)}`;
+      return res.json({ url: simulateUrl });
     }
 
     const redirectUri = `${appUrl}/auth/facebook/callback`;
@@ -1220,10 +1221,469 @@ async function startServer() {
       "public_profile"
     ].join(",");
 
-    const userEmail = (req.query.email || (req.session.user && req.session.user.email) || "ahsan.shabbir292@gmail.com") as string;
     const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(userEmail)}`;
     
     res.json({ url: authUrl });
+  });
+
+  // Gorgeous Facebook Connection Simulator (Sandbox Mode)
+  app.get("/auth/facebook/simulate", (req, res) => {
+    const userEmail = (req.query.email || "ahsan.shabbir292@gmail.com") as string;
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Facebook Login Sandbox Simulator</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+          body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: #f0f2f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            color: #1c1e21;
+          }
+          .fb-dialog {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 12px 28px 0 rgba(0, 0, 0, 0.2), 0 2px 4px 0 rgba(0, 0, 0, 0.1);
+            max-width: 550px;
+            width: 90%;
+            overflow: hidden;
+            border: 1px solid #dddfe2;
+          }
+          .fb-header {
+            background-color: #1877f2;
+            color: white;
+            padding: 14px 20px;
+            font-size: 18px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+          .fb-body {
+            padding: 24px;
+          }
+          .app-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #e5e5e5;
+            padding-bottom: 20px;
+          }
+          .app-logo {
+            width: 48px;
+            height: 48px;
+            background: #e0f2fe;
+            color: #0284c7;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 20px;
+          }
+          .app-text h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+          }
+          .app-text p {
+            margin: 3px 0 0 0;
+            font-size: 13px;
+            color: #606770;
+          }
+          .permissions-list {
+            background: #f5f6f7;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+          }
+          .permissions-list h4 {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            color: #4b4f56;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+          }
+          .perm-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            font-size: 13px;
+            color: #1c1e21;
+            margin-bottom: 8px;
+          }
+          .perm-item svg {
+            width: 16px;
+            height: 16px;
+            color: #4b4f56;
+            margin-top: 2px;
+          }
+          .pages-selection h4 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            font-weight: 600;
+          }
+          .page-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border: 1px solid #dddfe2;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+          }
+          .page-checkbox:hover {
+            background-color: #f5f6f7;
+          }
+          .page-checkbox img {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+          }
+          .page-checkbox .page-name {
+            flex-grow: 1;
+            font-size: 14px;
+            font-weight: 600;
+          }
+          .page-checkbox input {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+          }
+          .fb-footer {
+            background-color: #f5f6f7;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            border-top: 1px solid #dddfe2;
+          }
+          .btn {
+            padding: 8px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+          }
+          .btn-cancel {
+            background-color: #dddfe2;
+            color: #4b4f56;
+          }
+          .btn-cancel:hover {
+            background-color: #ced0d4;
+          }
+          .btn-primary {
+            background-color: #1877f2;
+            color: white;
+          }
+          .btn-primary:hover {
+            background-color: #166fe5;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="fb-dialog">
+          <div class="fb-header">
+            <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+            </svg>
+            Meta Login Sandbox
+          </div>
+          <form action="/auth/facebook/simulate/callback" method="POST" class="fb-body">
+            <input type="hidden" name="email" value="${userEmail}" />
+            
+            <div class="app-info">
+              <div class="app-logo">P</div>
+              <div class="app-text">
+                <h3>Perseus Bot (AI Agent)</h3>
+                <p>recommends connecting Facebook to launch auto-messaging triggers.</p>
+              </div>
+            </div>
+
+            <div class="permissions-list">
+              <h4>Requested Permissions:</h4>
+              <div class="perm-item">
+                <svg fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                Manage business pages & list pages
+              </div>
+              <div class="perm-item">
+                <svg fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                Access & reply to Messenger inquiries in chats
+              </div>
+            </div>
+
+            <div class="pages-selection">
+              <h4>Select Pages to Connect:</h4>
+              
+              <label class="page-checkbox">
+                <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80" />
+                <span class="page-name">Perseus Sales Agent</span>
+                <input type="checkbox" name="pages" value="page_perseus_core" checked />
+              </label>
+
+              <label class="page-checkbox">
+                <img src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=150&q=80" />
+                <span class="page-name">Fashion Hub Boutique</span>
+                <input type="checkbox" name="pages" value="page_fashion_store" checked />
+              </label>
+
+              <label class="page-checkbox">
+                <img src="https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=150&q=80" />
+                <span class="page-name">Elite Realty Guide</span>
+                <input type="checkbox" name="pages" value="page_property_portal" checked />
+              </label>
+
+              <label class="page-checkbox">
+                <img src="https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=150&q=80" />
+                <span class="page-name">Spicy Fusion Restaurant</span>
+                <input type="checkbox" name="pages" value="page_local_restaurant" checked />
+              </label>
+            </div>
+
+            <div style="margin-top: 20px; font-size: 11px; color: #8d949e; text-align: center;">
+              You are authorizing in <strong>Testing Sandbox Mode</strong> for user account <strong>${userEmail}</strong>.
+            </div>
+
+            <div class="fb-footer" style="margin: 20px -24px -24px -24px;">
+              <button type="button" class="btn btn-cancel" onclick="window.close()">Cancel</button>
+              <button type="submit" class="btn btn-primary">Simulate Access Grant</button>
+            </div>
+          </form>
+        </div>
+      </body>
+      </html>
+    `);
+  });
+
+  // Handle post submit from Simulator (updates DB & closes the window)
+  app.post("/auth/facebook/simulate/callback", async (req, res) => {
+    let userEmail = req.body.email as string;
+    if (!userEmail) {
+      userEmail = req.session?.user?.email || "ahsan.shabbir292@gmail.com";
+    }
+    
+    // Read selected checkboxes
+    const activeConfigs = req.body.pages;
+    const selectedPageIdsList = Array.isArray(activeConfigs) 
+      ? activeConfigs 
+      : (activeConfigs ? [activeConfigs] : ["page_perseus_core", "page_fashion_store", "page_property_portal"]);
+
+    const allModelPages = [
+      {
+        id: "page_perseus_core",
+        name: "Perseus Sales Agent",
+        access_token: "sim_token_perseus_core",
+        picture: { data: { url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=150&q=80" } }
+      },
+      {
+        id: "page_fashion_store",
+        name: "Fashion Hub Boutique",
+        access_token: "sim_token_fashion_store",
+        picture: { data: { url: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=150&q=80" } }
+      },
+      {
+        id: "page_property_portal",
+        name: "Elite Realty Guide",
+        access_token: "sim_token_property_portal",
+        picture: { data: { url: "https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=150&q=80" } }
+      },
+      {
+        id: "page_local_restaurant",
+        name: "Spicy Fusion Restaurant",
+        access_token: "sim_token_local_restaurant",
+        picture: { data: { url: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=150&q=80" } }
+      }
+    ];
+
+    const pages = allModelPages.filter(p => selectedPageIdsList.includes(p.id));
+    const userAccessToken = "simulated_fb_user_token_abc123";
+    
+    req.session.fbSessionId = `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+    console.log(`[FB-Simulator] Saving simulated Facebook payload for ${userEmail}. Pages connected:`, pages.map(p => p.name));
+
+    const db = await getDb();
+    if (db) {
+      try {
+        await db.collection("sessions").doc(req.session.fbSessionId).set({
+          userAccessToken,
+          pages,
+          selectedPageIds: []
+        });
+
+        // Save directly to Firestore users document too
+        const userDocRef = db.collection("users").doc(userEmail);
+        const snap = await userDocRef.get();
+        if (snap.exists) {
+          await userDocRef.update({
+            facebook: {
+              userAccessToken,
+              pages,
+              selectedPageIds: []
+            }
+          });
+        } else {
+          await userDocRef.set({
+            email: userEmail,
+            facebook: {
+              userAccessToken,
+              pages,
+              selectedPageIds: []
+            }
+          });
+        }
+      } catch (err: any) {
+        console.error("[FB-Simulator] Error saving simulated payload in DB:", err.message);
+      }
+    }
+
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Facebook Authenticated</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+          body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            color: #0f172a;
+          }
+          .card {
+            background: white;
+            padding: 2.5rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+          }
+          .icon-container {
+            width: 64px;
+            height: 64px;
+            background-color: #ecfdf5;
+            color: #10b981;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.5rem;
+          }
+          .icon {
+            width: 32px;
+            height: 32px;
+          }
+          h2 {
+            margin: 0 0 0.5rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #0f172a;
+          }
+          p {
+            color: #64748b;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            margin: 0 0 1.75rem;
+          }
+          .btn {
+            display: inline-block;
+            width: 100%;
+            padding: 0.875rem 1.5rem;
+            background-color: #1877f2;
+            color: white;
+            border: none;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            text-decoration: none;
+            box-sizing: border-box;
+          }
+          .btn:hover {
+            background-color: #166fe5;
+          }
+          .status-badge {
+            display: inline-block;
+            margin-top: 1.25rem;
+            font-size: 0.8rem;
+            color: #94a3b8;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <div class="icon-container">
+            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+            </svg>
+          </div>
+          <h2>Sandbox Connected!</h2>
+          <p>Facebook Demo Pages successfully configured and synchronized in Sandbox mode!</p>
+          
+          <button onclick="closeAndReturn()" class="btn">Close Window</button>
+          <span class="status-badge" id="countdown">Auto-closing in 3 seconds...</span>
+        </div>
+
+        <script>
+          try {
+            localStorage.setItem('FB_AUTH_SUCCESS', JSON.stringify({
+              sessionId: 'fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}',
+              timestamp: Date.now()
+            }));
+          } catch (e) {
+            console.error(e);
+          }
+
+          if (window.opener) {
+            try {
+              window.opener.postMessage({ 
+                type: 'FB_AUTH_SUCCESS', 
+                sessionId: 'fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}' 
+              }, '*');
+            } catch (e) {
+              console.error(e);
+            }
+          }
+
+          function closeAndReturn() {
+            window.close();
+          }
+
+          let seconds = 3;
+          const timer = setInterval(() => {
+            seconds--;
+            if (seconds <= 0) {
+              clearInterval(timer);
+              closeAndReturn();
+            } else {
+              document.getElementById('countdown').innerText = "Auto-closing in " + seconds + " seconds...";
+            }
+          }, 1000);
+        </script>
+      </body>
+      </html>
+    `);
   });
 
   app.get("/auth/facebook/callback", async (req, res) => {
@@ -1478,6 +1938,18 @@ async function startServer() {
 
     const data = await getFacebookData(req);
     if (!data) return res.json(null);
+
+    if (data.userAccessToken && data.userAccessToken.startsWith("simulated_")) {
+      return res.json({
+        name: req.session.user?.fullName || "Ahsan Shabbir (Demo Account)",
+        id: "simulated_fb_user_123",
+        picture: {
+          data: {
+            url: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80"
+          }
+        }
+      });
+    }
 
     try {
       const response = await axios.get(`https://graph.facebook.com/v19.0/me`, {
@@ -1874,6 +2346,179 @@ async function startServer() {
     }
   });
 
+  // --- Sandbox Simulation Helper Functions ---
+  function getDefaultSimulatedConversations(pageId: string) {
+    if (pageId === "page_perseus_core") {
+      return [
+        {
+          id: "conv_p1_1",
+          participants: {
+            data: [
+              { name: "Sajid Khan", id: "user_sajid", picture: { data: { url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80" } } }
+            ]
+          },
+          messages: {
+            data: [
+              { message: "Assalam o Alaikum! I need to know about your automation services price list.", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3600000).toISOString() },
+              { message: "Bhai, standard integration rates kya hain? customized options bhi hain custom logic k lye?", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3000000).toISOString() }
+            ]
+          },
+          updated_time: new Date(Date.now() - 3000000).toISOString()
+        },
+        {
+          id: "conv_p1_2",
+          participants: {
+            data: [
+              { name: "Aisha Rehman", id: "user_aisha", picture: { data: { url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80" } } }
+            ]
+          },
+          messages: {
+            data: [
+              { message: "Can we connect our CRM of Salesforce with your chatbot agent?", from: { name: "Aisha Rehman", id: "user_aisha" }, created_time: new Date(Date.now() - 7200000).toISOString() }
+            ]
+          },
+          updated_time: new Date(Date.now() - 7200000).toISOString()
+        }
+      ];
+    } else if (pageId === "page_fashion_store") {
+      return [
+        {
+          id: "conv_p2_1",
+          participants: {
+            data: [
+              { name: "Zainab Malik", id: "user_zainab", picture: { data: { url: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80" } } }
+            ]
+          },
+          messages: {
+            data: [
+              { message: "Hi! Is the silk velvet suit available in dark blue size Medium?", from: { name: "Zainab Malik", id: "user_zainab" }, created_time: new Date(Date.now() - 1800000).toISOString() }
+            ]
+          },
+          updated_time: new Date(Date.now() - 1800000).toISOString()
+        }
+      ];
+    } else if (pageId === "page_property_portal") {
+      return [
+        {
+          id: "conv_p3_1",
+          participants: {
+            data: [
+              { name: "Haris Jamil", id: "user_haris", picture: { data: { url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80" } } }
+            ]
+          },
+          messages: {
+            data: [
+              { message: "Interested in DHA Phase 6 1-Kanal villa. Can you send down brochure and pricing details?", from: { name: "Haris Jamil", id: "user_haris" }, created_time: new Date(Date.now() - 7200000).toISOString() }
+            ]
+          },
+          updated_time: new Date(Date.now() - 7200000).toISOString()
+        }
+      ];
+    } else {
+      return [
+        {
+          id: "conv_p4_1",
+          participants: {
+            data: [
+              { name: "Bilal Butt", id: "user_bilal", picture: { data: { url: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=150&q=80" } } }
+            ]
+          },
+          messages: {
+            data: [
+              { message: "Hello, what is your restaurant closing time tonight? Do you take online custom reservations or walk-ins only?", from: { name: "Bilal Butt", id: "user_bilal" }, created_time: new Date(Date.now() - 450000).toISOString() }
+            ]
+          },
+          updated_time: new Date(Date.now() - 450000).toISOString()
+        }
+      ];
+    }
+  }
+
+  async function getOrCreateSimulatedConversations(db: any, req: any, pageId: string) {
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
+
+    try {
+      const simColRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+      const snap = await simColRef.get();
+      if (snap.exists) {
+        return snap.data().conversations || [];
+      } else {
+        const initialConvs = getDefaultSimulatedConversations(pageId);
+        await simColRef.set({ conversations: initialConvs });
+        return initialConvs;
+      }
+    } catch (e: any) {
+      console.error("[FB-Simulator] Error getting simulated conversations:", e.message);
+      return getDefaultSimulatedConversations(pageId);
+    }
+  }
+
+  async function generateSimulatedCustomerReply(db: any, pageId: string, recipientId: string, agentMessage: string, userEmail: string) {
+    try {
+      const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+      const snap = await simDocRef.get();
+      if (!snap.exists) return;
+
+      const conversations = snap.data().conversations || [];
+      const conversation = conversations.find((c: any) => 
+        c.participants?.data?.some((p: any) => p.id === recipientId)
+      );
+
+      if (!conversation) return;
+
+      const customerName = conversation.participants?.data?.find((p: any) => p.id === recipientId)?.name || "Customer";
+
+      let simulatedReply = "Acha, main samajh gaya. Thank you so much details k liye.";
+      try {
+        const prompt = `You are a real human customer named ${customerName} chatting with a business page called "${pageId === 'page_perseus_core' ? 'Perseus Bot (AI Automation agency)' : pageId === 'page_fashion_store' ? 'Glamour Fashion Hub Boutique' : pageId === 'page_property_portal' ? 'Elite Realty Guide' : 'Spicy Fusion Restaurant'}" on Facebook Messenger.
+The customer speaks in a friendly mix of Urdu and English (Roman Urdu/Hinglish), which is extremely common in Pakistan.
+The business agent just told you: "${agentMessage}"
+
+Write a realistic, short and natural response expressing your reaction, query, or next logical steps (max 2 sentences, written in Roman Urdu/English). Do not sound robotic. Be a genuine customer:`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-1.5-flash',
+          contents: prompt,
+          generationConfig: {
+            maxOutputTokens: 100,
+            temperature: 0.8,
+          }
+        });
+
+        if (response.text) {
+          simulatedReply = response.text.trim();
+        }
+      } catch (gemErr: any) {
+        console.error("[FB-Simulator] Gemini failed to generate simulated customer response, falling back:", gemErr.message);
+      }
+
+      const customerMsgObj = {
+        message: simulatedReply,
+        from: { name: customerName, id: recipientId },
+        created_time: new Date().toISOString()
+      };
+
+      conversation.messages.data.push(customerMsgObj);
+      conversation.updated_time = customerMsgObj.created_time;
+
+      await simDocRef.set({ conversations });
+
+      // Emit via socket
+      io.to(`page_${pageId}`).emit("new_message", {
+        pageId,
+        recipientId,
+        message: { text: simulatedReply }
+      });
+      console.log(`[FB-Simulator] Simulated customer "${customerName}" sent real-time message to page_room: page_${pageId}`);
+
+    } catch (err: any) {
+      console.error("[FB-Simulator] Error generating customer reply:", err.message);
+    }
+  }
+
   app.get("/api/facebook/conversations/:pageId", async (req, res) => {
     const { pageId } = req.params;
 
@@ -1885,6 +2530,12 @@ async function startServer() {
     
     const page = data.pages?.find((p: any) => p.id === pageId);
     if (!page) return res.status(404).json({ error: "Page not found" });
+
+    // Check if simulated
+    if (page.access_token && page.access_token.startsWith("sim_")) {
+      const mockConversations = await getOrCreateSimulatedConversations(db, req, pageId);
+      return res.json({ conversations: mockConversations });
+    }
 
     try {
       // Get conversations for the page
@@ -1913,6 +2564,62 @@ async function startServer() {
     
     const page = data.pages?.find((p: any) => p.id === pageId);
     if (!page) return res.status(404).json({ error: "Page not found" });
+
+    // Check if simulated
+    if (page.access_token && page.access_token.startsWith("sim_")) {
+      let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+      if (!userEmail || userEmail === "anonymous") {
+        userEmail = "ahsan.shabbir292@gmail.com";
+      }
+
+      try {
+        const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+        const snap = await simDocRef.get();
+        let conversations = [];
+        if (snap.exists) {
+          conversations = snap.data().conversations || [];
+        } else {
+          conversations = getDefaultSimulatedConversations(pageId);
+        }
+
+        const conversation = conversations.find((c: any) => 
+          c.participants?.data?.some((p: any) => p.id === recipientId)
+        );
+
+        if (conversation) {
+          const newMessageObj = {
+            message,
+            from: { name: page.name || "Agent", id: pageId },
+            created_time: new Date().toISOString()
+          };
+          
+          if (!conversation.messages) conversation.messages = { data: [] };
+          conversation.messages.data.push(newMessageObj);
+          conversation.updated_time = newMessageObj.created_time;
+          
+          await simDocRef.set({ conversations });
+
+          // Emit the notification via Socket.IO
+          io.to(`page_${pageId}`).emit("new_message", {
+            pageId,
+            recipientId,
+            message: { text: message }
+          });
+
+          // Trigger automated customer AI reply after 1.5s
+          setTimeout(async () => {
+             await generateSimulatedCustomerReply(db, pageId, recipientId, message, userEmail);
+          }, 1500);
+
+          return res.json({ success: true, messageId: `msg_sim_${Math.random().toString(36).substr(2, 9)}` });
+        } else {
+          return res.status(404).json({ error: "Simulated conversation not found" });
+        }
+      } catch (err: any) {
+        console.error("[FB-Simulator] Error handling simulated reply:", err.message);
+        return res.status(500).json({ error: "Failed to simulate reply" });
+      }
+    }
 
     try {
       const response = await axios.post(`https://graph.facebook.com/v19.0/me/messages`, {
@@ -2006,6 +2713,68 @@ async function startServer() {
     const page = data.pages?.find((p: any) => p.id === pageId);
     if (!page) return res.status(404).json({ error: "Page not found" });
     if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+    // Check if simulated
+    if (page.access_token && page.access_token.startsWith("sim_")) {
+      let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+      if (!userEmail || userEmail === "anonymous") {
+        userEmail = "ahsan.shabbir292@gmail.com";
+      }
+
+      try {
+        const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+        const snap = await simDocRef.get();
+        let conversations = [];
+        if (snap.exists) {
+          conversations = snap.data().conversations || [];
+        } else {
+          conversations = getDefaultSimulatedConversations(pageId);
+        }
+
+        const conversation = conversations.find((c: any) => 
+          c.participants?.data?.some((p: any) => p.id === recipientId)
+        );
+
+        if (conversation) {
+          const fakeUrl = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=600&q=80";
+          const newAttachmentMessage = {
+            message: `Sent an attachment file (${type})`,
+            attachments: [{ type, payload: { url: fakeUrl } }],
+            from: { name: page.name || "Agent", id: pageId },
+            created_time: new Date().toISOString()
+          };
+
+          if (!conversation.messages) conversation.messages = { data: [] };
+          conversation.messages.data.push(newAttachmentMessage);
+          conversation.updated_time = newAttachmentMessage.created_time;
+
+          await simDocRef.set({ conversations });
+
+          // Emit real-time event
+          io.to(`page_${pageId}`).emit("new_message", {
+            pageId,
+            recipientId,
+            message: {
+              attachments: [{ type, payload: { url: fakeUrl } }],
+              from: { id: pageId, name: page.name },
+              created_time: new Date().toISOString()
+            }
+          });
+
+          // Trigger simulated customer response
+          setTimeout(async () => {
+             await generateSimulatedCustomerReply(db, pageId, recipientId, `Sent an attachment file (${type})`, userEmail);
+          }, 1500);
+
+          return res.json({ success: true, messageId: `msg_sim_attach_${Math.random().toString(36).substr(2, 9)}` });
+        } else {
+          return res.status(404).json({ error: "Simulated conversation not found" });
+        }
+      } catch (err: any) {
+        console.error("[FB-Simulator] Send attachment error:", err.message);
+        return res.status(500).json({ error: "Failed to simulate attachment upload" });
+      }
+    }
 
     try {
       // Use FormData to send file to FB

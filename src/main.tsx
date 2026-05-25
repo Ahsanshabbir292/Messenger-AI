@@ -10,7 +10,7 @@ const isCustomDomain =
   !window.location.hostname.endsWith('.run.app');
 
 const targetBaseURL = isCustomDomain 
-  ? 'https://ais-pre-fuut53ns3svspgq6wvd6oi-286885900807.asia-southeast1.run.app' 
+  ? 'https://ais-dev-fuut53ns3svspgq6wvd6oi-286885900807.asia-southeast1.run.app' 
   : '';
 
 if (isCustomDomain) {
