@@ -108,22 +108,7 @@ const Hero = ({ onCtaClick }: { onCtaClick: () => void }) => {
               </span>
             </h1>
             
-            <p className="max-w-2xl mx-auto text-lg lg:text-xl text-slate-500 mb-12 font-medium leading-relaxed">
-              Deploy hyper-intelligent AI agents directly to your Facebook Pages. Automate support, drive high-intent leads, and close deals while you sleep.
-            </p>
-            
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
-              <button 
-                onClick={onCtaClick}
-                className="w-full sm:w-auto bg-slate-900 text-white px-10 py-6 rounded-[2rem] text-sm lg:text-base font-black flex items-center justify-center gap-3 hover:bg-indigo-600 transition-all shadow-[0_20px_50px_rgba(79,70,229,0.2)] hover:shadow-indigo-200 active:scale-95 group uppercase tracking-widest"
-              >
-                Sync Your First Page
-                <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-              </button>
-              <button className="w-full sm:w-auto px-10 py-6 text-slate-600 font-black text-sm lg:text-base uppercase tracking-widest hover:text-indigo-600 transition-colors flex items-center justify-center gap-2 border-2 border-slate-100 rounded-[2rem] hover:bg-slate-50 active:scale-95">
-                <Play className="w-4 h-4 fill-slate-400" /> Watch Demo
-              </button>
-            </div>
+
 
             <div className="mt-16 flex items-center justify-center gap-8 opacity-40">
                <div className="flex flex-col items-center">
