@@ -67,6 +67,29 @@ interface Workspace {
   avatar?: string;
 }
 
+const formatAxiosError = (err: any, fallbackMessage: string): string => {
+  if (!err) return fallbackMessage;
+  if (err.response?.data) {
+    const data = err.response.data;
+    if (typeof data === "string") {
+      return data;
+    }
+    if (data.error) {
+      if (typeof data.error === "object") {
+        return data.error.message || data.error.details || JSON.stringify(data.error);
+      }
+      return data.error;
+    }
+    if (data.message) {
+      if (typeof data.message === "object") {
+        return data.message.message || JSON.stringify(data.message);
+      }
+      return data.message;
+    }
+  }
+  return err.message || String(err) || fallbackMessage;
+};
+
 export default function Dashboard({ onLogout, appUser }: { onLogout: () => void, appUser?: any }) {
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -294,7 +317,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         setPromoError(null);
       }
     } catch (err: any) {
-      alert(err.response?.data?.error || "Failed to create order");
+      alert(formatAxiosError(err, "Failed to create order"));
     } finally {
       setIsBillingLoading(false);
     }
@@ -315,7 +338,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         setCardCvc("");
       }
     } catch (err: any) {
-      alert(err.response?.data?.error || "Failed to process payment");
+      alert(formatAxiosError(err, "Failed to process payment"));
     } finally {
       setIsProcessingPayment(false);
     }
@@ -381,7 +404,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
       const res = await axios.post('/api/facebook/select-trial-page', { pageId, selected });
       setSelectedPageIds(res.data.selectedPageIds);
     } catch (err: any) {
-      alert(err.response?.data?.error || "Failed to update page selection");
+      alert(formatAxiosError(err, "Failed to update page selection"));
     }
   };
 
@@ -405,7 +428,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         getPages();
       }
     } catch (err: any) {
-      alert(err.response?.data?.error || "Failed to activate trial");
+      alert(formatAxiosError(err, "Failed to activate trial"));
     }
   };
 
@@ -590,7 +613,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         setFbSyncModalOpen(true);
       }
     } catch (err: any) {
-      alert(err.response?.data?.error || "Facebook URL nahi mil saka.");
+      alert(formatAxiosError(err, "Facebook URL nahi mil saka."));
     } finally {
       setSyncing(false);
     }
