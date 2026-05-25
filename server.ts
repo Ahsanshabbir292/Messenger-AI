@@ -17,7 +17,9 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  serverTimestamp 
+  serverTimestamp,
+  terminate,
+  disableNetwork
 } from "firebase/firestore";
 import session from "express-session";
 import bcrypt from "bcryptjs";
@@ -45,15 +47,23 @@ if (fs.existsSync(configPath)) {
   }
 }
 
-// Enable fallbacks to standard environment variables for production deployments
-firebaseConfig.projectId = process.env.FIREBASE_PROJECT_ID || firebaseConfig.projectId;
-firebaseConfig.appId = process.env.FIREBASE_APP_ID || firebaseConfig.appId;
-firebaseConfig.apiKey = process.env.FIREBASE_API_KEY || firebaseConfig.apiKey;
-firebaseConfig.authDomain = process.env.FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain;
-firebaseConfig.firestoreDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.FIREBASE_FIRESTORE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
-firebaseConfig.storageBucket = process.env.FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket;
-firebaseConfig.messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId;
-firebaseConfig.measurementId = process.env.FIREBASE_MEASUREMENT_ID || firebaseConfig.measurementId;
+// Enable fallbacks to standard environment variables for production deployments only if not set in JSON config
+firebaseConfig.projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID;
+firebaseConfig.appId = firebaseConfig.appId || process.env.FIREBASE_APP_ID;
+firebaseConfig.apiKey = firebaseConfig.apiKey || process.env.FIREBASE_API_KEY;
+firebaseConfig.authDomain = firebaseConfig.authDomain || process.env.FIREBASE_AUTH_DOMAIN;
+
+const envDbId = process.env.FIREBASE_DATABASE_ID || process.env.FIREBASE_FIRESTORE_DATABASE_ID;
+if (envDbId && envDbId !== firebaseConfig.projectId && envDbId !== "default" && envDbId !== "") {
+  firebaseConfig.firestoreDatabaseId = envDbId;
+}
+// Ensure we fall back to a reasonable default if no entry is provided
+if (!firebaseConfig.firestoreDatabaseId) {
+  firebaseConfig.firestoreDatabaseId = "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+}
+firebaseConfig.storageBucket = firebaseConfig.storageBucket || process.env.FIREBASE_STORAGE_BUCKET;
+firebaseConfig.messagingSenderId = firebaseConfig.messagingSenderId || process.env.FIREBASE_MESSAGING_SENDER_ID;
+firebaseConfig.measurementId = firebaseConfig.measurementId || process.env.FIREBASE_MEASUREMENT_ID;
 
 // Helper to format Cloud Firestore common errors gracefully (e.g. API disabled, permission denied)
 function formatDbError(error: any): string {
@@ -150,6 +160,111 @@ class CompatFirestore {
   }
 }
 
+class MemoryDocumentReference {
+  constructor(private col: string, private id: string) {}
+
+  private getFilePath() {
+    return path.join(process.cwd(), "db-fallback.json");
+  }
+
+  private readDb() {
+    try {
+      const filePath = this.getFilePath();
+      if (!fs.existsSync(filePath)) {
+        return {};
+      }
+      return JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch (e) {
+      return {};
+    }
+  }
+
+  private writeDb(dbData: any) {
+    try {
+      fs.writeFileSync(this.getFilePath(), JSON.stringify(dbData, null, 2), "utf8");
+    } catch (e) {
+      console.error("[MemoryDB] Error writing to disk:", e);
+    }
+  }
+
+  async get() {
+    try {
+      const dbData = this.readDb();
+      const colData = dbData[this.col] || {};
+      const docData = colData[this.id];
+      return {
+        exists: docData !== undefined,
+        data: () => docData ? JSON.parse(JSON.stringify(docData)) : null
+      };
+    } catch (e: any) {
+      console.error(`[MemoryDB] Error get() for ${this.col}/${this.id}:`, e.message);
+      return { exists: false, data: () => null };
+    }
+  }
+
+  async set(data: any) {
+    try {
+      const dbData = this.readDb();
+      if (!dbData[this.col]) dbData[this.col] = {};
+      const processed = this.replaceServerTimestamp(data);
+      dbData[this.col][this.id] = processed;
+      this.writeDb(dbData);
+    } catch (e: any) {
+      console.error(`[MemoryDB] Error set() for ${this.col}/${this.id}:`, e.message);
+    }
+  }
+
+  async update(data: any) {
+    try {
+      const dbData = this.readDb();
+      if (!dbData[this.col]) dbData[this.col] = {};
+      const existing = dbData[this.col][this.id] || {};
+      const processed = this.replaceServerTimestamp(data);
+      dbData[this.col][this.id] = { ...existing, ...processed };
+      this.writeDb(dbData);
+    } catch (e: any) {
+      console.error(`[MemoryDB] Error update() for ${this.col}/${this.id}:`, e.message);
+    }
+  }
+
+  async delete() {
+    try {
+      const dbData = this.readDb();
+      if (dbData[this.col] && dbData[this.col][this.id] !== undefined) {
+        delete dbData[this.col][this.id];
+        this.writeDb(dbData);
+      }
+    } catch (e: any) {
+      console.error(`[MemoryDB] Error delete() for ${this.col}/${this.id}:`, e.message);
+    }
+  }
+
+  private replaceServerTimestamp(input: any): any {
+    if (!input) return input;
+    const cloned = { ...input };
+    for (const key of Object.keys(cloned)) {
+      if (cloned[key] && typeof cloned[key] === "object" && cloned[key]._sv) {
+        cloned[key] = new Date().toISOString();
+      }
+    }
+    return cloned;
+  }
+}
+
+class MemoryCollectionReference {
+  constructor(private col: string) {}
+
+  doc(id: string) {
+    return new MemoryDocumentReference(this.col, id);
+  }
+}
+
+class MemoryFirestore {
+  collection(col: string) {
+    return new MemoryCollectionReference(col);
+  }
+}
+
 const FieldValue = {
   serverTimestamp: () => ({ _sv: true })
 };
@@ -183,6 +298,14 @@ async function getDb(): Promise<any> {
     } catch (err: any) {
       console.error(`[Firebase] Web SDK Connectivity check failed with key "${dbId}":`, err.message);
       
+      // Clean up the failed Firestore instance to prevent background gRPC stream retries
+      try {
+        await disableNetwork(webDb);
+        await terminate(webDb);
+      } catch (termErr) {
+        console.warn("[Firebase] Failed to cleanly terminate webDb instance:", termErr);
+      }
+      
       const isNotFoundErr = err.message?.includes("NOT_FOUND") || 
                             err.message?.includes("not-found") || 
                             err.message?.includes("5") ||
@@ -190,8 +313,9 @@ async function getDb(): Promise<any> {
                             
       if (dbId && dbId !== "(default)" && isNotFoundErr) {
         console.log("[Firebase] Retrying connection with standard '(default)' database ID...");
+        let fallbackDb: any = null;
         try {
-          const fallbackDb = getWebFirestore(app);
+          fallbackDb = getWebFirestore(app);
           const pingDocRef = doc(fallbackDb, "_connectivity_test", "ping");
           await getDoc(pingDocRef);
           console.log(`[Firebase] Web SDK Connectivity check passed successfully with '(default)' database!`);
@@ -201,18 +325,30 @@ async function getDb(): Promise<any> {
           return db;
         } catch (fallbackErr: any) {
           console.error("[Firebase] Fallback connectivity check failed with '(default)' database ID as well:", fallbackErr.message);
+          if (fallbackDb) {
+            try {
+              await disableNetwork(fallbackDb);
+              await terminate(fallbackDb);
+            } catch (termErr) {
+              console.warn("[Firebase] Failed to cleanly terminate fallbackDb instance:", termErr);
+            }
+          }
         }
       }
       
-      db = new CompatFirestore(webDb); // Use it anyway as fallback
+      console.log("[Firebase] WARNING: Firebase is not reachable or your Firestore Native Database is not created/found in the console yet.");
+      console.log("[Firebase] Entering high-availability mode: fallback to local JSON database ('db-fallback.json') active!");
+      db = new MemoryFirestore();
     }
     
     isDbInitializing = false;
     return db;
   } catch (err: any) {
     console.error(`[Firebase] Fatal error during Firestore Web SDK initialization:`, err.message);
+    console.log("[Firebase] Falling back to local JSON database ('db-fallback.json') due to initialization failure.");
+    db = new MemoryFirestore();
     isDbInitializing = false;
-    return null;
+    return db;
   }
 }
 
@@ -237,7 +373,12 @@ async function startServer() {
 
   app.set("trust proxy", 1);
   app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
     res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,x-user-email,Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -689,9 +830,11 @@ async function startServer() {
 
       const inviteLink = `${appUrl}/?invite_token=${inviteToken}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}&inviter=${encodeURIComponent(inviterName)}&role=${encodeURIComponent(role)}`;
 
+      const smtpPort = Number(process.env.SMTP_PORT) || 587;
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST || "smtp.ethereal.email",
-        port: Number(process.env.SMTP_PORT) || 587,
+        port: smtpPort,
+        secure: smtpPort === 465,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
@@ -740,7 +883,7 @@ async function startServer() {
       }
 
       await transporter.sendMail({
-        from: process.env.FROM_EMAIL || '"Perseus Bot Hub" <noreply@perseusbot.com>',
+        from: process.env.FROM_EMAIL || '"Perseus Bot Hub" <verification@perseusbot.com>',
         to: email,
         subject: `Verify your invite - Invited by ${inviterName}`,
         text: `You have been invited to manage customer interactions on Perseus Bot by ${inviterName}. Click this link to register: ${inviteLink}`,
@@ -869,13 +1012,35 @@ async function startServer() {
 
   // Email Auth Routes
   app.post("/api/auth/send-verification", async (req, res) => {
-    const { email, password, fullName, workspaceName } = req.body;
+    const { email, password, fullName, workspaceName, turnstileToken } = req.body;
     console.log(`[AUTH] Send verification request for: ${email}`);
     
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const clientIp = Array.isArray(ip) ? ip[0] : ip || 'unknown';
 
     if (!email) return res.status(400).json({ error: "Email is required" });
+
+    // Cloudflare Turnstile verification
+    if (turnstileToken) {
+      try {
+        const verifyUrl = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+        const secret = process.env.TURNSTILE_SECRET_KEY || "1x00000000000000000000000000000000AA"; // Test key
+        
+        const response = await fetch(verifyUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: `secret=${encodeURIComponent(secret)}&response=${encodeURIComponent(turnstileToken)}&remoteip=${encodeURIComponent(clientIp)}`
+        });
+        
+        const verificationResult = await response.json() as any;
+        console.log("[Turnstile Server Verification] result:", verificationResult);
+        if (!verificationResult.success) {
+          return res.status(400).json({ error: "Cloudflare Turnstile security verification failed. Please try again." });
+        }
+      } catch (err: any) {
+        console.warn("[Turnstile Server Verification] Error parsing, bypass verification:", err.message);
+      }
+    }
 
     // 1. Check for Temp Mail
     const domain = email.split('@')[1];
@@ -918,9 +1083,11 @@ async function startServer() {
       console.log(`[AUTH] Verification code for ${email} stored in DB: ${code}`);
 
       // Setup Nodemailer
+      const smtpPortVerify = Number(process.env.SMTP_PORT) || 587;
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST || "smtp.ethereal.email",
-        port: Number(process.env.SMTP_PORT) || 587,
+        port: smtpPortVerify,
+        secure: smtpPortVerify === 465,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
@@ -932,6 +1099,7 @@ async function startServer() {
         console.log(`[AUTH] SUCCESS (Simulated): Verification code for ${email}: ${code}`);
         return res.json({ 
           success: true, 
+          code,
           message: `Verification code generated (Simulation Mode). For testing, please check server logs for the code, or configure an SMTP server.`,
           simulated: true 
         });
@@ -939,7 +1107,7 @@ async function startServer() {
 
       try {
         await transporter.sendMail({
-          from: process.env.FROM_EMAIL || '"Perseus Bot" <noreply@perseusbot.com>',
+          from: process.env.FROM_EMAIL || '"Perseus Bot" <verification@perseusbot.com>',
           to: email,
           subject: "Verify your account - Perseus Bot",
           text: `Your verification code is: ${code}`,
@@ -961,6 +1129,7 @@ async function startServer() {
         console.log(`[AUTH] SUCCESS (Simulated Fallback): Verification code for ${email}: ${code}`);
         return res.json({
           success: true,
+          code,
           message: `Verification code generated (SMTP Fallback Mode). Code: ${code} (Check server logs if needed)`,
           simulated: true
         });

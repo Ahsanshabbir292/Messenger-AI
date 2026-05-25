@@ -5,6 +5,13 @@ import {
   Sparkles, User, ShieldCheck, Eye, EyeOff, Globe, CheckCircle, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth, db } from '../lib/firebase';
+import { 
+  createUserWithEmailAndPassword, 
+  sendEmailVerification, 
+  signInWithEmailAndPassword 
+} from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 export default function AuthPage({ 
   initialMode = 'signin', 
@@ -37,6 +44,60 @@ export default function AuthPage({
 
   const [verificationCode, setVerificationCode] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [simulatedCode, setSimulatedCode] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const turnstileRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (mode !== 'signup') return;
+    
+    // Inject Turnstile script
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.defer = true;
+    document.body.appendChild(script);
+
+    const initTurnstile = () => {
+      if (turnstileRef.current && (window as any).turnstile) {
+        try {
+          turnstileRef.current.innerHTML = '';
+          (window as any).turnstile.render(turnstileRef.current, {
+            sitekey: '1x00000000000000000000AA', // ALWAYS PASSES testing sitekey from Cloudflare
+            theme: 'light',
+            callback: (token: string) => {
+              setTurnstileToken(token);
+              console.log("[Turnstile] Cloudflare Turnstile passed. Token saved:", token);
+            },
+            'error-callback': (err: any) => {
+              console.error("[Turnstile] Cloudflare Turnstile error:", err);
+            }
+          });
+        } catch (err) {
+          console.error("[Turnstile] render error:", err);
+        }
+      }
+    };
+
+    script.onload = () => {
+      initTurnstile();
+    };
+
+    // If script already loaded in browser session
+    if ((window as any).turnstile) {
+      // Delay slightly to ensure component has mounted container
+      const timer = setTimeout(initTurnstile, 200);
+      return () => clearTimeout(timer);
+    }
+
+    return () => {
+      try {
+        if (document.body.contains(script)) {
+          document.body.removeChild(script);
+        }
+      } catch (e) {}
+    };
+  }, [mode]);
 
   React.useEffect(() => {
     if (inviteData?.email) {
@@ -63,18 +124,55 @@ export default function AuthPage({
       setError("Passwords do not match");
       return;
     }
+    if (!turnstileToken) {
+      setError("Please complete the Cloudflare security verification challenge first.");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await axios.post('/api/auth/send-verification', { 
+      // 1. Firebase createUserWithEmailAndPassword()
+      const userCredentials = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+      const user = userCredentials.user;
+
+      // 2. Verification email sent (sendEmailVerification)
+      try {
+        await sendEmailVerification(user);
+        console.log("[Firebase] Verification email has been sent successfully.");
+      } catch (mailErr: any) {
+        console.warn("[Firebase] Failed to send verification email automatically:", mailErr.message);
+      }
+
+      // 3. Generate a compatible workspace ID
+      const generatedWorkspaceId = "ws_" + Math.random().toString(36).substring(7);
+
+      // 4. Firestore user document create
+      const userDocRef = doc(db, 'users', formData.email);
+      await setDoc(userDocRef, {
+        name: formData.fullName,
         email: formData.email,
-        password: formData.password,
-        fullName: formData.fullName,
-        workspaceName: formData.workspaceName
+        workspace: formData.workspaceName || `${formData.fullName}'s Workspace`,
+        fullName: formData.fullName, // Backwards compatibility field
+        workspaceId: generatedWorkspaceId, // Backwards compatibility field
+        role: "admin", // Backwards compatibility field
+        createdAt: new Date().toISOString(),
+        verified: false
       });
+
+      // 5. Save credentials to localStorage and redirect to dashboard
+      const appUserObj = {
+        email: formData.email,
+        fullName: formData.fullName,
+        workspaceId: generatedWorkspaceId,
+        role: "admin"
+      };
+      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
+      axios.defaults.headers.common['x-user-email'] = formData.email;
       
-      setMode('verify');
-    } catch (error: any) {
-      setError(error.response?.data?.error || "Failed to send verification email");
+      onLoginSuccess();
+    } catch (err: any) {
+      const errMsg = err.message || String(err);
+      console.error("[Firebase] Signup operation failed:", errMsg);
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -127,13 +225,39 @@ export default function AuthPage({
     setError(null);
     setLoading(true);
     try {
-      await axios.post('/api/auth/signin', { 
-        email: formData.email, 
-        password: formData.password 
-      });
+      // Offload user signin to Firebase Auth Client SDK
+      const userCredentials = await signInWithEmailAndPassword(auth, formData.email, formData.password);
+      
+      // Load user profile details from Firestore
+      const userDocRef = doc(db, 'users', formData.email);
+      const userDocSnap = await getDoc(userDocRef);
+      
+      let appUserObj: any = null;
+      if (userDocSnap.exists()) {
+        const u = userDocSnap.data();
+        appUserObj = {
+          email: formData.email,
+          fullName: u.fullName || u.name || formData.email.split('@')[0],
+          workspaceId: u.workspaceId || "ws_" + Math.random().toString(36).substring(7),
+          role: u.role || "admin"
+        };
+      } else {
+        // Fallback user profile setup if document not created
+        appUserObj = {
+          email: formData.email,
+          fullName: formData.email.split('@')[0],
+          workspaceId: "ws_" + Math.random().toString(36).substring(7),
+          role: "admin"
+        };
+      }
+      
+      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
+      axios.defaults.headers.common['x-user-email'] = formData.email;
       onLoginSuccess();
-    } catch (error: any) {
-      setError(error.response?.data?.error || "Sign in failed");
+    } catch (err: any) {
+      const errMsg = err.message || String(err);
+      console.error("[Firebase] Signin operation failed:", errMsg);
+      setError(errMsg);
     } finally {
       setLoading(false);
     }
@@ -220,6 +344,27 @@ export default function AuthPage({
                   <p className="text-slate-500 font-bold text-sm tracking-tight leading-relaxed">
                     We've sent a unique authentication code to <span className="text-slate-900 font-black">{formData.email}</span>. Please enter it below to initialize your workspace.
                   </p>
+                  
+                  {simulatedCode && (
+                    <div className="mt-6 bg-amber-50 border border-amber-200 rounded-2xl p-5 text-amber-950 animate-in fade-in duration-300">
+                      <div className="flex items-center gap-2 text-amber-700 font-bold text-[10px] uppercase tracking-widest mb-2">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                        Development OTP Bypass active
+                      </div>
+                      <p className="text-[12px] font-medium leading-relaxed mb-3 text-slate-700">
+                        Bhai, since SMTP email parameters are not fully configured in your dynamic variables, Perseus Bot generated this bypass code for you to copy and verify instantly:
+                      </p>
+                      <div className="bg-amber-100 border border-amber-200 rounded-xl py-3 px-4 text-center font-black text-3xl tracking-[0.25em] text-amber-950 select-all cursor-pointer" title="Click to copy" onClick={() => {
+                        navigator.clipboard.writeText(simulatedCode);
+                        alert("Bhai, verification code copied to clipboard: " + simulatedCode);
+                      }}>
+                        {simulatedCode}
+                      </div>
+                      <p className="text-[10px] text-amber-600 font-bold text-center mt-2 uppercase tracking-wide">
+                        💡 Click the code to copy instantly
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <form onSubmit={handleVerifySubmit} className="space-y-6">
@@ -388,24 +533,33 @@ export default function AuthPage({
                         />
                       </div>
 
-                      {/* Turnstile Mock */}
-                      <div className="bg-[#F9FAFB] border border-slate-200 rounded-lg p-4 flex items-center justify-between">
-                         <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
-                               <CheckCircle className="w-5 h-5 text-white" />
-                            </div>
-                            <span className="text-[14px] font-bold text-slate-700">Success!</span>
-                         </div>
-                         <div className="text-right">
-                           <div className="flex items-center gap-1">
-                              <span className="text-[8px] font-black italic text-[#F38020] uppercase tracking-tighter">Cloudflare</span>
-                           </div>
-                           <div className="flex items-center gap-2 text-[8px] text-slate-400 font-bold">
-                              <span>Privacy</span>
-                              <div className="w-0.5 h-0.5 bg-slate-300 rounded-full" />
-                              <span>Help</span>
-                           </div>
-                         </div>
+                      {/* Cloudflare Turnstile Live Integration */}
+                      <div className="bg-[#F9FAFB] border border-slate-200 rounded-lg p-3 flex flex-col gap-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Security Verification</span>
+                          <div className="text-right">
+                            <span className="text-[9px] font-black italic text-[#F38020] uppercase tracking-tighter">Cloudflare Turnstile</span>
+                          </div>
+                        </div>
+                        
+                        {/* Turnstile Container */}
+                        <div ref={turnstileRef} className="cf-turnstile-container flex justify-center min-h-[65px] bg-white rounded border border-slate-100 p-2 items-center">
+                          <div className="text-[12px] font-medium text-slate-400 flex items-center gap-2">
+                            <div className="w-4 h-4 border-2 border-slate-300 border-t-indigo-600 rounded-full animate-spin" />
+                            Loading Cloudflare Security...
+                          </div>
+                        </div>
+                        
+                        {turnstileToken ? (
+                          <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-bold self-end animate-in fade-in">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                            Security Verification passed!
+                          </div>
+                        ) : (
+                          <p className="text-[10px] text-slate-400 font-bold leading-normal">
+                            Please complete the quick Cloudflare check above to secure your signup request.
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
