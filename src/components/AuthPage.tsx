@@ -13,6 +13,15 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 
+const withTimeout = <T,>(promise: Promise<T>, ms: number = 7000, errorMsg: string): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(errorMsg)), ms)
+    )
+  ]);
+};
+
 export default function AuthPage({ 
   initialMode = 'signin', 
   onBack, 
@@ -147,16 +156,24 @@ export default function AuthPage({
 
       // 4. Firestore user document create
       const userDocRef = doc(db, 'users', formData.email);
-      await setDoc(userDocRef, {
-        name: formData.fullName,
-        email: formData.email,
-        workspace: formData.workspaceName || `${formData.fullName}'s Workspace`,
-        fullName: formData.fullName, // Backwards compatibility field
-        workspaceId: generatedWorkspaceId, // Backwards compatibility field
-        role: "admin", // Backwards compatibility field
-        createdAt: new Date().toISOString(),
-        verified: false
-      });
+      try {
+        await withTimeout(
+          setDoc(userDocRef, {
+            name: formData.fullName,
+            email: formData.email,
+            workspace: formData.workspaceName || `${formData.fullName}'s Workspace`,
+            fullName: formData.fullName, // Backwards compatibility field
+            workspaceId: generatedWorkspaceId, // Backwards compatibility field
+            role: "admin", // Backwards compatibility field
+            createdAt: new Date().toISOString(),
+            verified: false
+          }),
+          7500,
+          "Firestore database setup timeout! (Database create nahi hai ya security rules block kar rahi hain.) Please ensure you have created the cloud Firestore database in your Firebase console and configured security rules."
+        );
+      } catch (dbErr: any) {
+        console.warn("[Firebase] Could not write user document to Firestore, proceeding with fallback logic:", dbErr.message);
+      }
 
       // 5. Save credentials to localStorage and redirect to dashboard
       const appUserObj = {
@@ -230,10 +247,19 @@ export default function AuthPage({
       
       // Load user profile details from Firestore
       const userDocRef = doc(db, 'users', formData.email);
-      const userDocSnap = await getDoc(userDocRef);
+      let userDocSnap: any = null;
+      try {
+        userDocSnap = await withTimeout(
+          getDoc(userDocRef),
+          7500,
+          "Firestore timed out fetching user info."
+        );
+      } catch (dbErr: any) {
+        console.warn("[Firebase] Could not fetch user document from Firestore, proceeding with fallback profile:", dbErr.message);
+      }
       
       let appUserObj: any = null;
-      if (userDocSnap.exists()) {
+      if (userDocSnap && userDocSnap.exists()) {
         const u = userDocSnap.data();
         appUserObj = {
           email: formData.email,
@@ -242,7 +268,7 @@ export default function AuthPage({
           role: u.role || "admin"
         };
       } else {
-        // Fallback user profile setup if document not created
+        // Fallback user profile setup if document not created or Firestore offline/mismatched
         appUserObj = {
           email: formData.email,
           fullName: formData.email.split('@')[0],
