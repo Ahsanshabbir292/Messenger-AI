@@ -1667,7 +1667,11 @@ async function startServer() {
           }
 
           function closeAndReturn() {
-            window.close();
+            if (window.opener) {
+              window.close();
+            } else {
+              window.location.href = "/";
+            }
           }
 
           let seconds = 3;
@@ -2482,7 +2486,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
         const response = await ai.models.generateContent({
           model: 'gemini-1.5-flash',
           contents: prompt,
-          generationConfig: {
+          config: {
             maxOutputTokens: 100,
             temperature: 0.8,
           }
