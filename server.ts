@@ -369,7 +369,7 @@ async function startServer() {
       methods: ["GET", "POST"]
     }
   });
-  const PORT = 3000;
+  const PORT = process.env.PORT || 3000;
 
   app.set("trust proxy", 1);
   app.use((req, res, next) => {
@@ -2903,9 +2903,17 @@ Write a realistic, short and natural response expressing your reaction, query, o
     });
   }
 
-  httpServer.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  if (typeof PORT === "string" && isNaN(Number(PORT))) {
+    // If PORT is a Unix socket path or named pipe (typical for cPanel Phusion Passenger)
+    httpServer.listen(PORT, () => {
+      console.log(`Server running on socket/pipe: ${PORT}`);
+    });
+  } else {
+    // Standard TCP Port
+    httpServer.listen(Number(PORT), "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  }
 }
 
 startServer();
