@@ -3,6 +3,7 @@ name: Deploy to cPanel
 on:
   push:
     branches: [main]
+  workflow_dispatch:  # manual trigger bhi allow karo
 
 jobs:
   deploy:
