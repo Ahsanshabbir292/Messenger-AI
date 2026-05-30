@@ -3,6 +3,7 @@ name: Deploy to cPanel
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -22,10 +23,12 @@ jobs:
       - name: Build Project
         run: npm run build
 
-      - name: Copy files to dist
+      - name: Prepare Deployment Files
         run: |
           cp package.json dist/
           cp -r node_modules dist/
+          cp server.cjs dist/          # agar server.cjs dist mein nahi hai toh
+          cp -r public dist/ 2>/dev/null || true
 
       - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.4
