@@ -25,10 +25,19 @@ jobs:
 
       - name: Prepare Deployment Files
         run: |
+          # Copy build output
+          cp -r dist/* . 2>/dev/null || true
+          
+          # Ensure server.cjs is in place
+          if [ -f server.cjs ]; then
+            cp server.cjs dist/
+          elif [ -f dist/server.cjs ]; then
+            cp dist/server.cjs ./
+          fi
+          
+          # Copy package.json and node_modules
           cp package.json dist/
-          cp -r node_modules dist/
-          cp server.cjs dist/          # agar server.cjs dist mein nahi hai toh
-          cp -r public dist/ 2>/dev/null || true
+          cp -r node_modules dist/ || echo "node_modules copy skipped"
 
       - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.4
