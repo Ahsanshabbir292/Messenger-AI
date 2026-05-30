@@ -17,10 +17,8 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Install Dependencies
-        run: |
-          rm -f package-lock.json
-          npm install
+- name: Install Dependencies
+        run: npm install --legacy-peer-deps
 
       - name: Build Project
         run: npm run build
