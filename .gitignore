@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+# Keep workflow files
+!.github/
+!.github/workflows/
+!.github/workflows/deploy.yml
