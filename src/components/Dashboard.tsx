@@ -867,72 +867,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                 <option value="support">Support</option>
               </select>
             </div>
-            <div className="relative group">
-              <button 
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="relative p-2 rounded-xl hover:bg-slate-50 transition-all cursor-pointer group"
-              >
-                <Bell className={`w-5 h-5 transition-colors ${isNotificationsOpen ? 'text-indigo-600' : 'text-slate-400 group-hover:text-indigo-600'}`} />
-                {notifications.some(n => n.unread) && (
-                  <div className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 border-2 border-white rounded-full"></div>
-                )}
-              </button>
 
-              {isNotificationsOpen && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-40" 
-                    onClick={() => setIsNotificationsOpen(false)}
-                  ></div>
-                  <div className="absolute top-full right-0 mt-3 w-80 bg-white rounded-[2rem] shadow-3xl border border-slate-100 z-50 animate-in fade-in zoom-in-95 duration-200 overflow-hidden">
-                    <div className="p-6 border-b border-slate-50 flex items-center justify-between">
-                      <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Notifications</h4>
-                      <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">
-                        {notifications.filter(n => n.unread).length} NEW
-                      </span>
-                    </div>
-                    <div className="max-h-[24rem] overflow-y-auto">
-                      {notifications.length > 0 ? (
-                        notifications.map((n) => (
-                          <div 
-                            key={n.id} 
-                            className={`p-5 flex gap-4 hover:bg-slate-50 transition-colors cursor-pointer border-b border-slate-50 last:border-0 ${n.unread ? 'bg-indigo-50/10' : ''}`}
-                            onClick={() => {
-                              setNotifications(notifications.map(notif => notif.id === n.id ? { ...notif, unread: false } : notif));
-                            }}
-                          >
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                              n.type === 'message' ? 'bg-blue-50 text-blue-600' : 
-                              n.type === 'billing' ? 'bg-emerald-50 text-emerald-600' : 
-                              'bg-amber-50 text-amber-600'
-                            }`}>
-                              {n.type === 'message' ? <MessageSquare className="w-5 h-5" /> : 
-                               n.type === 'billing' ? <CreditCard className="w-5 h-5" /> : 
-                               <Zap className="w-5 h-5" />}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex justify-between items-start mb-1">
-                                <p className="text-xs font-bold text-slate-900 truncate">{n.title}</p>
-                                <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap ml-2">{n.time}</span>
-                              </div>
-                              <p className="text-[11px] text-slate-500 leading-relaxed truncate-2-lines">{n.message}</p>
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="p-10 text-center text-slate-400">
-                          <Bell className="w-8 h-8 mx-auto mb-3 opacity-20" />
-                          <p className="text-xs font-bold">Inbox is empty</p>
-                        </div>
-                      )}
-                    </div>
-                    <button className="w-full py-4 bg-slate-50 text-indigo-600 text-[10px] font-black uppercase tracking-[0.2rem] hover:bg-indigo-50 transition-colors">
-                      View All Activity
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
             <button 
               onClick={() => setActiveTab('settings')}
               className="w-10 h-10 bg-slate-100 rounded-2xl flex items-center justify-center hover:bg-indigo-50 transition-colors cursor-pointer group border-none outline-none"
