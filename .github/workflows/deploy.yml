@@ -22,8 +22,10 @@ jobs:
       - name: Build Project
         run: npm run build
 
-      - name: Copy package.json to dist
-        run: cp package.json dist/
+      - name: Copy files to dist
+        run: |
+          cp package.json dist/
+          cp -r node_modules dist/
 
       - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.4
