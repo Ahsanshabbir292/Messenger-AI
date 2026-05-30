@@ -36,9 +36,15 @@ declare module 'express-session' {
   }
 }
 
+// Calculate robust application root directory (works reliably in both standard environments and cPanel Passenger)
+let appDir = process.cwd();
+if (typeof __dirname !== "undefined") {
+  appDir = __dirname.endsWith("dist") ? path.join(__dirname, "..") : __dirname;
+}
+
 // Load Firebase Config
 let firebaseConfig: any = {};
-const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+const configPath = path.join(appDir, "firebase-applet-config.json");
 if (fs.existsSync(configPath)) {
   try {
     firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -164,7 +170,7 @@ class MemoryDocumentReference {
   constructor(private col: string, private id: string) {}
 
   private getFilePath() {
-    return path.join(process.cwd(), "db-fallback.json");
+    return path.join(appDir, "db-fallback.json");
   }
 
   private readDb() {
@@ -2896,7 +2902,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
+    const distPath = path.join(appDir, "dist");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
