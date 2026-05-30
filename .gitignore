@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+# Never remove workflow
+!.github
+!.github/**
