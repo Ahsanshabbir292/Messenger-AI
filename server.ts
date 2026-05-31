@@ -2902,7 +2902,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(appDir, "dist");
+    const distPath = appDir;
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
