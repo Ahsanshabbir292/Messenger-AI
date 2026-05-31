@@ -13,8 +13,10 @@ import PrivacyPage from './components/PrivacyPage';
 import TermsPage from './components/TermsPage';
 import DeletionPage from './components/DeletionPage';
 import SupportFAQPage from './components/SupportFAQPage';
+import AboutPage from './components/AboutPage';
+import ContactPage from './components/ContactPage';
 
-type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support';
+type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support' | 'about' | 'contact';
 
 export default function App() {
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
@@ -120,7 +122,7 @@ export default function App() {
   const goToLanding = () => navigateTo('/');
   const goToSignIn = () => navigateTo('/signin');
   const goToSignUp = () => navigateTo('/signup');
-  const goToLegal = (tab: 'privacy' | 'terms' | 'deletion' | 'faq-support') => {
+  const goToLegal = (tab: 'privacy' | 'terms' | 'deletion' | 'faq-support' | 'about' | 'contact' | 'checkout') => {
     navigateTo(`/${tab}`);
   };
   const handleLoginSuccess = async () => {
@@ -171,6 +173,12 @@ export default function App() {
     view = 'deletion';
   } else if (currentPath === '/faq-support') {
     view = 'faq-support';
+  } else if (currentPath === '/about') {
+    view = 'about';
+  } else if (currentPath === '/contact') {
+    view = 'contact';
+  } else if (currentPath === '/checkout') {
+    view = 'landing';
   }
 
   return (
@@ -183,6 +191,8 @@ export default function App() {
           onTermsClick={() => goToLegal('terms')}
           onDeletionClick={() => goToLegal('deletion')}
           onSupportClick={() => goToLegal('faq-support')}
+          onAboutClick={() => goToLegal('about')}
+          onContactClick={() => goToLegal('contact')}
         />
       )}
       
@@ -207,6 +217,14 @@ export default function App() {
 
       {view === 'terms' && (
         <TermsPage onBack={goToLanding} />
+      )}
+
+      {view === 'about' && (
+        <AboutPage onBack={goToLanding} />
+      )}
+
+      {view === 'contact' && (
+        <ContactPage onBack={goToLanding} />
       )}
 
       {view === 'deletion' && (

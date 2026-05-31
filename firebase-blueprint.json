@@ -60,6 +60,10 @@
       "schema": "VerificationCode",
       "description": "Collection of pending verification codes"
     },
+    "/passwordResetCodes/{email}": {
+      "schema": "VerificationCode",
+      "description": "Collection of verification codes for password resetting"
+    },
     "/trialIPs/{ip}": {
       "schema": "TrialIP",
       "description": "Anti-abuse registry for trial accounts"

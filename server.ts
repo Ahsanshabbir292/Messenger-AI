@@ -69,12 +69,114 @@ function getSmtpTransporter() {
     tls: {
       rejectUnauthorized: false
     },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000
+    connectionTimeout: 4000,
+    greetingTimeout: 4000,
+    socketTimeout: 4000
   });
 
   return { transporter, user, fromEmail };
+}
+
+async function sendMailWithFallbacks(mailOptions: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}) {
+  const { transporter: smtpTransporter, user: smtpUser, fromEmail: smtpFrom } = getSmtpTransporter();
+
+  const errors: string[] = [];
+
+  // Attempt 1: Configured SMTP (with low timeout to fail fast)
+  console.log(`[EMAIL-SENDER] Attempt 1: Sending via configured SMTP to ${mailOptions.to}...`);
+  try {
+    const info = await smtpTransporter.sendMail({
+      from: smtpFrom,
+      ...mailOptions
+    });
+    console.log(`[EMAIL-SENDER] Attempt 1 (SMTP) succeeded! MessageId: ${info.messageId}`);
+    return { success: true, method: "smtp", info };
+  } catch (err: any) {
+    console.error(`[EMAIL-SENDER] Attempt 1 (SMTP) failed: ${err.message || err}`);
+    errors.push(`SMTP: ${err.message || err}`);
+  }
+
+  // Attempt 2: Local Sendmail binary
+  // This is highly robust for cPanel platforms where standard SMTP loopback outbound ports are blocked
+  console.log(`[EMAIL-SENDER] Attempt 2: Sending via local Sendmail binary to ${mailOptions.to}...`);
+  try {
+    const sendmailTransporter = nodemailer.createTransport({
+      sendmail: true,
+      newline: 'unix',
+      path: '/usr/sbin/sendmail'
+    });
+    const info = await sendmailTransporter.sendMail({
+      from: smtpFrom,
+      ...mailOptions
+    });
+    console.log(`[EMAIL-SENDER] Attempt 2 (Sendmail) succeeded! MessageId: ${info.messageId}`);
+    return { success: true, method: "sendmail", info };
+  } catch (err: any) {
+    console.error(`[EMAIL-SENDER] Attempt 2 (Sendmail) failed: ${err.message || err}`);
+    errors.push(`Sendmail: ${err.message || err}`);
+  }
+
+  // Attempt 3: Localhost SMTP port 25
+  console.log(`[EMAIL-SENDER] Attempt 3: Sending via localhost SMTP (port 25) to ${mailOptions.to}...`);
+  try {
+    const local25Transporter = nodemailer.createTransport({
+      host: '127.0.0.1',
+      port: 25,
+      secure: false,
+      auth: {
+        user: smtpUser,
+        pass: cleanEnvValue(process.env.SMTP_PASS) || "A@hsan7733292"
+      },
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 3000,
+      greetingTimeout: 3000,
+      socketTimeout: 3000
+    });
+    const info = await local25Transporter.sendMail({
+      from: smtpFrom,
+      ...mailOptions
+    });
+    console.log(`[EMAIL-SENDER] Attempt 3 (Localhost-25) succeeded! MessageId: ${info.messageId}`);
+    return { success: true, method: "localhost-25", info };
+  } catch (err: any) {
+    console.error(`[EMAIL-SENDER] Attempt 3 (Localhost-25) failed: ${err.message || err}`);
+    errors.push(`Localhost-25: ${err.message || err}`);
+  }
+
+  // Attempt 4: Localhost SMTP port 587
+  console.log(`[EMAIL-SENDER] Attempt 4: Sending via localhost SMTP (port 587) to ${mailOptions.to}...`);
+  try {
+    const local587Transporter = nodemailer.createTransport({
+      host: '127.0.0.1',
+      port: 587,
+      secure: false,
+      auth: {
+        user: smtpUser,
+        pass: cleanEnvValue(process.env.SMTP_PASS) || "A@hsan7733292"
+      },
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 3000,
+      greetingTimeout: 3000,
+      socketTimeout: 3000
+    });
+    const info = await local587Transporter.sendMail({
+      from: smtpFrom,
+      ...mailOptions
+    });
+    console.log(`[EMAIL-SENDER] Attempt 4 (Localhost-587) succeeded! MessageId: ${info.messageId}`);
+    return { success: true, method: "localhost-587", info };
+  } catch (err: any) {
+    console.error(`[EMAIL-SENDER] Attempt 4 (Localhost-587) failed: ${err.message || err}`);
+    errors.push(`Localhost-587: ${err.message || err}`);
+  }
+
+  // If all attempts failed, throw combined error
+  throw new Error(`All email dispatch attempts failed.\n- ${errors.join('\n- ')}`);
 }
 
 declare module 'express-session' {
@@ -1040,8 +1142,7 @@ async function startServer() {
         });
       }
 
-      await transporter.sendMail({
-        from: smtpFrom,
+      await sendMailWithFallbacks({
         to: email,
         subject: `Verify your invite - Invited by ${inviterName}`,
         text: `You have been invited to manage customer interactions on Perseus Bot by ${inviterName}. Click this link to register: ${inviteLink}`,
@@ -1052,14 +1153,10 @@ async function startServer() {
       res.json({ success: true, message: "Invitation sent successfully to " + email });
     } catch (err: any) {
       console.error("[TEAM INVITE ERROR]:", err);
-      // Fallback: If SMTP delivery fails (connection timeout, firewall block), we return the link with simulated: true.
-      // This displays the invite link on the screen, ensuring the user is never locked out of testing team members.
-      res.json({
-        success: true,
-        simulated: true,
-        inviteLink,
-        emailHtml,
-        message: `Notice: Managed to generate invitation, but background email dispatch failed due to server timeout or network block (${err.message}). You can copy and share the link manually below!`
+      res.status(500).json({
+        error: `Failed to dispatch invitation email to ${email}.\n\n` +
+               `If you are on cPanel, please ensure your SMTP settings are correct. Alternatively, set SMTP_HOST=127.0.0.1 (or localhost) in your server environment to bypass CSF outgoing firewall rules.\n\n` +
+               `(System Error Details: ${err.message || err})`
       });
     }
   });
@@ -1176,15 +1273,17 @@ async function startServer() {
     }
   });
 
-  // Email Auth Routes
-  app.post("/api/auth/send-verification", async (req, res) => {
+  // Direct Auth Routes (No Verification Code Required)
+  app.post("/api/auth/signup", async (req, res) => {
     const { email, password, fullName, workspaceName, turnstileToken } = req.body;
-    console.log(`[AUTH] Send verification request for: ${email}`);
+    console.log(`[AUTH] Direct signup request for: ${email}`);
     
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     const clientIp = Array.isArray(ip) ? ip[0] : ip || 'unknown';
 
-    if (!email) return res.status(400).json({ error: "Email is required" });
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
+    }
 
     // Cloudflare Turnstile verification
     if (turnstileToken) {
@@ -1208,7 +1307,7 @@ async function startServer() {
       }
     }
 
-    // 1. Check for Temp Mail
+    // Check for Temp Mail
     const domain = email.split('@')[1];
     if (TEMP_MAIL_DOMAINS.includes(domain)) {
       return res.status(400).json({ error: "Temporary emails are not allowed for registration." });
@@ -1216,140 +1315,250 @@ async function startServer() {
 
     const db = await getDb();
     if (!db) {
-      console.error("[AUTH] Signup failed: Database not initialized");
+      console.error("[AUTH] Direct signup failed: Database not initialized");
       return res.status(500).json({ error: "Database not initialized" });
     }
 
     try {
-      // 2. Check if email already exists
-      const userDoc = await db.collection("users").doc(email).get();
+      // Check if email already exists
+      const userDoc = await db.collection("users").doc(email.toLowerCase()).get();
       if (userDoc.exists) {
         return res.status(400).json({ error: "An account with this email already exists." });
       }
 
-      // 3. Bypass strict IP verification in development / sandbox environments so that multiple testing accounts aren't blocked from same IP.
-      // We only log the IP address for analytical purposes rather than locking out the registration.
-      console.log(`[AUTH] Client IP registered: ${clientIp}`);
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Successfully registered
+      const userData = { 
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        fullName: fullName || email.split('@')[0],
+        workspaceId: "ws_" + Math.random().toString(36).substring(7),
+        workspaceName: workspaceName || `${fullName || email.split('@')[0]}'s Workspace`,
+        ip: clientIp, 
+        createdAt: FieldValue.serverTimestamp() 
+      };
+      
+      await db.collection("users").doc(email.toLowerCase()).set(userData);
+      
+      // Track IP for trial
+      await db.collection("trialIPs").doc(clientIp).set({ used: true, createdAt: FieldValue.serverTimestamp() });
+      
+      // Login the user in session
+      const { password: _, ...userWithoutPassword } = userData;
+      req.session.user = userWithoutPassword;
+
+      console.log(`[AUTH] Direct user signed up and logged in: ${email}`);
+      res.json({ success: true, user: userWithoutPassword });
+    } catch (err: any) {
+      console.error("[AUTH] Direct signup database error:", err);
+      res.status(500).json({ error: formatDbError(err) });
+    }
+  });
+
+  // Google OAuth Login / Link Route
+  app.post("/api/auth/google-login", async (req, res) => {
+    const { email, fullName } = req.body;
+    console.log(`[AUTH] Google Login action request for: ${email}`);
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const db = await getDb();
+    if (!db) {
+      return res.status(500).json({ error: "Database not initialized" });
+    }
+
+    try {
+      const userRef = db.collection("users").doc(email.toLowerCase());
+      const userDoc = await userRef.get();
+      
+      let userData: any;
+
+      if (!userDoc.exists) {
+        // Create new user for first-time Google Sign up
+        userData = {
+          email: email.toLowerCase(),
+          fullName: fullName || email.split('@')[0],
+          workspaceId: "ws_" + Math.random().toString(36).substring(7),
+          workspaceName: `${fullName || email.split('@')[0]}'s Workspace`,
+          googleLinked: true,
+          createdAt: FieldValue.serverTimestamp()
+        };
+        await userRef.set(userData);
+        console.log(`[AUTH] Created new Google-linked user doc: ${email}`);
+      } else {
+        // User already exists
+        userData = userDoc.data();
+        if (!userData.googleLinked) {
+          await userRef.update({ googleLinked: true });
+          userData.googleLinked = true;
+        }
+        console.log(`[AUTH] Logged in existing user with Google: ${email}`);
+      }
+
+      // Store in express session
+      const { password: _, ...userWithoutPassword } = userData;
+      req.session.user = userWithoutPassword;
+
+      res.json({ success: true, user: userWithoutPassword });
+    } catch (err: any) {
+      console.error("[AUTH] Google login error:", err);
+      res.status(500).json({ error: formatDbError(err) });
+    }
+  });
+
+  // Password Reset Phase 1: Request Reset Code
+  app.post("/api/auth/forgot-password/request", async (req, res) => {
+    const { email } = req.body;
+    console.log(`[AUTH] Forgot password code request for: ${email}`);
+
+    if (!email) {
+      return res.status(400).json({ error: "Email address is required." });
+    }
+
+    const db = await getDb();
+    if (!db) {
+      return res.status(500).json({ error: "Database not initialized" });
+    }
+
+    try {
+      const emailLower = email.toLowerCase().trim();
+      const userDoc = await db.collection("users").doc(emailLower).get();
+
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "No account found with this email address. Please make sure the email is spelled correctly." });
+      }
 
       // Generate 6-digit code
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       
-      // Passwords should be hashed even in temp storage preferred
-      const hashedPassword = password ? await bcrypt.hash(password, 10) : null;
-
-      await db.collection("verificationCodes").doc(email).set({
-        email,
+      // Store in DB with expiration time (15 mins from now)
+      await db.collection("passwordResetCodes").doc(emailLower).set({
+        email: emailLower,
         code,
-        password: hashedPassword,
-        fullName,
-        workspaceName,
         createdAt: FieldValue.serverTimestamp()
       });
 
-      console.log(`[AUTH] Verification code for ${email} stored in DB: ${code}`);
+      console.log(`[AUTH] Password reset code for ${emailLower} generated: ${code}`);
 
-      const { transporter, user: smtpUser, fromEmail: smtpFrom } = getSmtpTransporter();
+      const { user: smtpUser } = getSmtpTransporter();
 
-      // If no real SMTP_USER is provided, we'll log it and tell the user
-      if (!smtpUser) {
-        console.log(`[AUTH] SUCCESS (Simulated): Verification code for ${email}: ${code}`);
-        return res.json({ 
-          success: true, 
-          code,
-          message: `Verification code generated in Simulation Mode. Checked in server logs.`,
-          simulated: true 
-        });
-      }
-
+      // Send the email with fallbacks
+      let emailSentSuccessfully = false;
+      let errorReason = "";
+      
       try {
-        await transporter.sendMail({
-          from: smtpFrom,
-          to: email,
-          subject: "Verify your account - Perseus Bot",
-          text: `Your verification code is: ${code}`,
+        await sendMailWithFallbacks({
+          to: emailLower,
+          subject: "Reset your password - Perseus Bot",
+          text: `Your password reset code is: ${code}`,
           html: `
             <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
-              <h2 style="color: #4f46e5;">Verify your account</h2>
-              <p>Welcome to Perseus Bot! Please use the following code to complete your registration:</p>
-              <div style="background: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; border-radius: 8px; color: #111827;">
+              <h2 style="color: #1d63ff;">Reset Your Password</h2>
+              <p>Hello,</p>
+              <p>We received a request to reset the password for your Perseus Bot account.</p>
+              <p>Please use the verification code below to complete the reset. This code is confidential and will expire in 15 minutes:</p>
+              <div style="background: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; border-radius: 8px; color: #111827; margin: 20px 0;">
                 ${code}
               </div>
-              <p style="color: #6b7280; font-size: 14px; margin-top: 20px;">This code will expire in 10 minutes.</p>
+              <p style="color: #6b7280; font-size: 13px;">If you did not initiate this request, you can safely ignore this email; your password will remain unchanged.</p>
             </div>
           `,
         });
-        console.log(`[AUTH] Verification email sent successfully to: ${email}`);
-        res.json({ success: true, message: "Code sent successfully" });
+        console.log(`[AUTH] Password reset email sent successfully to: ${emailLower}`);
+        emailSentSuccessfully = true;
       } catch (mailError: any) {
-        console.error(`[AUTH] Failed to dispatch SMTP email to ${email}:`, mailError);
-        // Fallback: If SMTP delivery fails (connection timeout, firewall block), we return the code with simulated: true.
-        // This displays the code on the screen directly, ensuring the user is never locked out of testing or signup.
-        return res.json({
-          success: true,
-          code,
-          message: `Notice: System failed to dispatch background SMTP email due to a connection timeout or network block (${mailError.message || mailError}). Displaying authentication code on screen directly to prevent registration lockout.`,
-          simulated: true,
-          smtpFailed: true
-        });
+        console.error(`[AUTH] Failed to dispatch password reset email to ${emailLower}:`, mailError);
+        errorReason = mailError.message || String(mailError);
       }
+
+      // If no custom SMTP user is configured or mail delivery failed, we can helper-expose the code for easy local visual copy-paste
+      const isSimulated = !smtpUser || !emailSentSuccessfully;
+      
+      res.json({ 
+        success: true, 
+        code: isSimulated ? code : undefined,
+        simulated: isSimulated,
+        message: isSimulated 
+          ? `Reset code generated in verification bypass mode: ${code}` 
+          : "A secure verification code has been dispatched to your email address."
+      });
+
     } catch (error: any) {
-      console.error("[AUTH] Signup Error:", error);
+      console.error("[AUTH] Forgot password request error:", error);
       res.status(500).json({ error: formatDbError(error) });
     }
   });
 
-  app.post("/api/auth/verify-code", async (req, res) => {
-    const { email, code } = req.body;
-    console.log(`[AUTH] Verify code request for: ${email}, code: ${code}`);
-    
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    const clientIp = Array.isArray(ip) ? ip[0] : ip || 'unknown';
+  // Password Reset Phase 2: Verify Code and Reset Password
+  app.post("/api/auth/forgot-password/reset", async (req, res) => {
+    const { email, code, newPassword } = req.body;
+    console.log(`[AUTH] Password reset verification submitted for: ${email}`);
+
+    if (!email || !code || !newPassword) {
+      return res.status(400).json({ error: "Email, verification code, and new password are required." });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long." });
+    }
 
     const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    if (!db) {
+      return res.status(500).json({ error: "Database not initialized" });
+    }
 
     try {
-      const codeDoc = await db.collection("verificationCodes").doc(email).get();
+      const emailLower = email.toLowerCase().trim();
+      const codeDoc = await db.collection("passwordResetCodes").doc(emailLower).get();
       const storedData = codeDoc.data();
 
       if (!storedData) {
-        return res.status(400).json({ error: "Verification session expired. Please start over." });
+        return res.status(400).json({ error: "Verification session found, but expired or invalid. Please request a new code." });
       }
 
-      console.log(`[AUTH] Stored data for ${email}:`, storedData);
-
-      if (storedData && storedData.code === code) {
-        await db.collection("verificationCodes").doc(email).delete(); // One-time use
-        
-        // Successfully registered
-        const userData = { 
-          email,
-          password: storedData.password, // This was already hashed in send-verification
-          fullName: storedData.fullName || email.split('@')[0],
-          workspaceId: "ws_" + Math.random().toString(36).substring(7),
-          workspaceName: storedData.workspaceName || `${storedData.fullName || email.split('@')[0]}'s Workspace`,
-          ip: clientIp, 
-          createdAt: FieldValue.serverTimestamp() 
-        };
-        
-        await db.collection("users").doc(email).set(userData);
-        
-        // Track IP for trial
-        await db.collection("trialIPs").doc(clientIp).set({ used: true, createdAt: FieldValue.serverTimestamp() });
-        
-        // Login the user in session
-        const { password: _, ...userWithoutPassword } = userData;
-        req.session.user = userWithoutPassword;
-
-        console.log(`[AUTH] User verified and created: ${email}`);
-        res.json({ success: true, user: userWithoutPassword });
-      } else {
-        console.log(`[AUTH] Verification failed for ${email}: Invalid code`);
-        res.status(400).json({ error: "Invalid or expired verification code" });
+      if (storedData.code !== code.trim()) {
+        return res.status(400).json({ error: "Invalid verification code. Please check your email and try again." });
       }
-    } catch (err: any) {
-      console.error("[AUTH] Verification database error:", err);
-      res.status(500).json({ error: formatDbError(err) });
+
+      // Check for code expiration (15 minutes)
+      if (storedData.createdAt) {
+        let createdMs = 0;
+        if (typeof storedData.createdAt.toMillis === 'function') {
+          createdMs = storedData.createdAt.toMillis();
+        } else if (storedData.createdAt.seconds) {
+          createdMs = storedData.createdAt.seconds * 1000;
+        } else {
+          createdMs = new Date(storedData.createdAt).getTime();
+        }
+
+        const ageMs = Date.now() - createdMs;
+        if (ageMs > 15 * 60 * 1000) {
+          await db.collection("passwordResetCodes").doc(emailLower).delete();
+          return res.status(400).json({ error: "The verification code has expired. Please request a new code." });
+        }
+      }
+
+      // Clean up the code first (one-time use)
+      await db.collection("passwordResetCodes").doc(emailLower).delete();
+
+      // Process password update
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await db.collection("users").doc(emailLower).update({
+        password: hashedPassword,
+        googleLinked: false, // Forces manual password login
+        updatedAt: FieldValue.serverTimestamp()
+      });
+
+      console.log(`[AUTH] Password successfully updated for: ${emailLower}`);
+      res.json({ success: true, message: "Bhai, your password has been successfully updated! You can now log in using your new credentials." });
+
+    } catch (error: any) {
+      console.error("[AUTH] Forgot password verification/reset error:", error);
+      res.status(500).json({ error: formatDbError(error) });
     }
   });
 

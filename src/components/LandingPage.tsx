@@ -2,7 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Bot, MessageSquare, Terminal, Zap, Shield, BarChart3, ChevronRight, Globe, Github, Twitter, Linkedin, Menu, X, Check, ArrowRight, ArrowLeft, Send, Play, Sparkles, Facebook, Star, Layers, Command } from 'lucide-react';
 import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
 
-const Navbar = ({ onAuthClick }: { onAuthClick: () => void }) => {
+const Navbar = ({ 
+  onAuthClick,
+  onAboutClick,
+  onContactClick
+}: { 
+  onAuthClick: () => void;
+  onAboutClick: () => void;
+  onContactClick: () => void;
+}) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
@@ -13,7 +21,7 @@ const Navbar = ({ onAuthClick }: { onAuthClick: () => void }) => {
   }, []);
 
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${scrolled ? 'bg-white/70 backdrop-blur-xl border-b border-slate-100 py-3 shadow-sm' : 'bg-transparent py-6'}`}>
+    <nav role="navigation" className={`fixed top-0 left-0 right-0 z-50 transition-all duration-500 ${scrolled ? 'bg-white/70 backdrop-blur-xl border-b border-slate-100 py-3 shadow-sm' : 'bg-transparent py-6'}`}>
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-3 group cursor-pointer">
@@ -36,6 +44,18 @@ const Navbar = ({ onAuthClick }: { onAuthClick: () => void }) => {
                 {item}
               </a>
             ))}
+            <button 
+              onClick={onAboutClick}
+              className="text-sm font-bold text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest cursor-pointer"
+            >
+              About
+            </button>
+            <button 
+              onClick={onContactClick}
+              className="text-sm font-bold text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-widest cursor-pointer"
+            >
+              Contact
+            </button>
             <button 
               onClick={onAuthClick}
               className="bg-slate-900 text-white px-7 py-3 rounded-2xl text-xs font-black uppercase tracking-widest shadow-2xl shadow-indigo-100 hover:bg-indigo-600 transition-all active:scale-95"
@@ -68,6 +88,8 @@ const Navbar = ({ onAuthClick }: { onAuthClick: () => void }) => {
               {['Features', 'Solutions', 'Resources'].map((item) => (
                 <a key={item} href={`#${item.toLowerCase()}`} className="text-xl font-black text-slate-900" onClick={() => setIsMenuOpen(false)}>{item}</a>
               ))}
+              <button onClick={() => { onAboutClick(); setIsMenuOpen(false); }} className="text-xl font-black text-left text-slate-900">About Us</button>
+              <button onClick={() => { onContactClick(); setIsMenuOpen(false); }} className="text-xl font-black text-left text-slate-900">Contact Support</button>
               <button 
                 onClick={() => { onAuthClick(); setIsMenuOpen(false); }}
                 className="w-full bg-indigo-600 text-white py-5 rounded-[2rem] font-black text-sm uppercase tracking-widest shadow-2xl shadow-indigo-100"
@@ -98,15 +120,19 @@ const Hero = ({ onCtaClick }: { onCtaClick: () => void }) => {
           >
             <div className="inline-flex items-center gap-2 px-6 py-2.5 bg-indigo-50/50 border border-indigo-100 rounded-full mb-10 backdrop-blur-sm">
               <Sparkles className="w-4 h-4 text-indigo-600 fill-indigo-600" />
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600">The Modern Standard for Messenger Automation</span>
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600">The Modern Standard for Checkout & Messenger Automation</span>
             </div>
             
             <h1 className="text-5xl lg:text-8xl font-black text-slate-900 tracking-tighter leading-[0.95] mb-10">
-              Transform Your <br />
+              Checkout Automation <br />
               <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-indigo-500 to-indigo-700">
-                Messenger Experience
+                For Messenger
               </span>
             </h1>
+            
+            <p className="text-lg md:text-xl text-slate-500 max-w-2xl mx-auto mb-10 font-bold leading-relaxed">
+              Automate your conversational sales funnel. Enable direct customer checkout inside Facebook Messenger using Perseus Bot—the ultimate chatbot trusted by over 10,000+ active brands.
+            </p>
             
 
 
@@ -242,8 +268,8 @@ const FeatureSection = () => {
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="flex flex-col lg:flex-row justify-between items-end mb-24 gap-10">
           <div className="max-w-2xl">
-            <h2 className="text-4xl lg:text-6xl font-black text-slate-900 tracking-tighter leading-none mb-8">Outsmart the average bot with <span className="text-indigo-600">Pure Intelligence.</span></h2>
-            <p className="text-lg text-slate-500 font-medium leading-relaxed uppercase tracking-[0.2em] text-[10px]">Everything you need to automate your digital storefront</p>
+            <h2 className="text-4xl lg:text-6xl font-black text-slate-900 tracking-tighter leading-none mb-8">Outsmart other bots with <span className="text-indigo-600">Smart Checkout.</span></h2>
+            <p className="text-lg text-slate-500 font-medium leading-relaxed uppercase tracking-[0.2em] text-[10px]">Everything you need to automate your digital storefront and checkout threads</p>
           </div>
           <div className="hidden lg:block pb-2">
              <button className="bg-slate-50 text-slate-900 font-black text-xs uppercase tracking-widest px-8 py-4 rounded-2xl hover:bg-indigo-600 hover:text-white transition-all">Explore Documentation</button>
@@ -355,7 +381,7 @@ const ARTICLES_DATA: Article[] = [
     summary: "A step-by-step masterclass on fixing authentication mail dispatches, custom domain mapping, and database permission blockages when migrating your app from local sandbox to Vercel/VPS.",
     date: "May 23, 2026",
     author: "Ahsan Shabbir (SecOps Lead)",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop",
+    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&fm=webp",
     content: [
       "## Introduction to Production Deployments",
       "During early development phases within local sandboxes, server actions run with zero outbound blockers. However, when you deploy your Perseus Bot package onto Vercel, Cloud Run, or custom domains, strict firewall architectures, mail relay blockades, or database security permissions may intercept outbound requests, resulting in 'Failed to send verification code' errors or completely blank registration screens. This guide addresses how to resolve these quickly.",
@@ -382,7 +408,7 @@ const ARTICLES_DATA: Article[] = [
     summary: "Discover how Pakistan's leading fashion lifestyle retailer automated summer launch queries with 94.2% semantic correctness and streamlined orders using our Gemini 1.5 core schema.",
     date: "May 20, 2026",
     author: "Zainab Malik",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop",
+    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&fm=webp",
     content: [
       "## The Challenge: Flash Sales & Support Congestions",
       "During seasonal flash sales, Retail networks face extreme congestion. Customer support lines become backlogged instantly with basic repeated questions like 'Price?', 'Size available?', or 'DHA outlet open?'. For Pakistani lifestyle brand Khaadi, average response wait times on peak sales days spiked past 4 hours.",
@@ -400,7 +426,7 @@ const ARTICLES_DATA: Article[] = [
     summary: "A technical walkthrough of configuring Page Subscriptions, SSL handshakes, Page Access Tokens, and secondary hub controls inside Meta's Developer Dashboard.",
     date: "May 18, 2026",
     author: "Hamza Farooq",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop",
+    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&fm=webp",
     content: [
       "## Understanding Facebook Page Webhooks",
       "Webhooks are the medium through which Facebook sends real-time message events to your custom Node.js server. If webhooks are not configured securely, your bot is essentially blind.",
@@ -581,7 +607,7 @@ const ResourcesSection = ({ onReadArticle }: { onReadArticle: (art: Article) => 
               {/* Card Footer */}
               <div className="p-8 bg-slate-50 rounded-[2.5rem] flex items-center justify-between border-t border-slate-100">
                 <div className="flex items-center gap-3">
-                  <img src={art.avatar} alt={art.author} className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-md shadow-slate-200" />
+                  <img src={art.avatar} alt={art.author} loading="lazy" className="w-10 h-10 rounded-full object-cover border-2 border-white shadow-md shadow-slate-200" />
                   <div>
                     <p className="text-[10px] font-black uppercase tracking-wider text-slate-900 leading-tight">{art.author}</p>
                     <p className="text-[9px] font-bold text-slate-400">{art.date}</p>
@@ -638,7 +664,7 @@ const ArticleReader = ({ article, onClose }: { article: Article, onClose: () => 
           </p>
 
           <div className="flex items-center gap-4 pt-4">
-            <img src={article.avatar} alt={article.author} className="w-14 h-14 rounded-full object-cover border-2 border-indigo-50 shadow-md" />
+            <img src={article.avatar} alt={article.author} loading="lazy" className="w-14 h-14 rounded-full object-cover border-2 border-indigo-50 shadow-md" />
             <div>
               <p className="text-xs font-black uppercase tracking-widest text-slate-900">{article.author}</p>
               <p className="text-[10px] font-bold text-slate-400">{article.date} &bull; {article.readTime}</p>
@@ -722,15 +748,19 @@ const Footer = ({
   onPrivacyClick, 
   onTermsClick, 
   onDeletionClick, 
-  onSupportClick 
+  onSupportClick,
+  onAboutClick,
+  onContactClick
 }: { 
   onPrivacyClick: () => void; 
   onTermsClick: () => void; 
   onDeletionClick: () => void; 
   onSupportClick: () => void; 
+  onAboutClick: () => void;
+  onContactClick: () => void;
 }) => {
   return (
-    <footer className="bg-slate-900 text-slate-500 py-24">
+    <footer className="bg-slate-900 text-slate-500 py-24" role="contentinfo">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-20 mb-20">
           <div className="col-span-1 md:col-span-2">
@@ -747,10 +777,10 @@ const Footer = ({
           <div>
             <h4 className="text-white font-black text-xs uppercase tracking-[0.2em] mb-10">Product</h4>
             <ul className="space-y-6 text-sm font-bold">
+              <li><a href="/about" onClick={(e) => { e.preventDefault(); onAboutClick(); }} className="hover:text-indigo-400 hover:underline transition-all text-left block cursor-pointer">About Us</a></li>
+              <li><a href="/contact" onClick={(e) => { e.preventDefault(); onContactClick(); }} className="hover:text-indigo-400 hover:underline transition-all text-left block cursor-pointer">Contact Support</a></li>
               <li><a href="/privacy" onClick={(e) => { e.preventDefault(); onPrivacyClick(); }} className="hover:text-indigo-400 hover:underline transition-all text-left block cursor-pointer">Privacy Policy</a></li>
               <li><a href="/terms" onClick={(e) => { e.preventDefault(); onTermsClick(); }} className="hover:text-indigo-400 hover:underline transition-all text-left block cursor-pointer">Terms & Conditions</a></li>
-              <li><a href="/deletion" onClick={(e) => { e.preventDefault(); onDeletionClick(); }} className="hover:text-amber-400 hover:underline transition-all text-left block cursor-pointer">Data Deletion</a></li>
-              <li><a href="/faq-support" onClick={(e) => { e.preventDefault(); onSupportClick(); }} className="hover:text-indigo-400 hover:underline transition-all text-left block cursor-pointer">FAQ & Help Desk</a></li>
             </ul>
           </div>
           <div>
@@ -766,9 +796,10 @@ const Footer = ({
         <div className="pt-12 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-8">
           <span className="text-[10px] font-black uppercase tracking-widest opacity-30">&copy; 2026 Perseus Bot Automation. All rights reserved.</span>
           <div className="flex gap-10 text-[10px] font-black uppercase tracking-widest">
+             <a href="/about" onClick={(e) => { e.preventDefault(); onAboutClick(); }} className="hover:text-white transition-colors cursor-pointer uppercase font-black text-[10px] tracking-widest">About Us</a>
+             <a href="/contact" onClick={(e) => { e.preventDefault(); onContactClick(); }} className="hover:text-white transition-colors cursor-pointer uppercase font-black text-[10px] tracking-widest">Contact Support</a>
              <a href="/privacy" onClick={(e) => { e.preventDefault(); onPrivacyClick(); }} className="hover:text-white transition-colors cursor-pointer uppercase font-black text-[10px] tracking-widest">Privacy Policy</a>
              <a href="/terms" onClick={(e) => { e.preventDefault(); onTermsClick(); }} className="hover:text-white transition-colors cursor-pointer uppercase font-black text-[10px] tracking-widest">Terms & Conditions</a>
-             <a href="/deletion" onClick={(e) => { e.preventDefault(); onDeletionClick(); }} className="hover:text-red-400 transition-colors cursor-pointer uppercase font-black text-[10px] tracking-widest">Delete Data</a>
           </div>
         </div>
       </div>
@@ -783,6 +814,8 @@ interface LandingPageProps {
   onTermsClick: () => void;
   onDeletionClick: () => void;
   onSupportClick: () => void;
+  onAboutClick: () => void;
+  onContactClick: () => void;
 }
 
 export default function LandingPage({ 
@@ -791,14 +824,20 @@ export default function LandingPage({
   onPrivacyClick,
   onTermsClick,
   onDeletionClick,
-  onSupportClick
+  onSupportClick,
+  onAboutClick,
+  onContactClick
 }: LandingPageProps) {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   if (selectedArticle) {
     return (
       <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-indigo-600 selection:text-white">
-        <Navbar onAuthClick={onSignIn} />
+        <Navbar 
+          onAuthClick={onSignIn} 
+          onAboutClick={onAboutClick}
+          onContactClick={onContactClick}
+        />
         <ArticleReader 
           article={selectedArticle} 
           onClose={() => setSelectedArticle(null)} 
@@ -808,6 +847,8 @@ export default function LandingPage({
           onTermsClick={onTermsClick} 
           onDeletionClick={onDeletionClick} 
           onSupportClick={onSupportClick} 
+          onAboutClick={onAboutClick}
+          onContactClick={onContactClick}
         />
       </div>
     );
@@ -815,7 +856,11 @@ export default function LandingPage({
 
   return (
     <div className="min-h-screen bg-white font-sans text-slate-900 selection:bg-indigo-600 selection:text-white">
-      <Navbar onAuthClick={onSignIn} />
+      <Navbar 
+        onAuthClick={onSignIn} 
+        onAboutClick={onAboutClick}
+        onContactClick={onContactClick}
+      />
       <main>
         <Hero onCtaClick={onSignUp} />
         
@@ -867,6 +912,8 @@ export default function LandingPage({
         onTermsClick={onTermsClick} 
         onDeletionClick={onDeletionClick} 
         onSupportClick={onSupportClick} 
+        onAboutClick={onAboutClick}
+        onContactClick={onContactClick}
       />
     </div>
   );

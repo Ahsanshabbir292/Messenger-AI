@@ -59,6 +59,10 @@ service cloud.firestore {
     match /verificationCodes/{email} {
       allow read, write: if true;
     }
+
+    match /passwordResetCodes/{email} {
+      allow read, write: if true;
+    }
     
     match /trialIPs/{ip} {
       allow read, write: if true;
