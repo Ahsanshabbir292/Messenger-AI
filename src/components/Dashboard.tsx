@@ -103,11 +103,41 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
   const [syncing, setSyncing] = useState(false);
   const [fbSyncModalOpen, setFbSyncModalOpen] = useState(false);
   const [fbAuthUrl, setFbAuthUrl] = useState("");
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([
-    { id: '1', name: 'Khaadi' },
-    { id: '2', name: 'Microphone Hub' },
-  ]);
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(workspaces[0].id);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
+    if (appUser?.workspaces && Array.isArray(appUser.workspaces) && appUser.workspaces.length > 0) {
+      return appUser.workspaces;
+    }
+    if (appUser?.workspaceName) {
+      return [{ id: '1', name: appUser.workspaceName }];
+    }
+    try {
+      const saved = localStorage.getItem('current_app_user');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed) {
+          if (parsed.workspaces && Array.isArray(parsed.workspaces) && parsed.workspaces.length > 0) {
+            return parsed.workspaces;
+          }
+          if (parsed.workspaceName) {
+            return [{ id: '1', name: parsed.workspaceName }];
+          }
+        }
+      }
+    } catch (e) {}
+    return [
+      { id: '1', name: 'Khaadi' },
+      { id: '2', name: 'Microphone Hub' },
+    ];
+  });
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(workspaces[0]?.id || '1');
+
+  useEffect(() => {
+    if (appUser?.workspaces && Array.isArray(appUser.workspaces) && appUser.workspaces.length > 0) {
+      setWorkspaces(appUser.workspaces);
+    } else if (appUser?.workspaceName) {
+      setWorkspaces([{ id: '1', name: appUser.workspaceName }]);
+    }
+  }, [appUser?.workspaces, appUser?.workspaceName]);
 
   useEffect(() => {
     setSelectedPage(null);
@@ -121,6 +151,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     { id: '2', title: 'System Update', message: 'Version 2.4 has been successfully deployed.', time: '1 hour ago', type: 'system', unread: false },
     { id: '3', title: 'Payment Success', message: 'Your credit balance has been updated.', time: '5 hours ago', type: 'billing', unread: false },
   ]);
+  const [isWorkspaceDropdownOpen, setIsWorkspaceDropdownOpen] = useState(false);
   const [isCreateWorkspaceModalOpen, setIsCreateWorkspaceModalOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [pages, setPages] = useState<any[]>([]);
@@ -559,7 +590,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     setSyncing(true);
     try {
       const res = await axios.get('/api/auth/facebook/url', {
-        params: { email: appUser?.email }
+        params: { email: appUser?.email, workspaceId: currentWorkspaceId }
       });
       const { url } = res.data;
       setFbAuthUrl(url);
@@ -633,6 +664,11 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     if (appUser?.email) {
       axios.defaults.headers.common['x-user-email'] = appUser.email;
     }
+    if (currentWorkspaceId) {
+      axios.defaults.headers.common['x-workspace-id'] = currentWorkspaceId;
+    } else {
+      delete axios.defaults.headers.common['x-workspace-id'];
+    }
     getPages();
     getUserProfile();
     
@@ -640,6 +676,8 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
       if (event.data?.type === 'FB_AUTH_SUCCESS') {
         getPages();
         getUserProfile();
+      } else if (event.data?.type === 'FB_AUTH_ERROR') {
+        addToast(event.data.message || "Facebook authentication failed due to account constraints.", "error");
       }
     };
 
@@ -657,6 +695,16 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         } catch (e) {
           console.error("Storage event parse error:", e);
         }
+      } else if (event.key === 'FB_AUTH_ERROR' && event.newValue) {
+        try {
+          const data = JSON.parse(event.newValue);
+          if (data && Date.now() - data.timestamp < 15000) {
+            addToast(data.message || "This Facebook account is already connected to another workspace.", "error");
+            localStorage.removeItem('FB_AUTH_ERROR');
+          }
+        } catch (e) {
+          console.error("Storage event error parsing validation:", e);
+        }
       }
     };
 
@@ -667,7 +715,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [getPages, getUserProfile]);
+  }, [getPages, getUserProfile, currentWorkspaceId]);
 
   useEffect(() => {
     if (selectedPage) {
@@ -723,10 +771,10 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           </div>
 
           {/* Workspace Switcher */}
-          <div className="relative group">
+          <div className="relative z-50">
             <button 
-              className="w-full flex items-center justify-between gap-3 px-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-white hover:border-indigo-200 transition-all shadow-sm"
-              onClick={() => setIsCreateWorkspaceModalOpen(!isCreateWorkspaceModalOpen)}
+              className="w-full flex items-center justify-between gap-3 px-4 py-4 bg-slate-50 border border-slate-100 rounded-2xl hover:bg-white hover:border-indigo-200 transition-all shadow-sm cursor-pointer"
+              onClick={() => setIsWorkspaceDropdownOpen(!isWorkspaceDropdownOpen)}
             >
               <div className="flex items-center gap-3 overflow-hidden">
                 <div className="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center text-white text-xs font-black shrink-0">
@@ -736,36 +784,49 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                   {workspaces.find(w => w.id === currentWorkspaceId)?.name}
                 </span>
               </div>
-              <ChevronDown className="w-4 h-4 text-slate-400 group-hover:text-indigo-600" />
+              <ChevronDown className="w-4 h-4 text-slate-400" />
             </button>
             
-            <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-3xl border border-slate-100 shadow-2xl overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 p-2 transform origin-top scale-95 group-hover:scale-100">
-              <div className="max-h-60 overflow-y-auto scrollbar-hide">
-                {workspaces.map((w) => (
-                  <button
-                    key={w.id}
-                    onClick={() => setCurrentWorkspaceId(w.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left transition-all mb-1 ${currentWorkspaceId === w.id ? 'bg-indigo-50 text-indigo-600 font-black' : 'text-slate-500 hover:bg-slate-50'}`}
-                  >
-                    <div className={`w-8 h-8 ${currentWorkspaceId === w.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'} rounded-xl flex items-center justify-center text-[10px] font-black shrink-0`}>
-                      {w.name.charAt(0)}
-                    </div>
-                    <span className="text-[10px] uppercase tracking-widest truncate">{w.name}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="border-t border-slate-50 mt-2 pt-2">
-                <button 
-                  onClick={() => setIsCreateWorkspaceModalOpen(true)}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 transition-all"
-                >
-                  <div className="w-8 h-8 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center">
-                    <Plus className="w-4 h-4" />
+            {isWorkspaceDropdownOpen && (
+              <>
+                {/* Backdrop to close the dropdown when clicking anywhere outside */}
+                <div className="fixed inset-0 z-40 bg-transparent" onClick={() => setIsWorkspaceDropdownOpen(false)}></div>
+                
+                <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-3xl border border-slate-100 shadow-2xl overflow-hidden z-50 p-2 transform origin-top scale-100 transition-all">
+                  <div className="max-h-60 overflow-y-auto scrollbar-hide">
+                    {workspaces.map((w) => (
+                      <button
+                        key={w.id}
+                        onClick={() => {
+                          setCurrentWorkspaceId(w.id);
+                          setIsWorkspaceDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-left transition-all mb-1 cursor-pointer border-none bg-transparent ${currentWorkspaceId === w.id ? 'bg-indigo-50 text-indigo-600 font-black' : 'text-slate-500 hover:bg-slate-50'}`}
+                      >
+                        <div className={`w-8 h-8 ${currentWorkspaceId === w.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'} rounded-xl flex items-center justify-center text-[10px] font-black shrink-0`}>
+                          {w.name.charAt(0)}
+                        </div>
+                        <span className="text-[10px] uppercase tracking-widest truncate">{w.name}</span>
+                      </button>
+                    ))}
                   </div>
-                  New Workspace
-                </button>
-              </div>
-            </div>
+                  <div className="border-t border-slate-50 mt-2 pt-2">
+                    <button 
+                      onClick={() => {
+                        setIsCreateWorkspaceModalOpen(true);
+                        setIsWorkspaceDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50 transition-all border-none bg-transparent cursor-pointer"
+                    >
+                      <div className="w-8 h-8 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center">
+                        <Plus className="w-4 h-4" />
+                      </div>
+                      New Workspace
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
         
@@ -1871,13 +1932,28 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                           Cancel
                         </button>
                         <button 
-                          onClick={() => {
+                          onClick={async () => {
                             if (!editWorkspaceName.trim()) {
                               addToast("Workspace name cannot be empty.", "error");
                               return;
                             }
-                            setWorkspaces(prev => prev.map(w => w.id === currentWorkspaceId ? { ...w, name: editWorkspaceName.trim() } : w));
-                            addToast(`Workspace renamed to "${editWorkspaceName.trim()}" successfully!`, "success");
+                            const newName = editWorkspaceName.trim();
+                            // Update local UI state
+                            setWorkspaces(prev => prev.map(w => w.id === currentWorkspaceId ? { ...w, name: newName } : w));
+                            
+                            try {
+                              const res = await axios.post('/api/auth/update-settings', { workspaceName: newName });
+                              if (res.data.user) {
+                                localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                                if (appUser) {
+                                  appUser.workspaceName = newName;
+                                }
+                              }
+                              addToast(`Workspace renamed to "${newName}" successfully!`, "success");
+                            } catch (e: any) {
+                              console.warn("Could not persist workspace settings to database:", e);
+                              addToast(`Workspace renamed to "${newName}" locally (DB sync failed).`, "success");
+                            }
                             setIsEditWorkspaceModalOpen(false);
                           }}
                           className="flex-1 py-3.5 bg-indigo-600 hover:bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all cursor-pointer border-none"
@@ -1929,18 +2005,32 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                         >
                           Cancel
                         </button>
-                        <button 
-                          onClick={() => {
+                         <button 
+                          onClick={async () => {
                             if (!editProfileName.trim() || !editProfileEmail.trim()) {
                               addToast("All input parameters must be completely populated.", "error");
                               return;
                             }
+                            const newName = editProfileName.trim();
                             setUserProfile(prev => ({
                               ...prev,
-                              name: editProfileName.trim(),
+                              name: newName,
                               email: editProfileEmail.trim()
                             }));
-                            addToast("Profile credentials synchronized successfully!", "success");
+                            
+                            try {
+                              const res = await axios.post('/api/auth/update-settings', { fullName: newName });
+                              if (res.data.user) {
+                                localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                                if (appUser) {
+                                  appUser.fullName = newName;
+                                }
+                              }
+                              addToast("Profile credentials synchronized successfully!", "success");
+                            } catch (e: any) {
+                              console.warn("Could not persist profile settings to database:", e);
+                              addToast("Profile credentials synchronized locally (DB sync failed).", "success");
+                            }
                             setIsEditProfileModalOpen(false);
                           }}
                           className="flex-1 py-3.5 bg-indigo-600 hover:bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all cursor-pointer border-none"
@@ -3579,6 +3669,79 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           </div>
         </div>
       )}
+
+      {/* Create Workspace Modal */}
+      {isCreateWorkspaceModalOpen && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 lg:p-10 animate-in fade-in duration-205">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsCreateWorkspaceModalOpen(false)}></div>
+          <div className="bg-white w-full max-w-lg rounded-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 p-6 sm:p-10 animate-in zoom-in-95 duration-200 border border-slate-100">
+             <div className="w-14 h-14 sm:w-16 sm:h-16 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-5 sm:mb-6 text-indigo-600 shadow-md">
+                <Plus className="w-6 h-6 sm:w-8 sm:h-8" />
+              </div>
+              
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tighter text-center">Create New Workspace</h3>
+              <p className="text-slate-500 font-medium text-xs sm:text-sm mt-2 leading-relaxed text-center">
+                 Create your new workspace and authorize a distinct Facebook account to connect its associated pages.
+              </p>
+
+              <div className="my-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-widest text-slate-450 mb-2">Workspace Name</label>
+                  <input 
+                    type="text"
+                    value={newWorkspaceName}
+                    onChange={(e) => setNewWorkspaceName(e.target.value)}
+                    placeholder="Enter workspace name (e.g., Khaadi, Brand Name)"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 text-slate-900 rounded-2xl text-xs sm:text-sm tracking-tight focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                 <button 
+                   onClick={async () => {
+                     const workspaceNameVal = newWorkspaceName.trim();
+                     if (!workspaceNameVal) {
+                       addToast("Please enter a workspace name.", "error");
+                       return;
+                     }
+
+                     const newId = "ws_" + Math.random().toString(36).substring(7);
+                     const updatedWorkspaces = [...workspaces, { id: newId, name: workspaceNameVal }];
+                     
+                     setWorkspaces(updatedWorkspaces);
+                     setCurrentWorkspaceId(newId);
+                     
+                     try {
+                       const res = await axios.post('/api/auth/update-settings', { workspaces: updatedWorkspaces });
+                       if (res.data.user) {
+                         localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                       }
+                     } catch (err) {
+                       console.warn("Could not persist workspace settings to database:", err);
+                     }
+
+                     addToast(`Workspace "${workspaceNameVal}" successfully created! Now, connect a new Facebook account.`, "success");
+                     setIsCreateWorkspaceModalOpen(false);
+                     setNewWorkspaceName("");
+                     
+                     handleSyncPages();
+                   }}
+                   className="w-full py-3.5 sm:py-4 bg-[#1877F2] hover:bg-[#166fe5] text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-2 cursor-pointer border-none"
+                 >
+                    <Facebook className="w-4 h-4 fill-current animate-pulse" /> Save & Connect Facebook Account
+                 </button>
+
+                 <button 
+                   onClick={() => setIsCreateWorkspaceModalOpen(false)}
+                   className="w-full py-3 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-950 transition-colors bg-transparent border-none cursor-pointer mt-1"
+                 >
+                    Cancel / Wapis Jayen
+                 </button>
+              </div>
+           </div>
+         </div>
+       )}
 
       {/* Facebook Redirect & Helper Modal */}
       {fbSyncModalOpen && (

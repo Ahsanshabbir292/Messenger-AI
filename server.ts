@@ -19,7 +19,9 @@ import {
   deleteDoc, 
   serverTimestamp,
   terminate,
-  disableNetwork
+  disableNetwork,
+  collection,
+  getDocs
 } from "firebase/firestore";
 import session from "express-session";
 import bcrypt from "bcryptjs";
@@ -28,6 +30,49 @@ import fs from "fs";
 dotenv.config();
 
 console.log("[DEBUG Env Keys]:", Object.keys(process.env).filter(k => k.includes("FIREBASE") || k.includes("GOOGLE") || k.includes("CREDENTIALS") || k.includes("SERVICE")));
+
+function cleanEnvValue(val: string | undefined): string {
+  if (!val) return "";
+  // Trim spaces and remove wrapping quotes (both single and double) which might be present from copy-paste
+  return val.trim().replace(/^["']|["']$/g, "").trim();
+}
+
+function getSmtpTransporter() {
+  let host = cleanEnvValue(process.env.SMTP_HOST) || "mail.perseusbot.com";
+  let portStr = cleanEnvValue(process.env.SMTP_PORT) || "465";
+  let user = cleanEnvValue(process.env.SMTP_USER) || "verification@perseusbot.com";
+  let pass = cleanEnvValue(process.env.SMTP_PASS) || "A@hsan7733292";
+  let fromEmail = cleanEnvValue(process.env.FROM_EMAIL) || '"Perseus Bot" <verification@perseusbot.com>';
+
+  // Auto-correct to user's cPanel mail manually if they set their local email or if it matches the general pattern
+  if (host.includes("perseusbot") || user.includes("perseusbot") || user.includes("ahsan")) {
+    host = "mail.perseusbot.com";
+    portStr = "465";
+    user = "verification@perseusbot.com";
+    pass = "A@hsan7733292";
+    fromEmail = '"Perseus Bot" <verification@perseusbot.com>';
+  }
+
+  const port = Number(portStr) || 465;
+  const isSecure = port === 465;
+
+  console.log(`[SMTP_TRANSPORTER] host="${host}", port=${port}, secure=${isSecure}, user="${user}"`);
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: isSecure,
+    auth: {
+      user,
+      pass,
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+
+  return { transporter, user, fromEmail };
+}
 
 declare module 'express-session' {
   interface SessionData {
@@ -79,7 +124,7 @@ function formatDbError(error: any): string {
     return `Firebase Firestore Setup Error (API Disabled or Database Missing):\n` +
            `1. Enable the Firestore API: https://console.cloud.google.com/apis/library/firestore.googleapis.com?project=${projId}\n` +
            `2. Create a Cloud Firestore Database in Native/Test mode: https://console.firebase.google.com/project/${projId}/firestore\n\n` +
-           `Urdu: Apne Google Cloud / Firebase project me Firestore API enable nahi ki, ya abhi tak Firestore Database console se create nahi kiya. Upar diye link par ja kar please API enable karein aur database create karein.`;
+           `Note: It appears that the Firestore API is not enabled or a database has not yet been initialized under your project. Please click the URLs above to enable the API and create a Firestore instance in native mode.`;
   }
   if (msg.includes("client is offline") || msg.includes("Could not reach Cloud Firestore backend")) {
     return `Firebase Firestore Connection Error (Offline/Connectivity Issue):\n` +
@@ -155,6 +200,23 @@ class CompatCollectionReference {
 
   doc(id: string) {
     return new CompatDocumentReference(this.firestore, this.col, id);
+  }
+
+  async get() {
+    try {
+      const c = collection(this.firestore, this.col);
+      const snap = await getDocs(c);
+      const docs = snap.docs.map(d => ({
+        id: d.id,
+        data: () => d.data()
+      }));
+      return {
+        docs
+      };
+    } catch (e: any) {
+      console.error(`Error in collection.get() for ${this.col}:`, e.message);
+      throw e;
+    }
   }
 }
 
@@ -262,6 +324,26 @@ class MemoryCollectionReference {
 
   doc(id: string) {
     return new MemoryDocumentReference(this.col, id);
+  }
+
+  async get() {
+    try {
+      const filePath = path.join(appDir, "db-fallback.json");
+      if (!fs.existsSync(filePath)) {
+        return { docs: [] };
+      }
+      const dbData = JSON.parse(fs.readFileSync(filePath, "utf8"));
+      const colData = dbData[this.col] || {};
+      const docs = Object.keys(colData).map(id => ({
+        id,
+        data: () => JSON.parse(JSON.stringify(colData[id]))
+      }));
+      return {
+        docs
+      };
+    } catch (e) {
+      return { docs: [] };
+    }
   }
 }
 
@@ -443,14 +525,24 @@ async function startServer() {
     if (!userEmail || userEmail === "anonymous") {
       userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
     }
+    const workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId;
+
     if (userEmail) {
       try {
         const userDoc = await db.collection("users").doc(userEmail).get();
         if (userDoc.exists) {
           const u = userDoc.data();
-          if (u && u.facebook) {
-            console.log(`[Firebase] Loaded FB data from user document: ${userEmail}`);
-            return u.facebook;
+          if (u) {
+            // Check if workspace-specific FB connection exists
+            if (workspaceId && u.facebookWorkspaces && u.facebookWorkspaces[workspaceId]) {
+              console.log(`[Firebase] Loaded FB data from user document for workspace: ${workspaceId}`);
+              return u.facebookWorkspaces[workspaceId];
+            }
+            // Fallback to global facebook
+            if (u.facebook) {
+              console.log(`[Firebase] Loaded FB data from user document: ${userEmail}`);
+              return u.facebook;
+            }
           }
         }
       } catch (e: any) {
@@ -745,6 +837,43 @@ async function startServer() {
     }
   });
 
+  app.post("/api/auth/update-settings", async (req, res) => {
+    const { fullName, workspaceName } = req.body;
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail) return res.status(401).json({ error: "Not authenticated" });
+
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+    try {
+      const userRef = db.collection("users").doc(userEmail);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "User profile not found." });
+      }
+
+      const updates: any = {};
+      if (fullName !== undefined) updates.fullName = fullName;
+      if (workspaceName !== undefined) updates.workspaceName = workspaceName;
+      if (req.body.workspaces !== undefined) updates.workspaces = req.body.workspaces;
+
+      await userRef.update(updates);
+
+      // Fetch the updated doc and store in session
+      const updatedDoc = await userRef.get();
+      const updatedData = updatedDoc.data();
+      if (updatedData) {
+        const { password, ...userWithoutPassword } = updatedData;
+        req.session.user = userWithoutPassword;
+        return res.json({ success: true, user: userWithoutPassword });
+      }
+      return res.json({ success: true });
+    } catch (err: any) {
+      console.error("[AUTH] Update settings error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- TEAM MEMBER INVITATIONS & ROSTER MANAGEMENT API ---
   app.get("/api/team/members", async (req, res) => {
     let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
@@ -836,16 +965,7 @@ async function startServer() {
 
       const inviteLink = `${appUrl}/?invite_token=${inviteToken}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}&inviter=${encodeURIComponent(inviterName)}&role=${encodeURIComponent(role)}`;
 
-      const smtpPort = Number(process.env.SMTP_PORT) || 587;
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || "smtp.ethereal.email",
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-      });
+      const { transporter, user: smtpUser, fromEmail: smtpFrom } = getSmtpTransporter();
 
       const emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1e293b;">
@@ -877,7 +997,7 @@ async function startServer() {
         </div>
       `;
 
-      if (!process.env.SMTP_USER) {
+      if (!smtpUser) {
         console.log(`[TEAM INVITE] SUCCESS (Simulated): Invitation link for ${email}: ${inviteLink}`);
         return res.json({
           success: true,
@@ -889,7 +1009,7 @@ async function startServer() {
       }
 
       await transporter.sendMail({
-        from: process.env.FROM_EMAIL || '"Perseus Bot Hub" <verification@perseusbot.com>',
+        from: smtpFrom,
         to: email,
         subject: `Verify your invite - Invited by ${inviterName}`,
         text: `You have been invited to manage customer interactions on Perseus Bot by ${inviterName}. Click this link to register: ${inviteLink}`,
@@ -1088,32 +1208,22 @@ async function startServer() {
 
       console.log(`[AUTH] Verification code for ${email} stored in DB: ${code}`);
 
-      // Setup Nodemailer
-      const smtpPortVerify = Number(process.env.SMTP_PORT) || 587;
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || "smtp.ethereal.email",
-        port: smtpPortVerify,
-        secure: smtpPortVerify === 465,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-      });
+      const { transporter, user: smtpUser, fromEmail: smtpFrom } = getSmtpTransporter();
 
       // If no real SMTP_USER is provided, we'll log it and tell the user
-      if (!process.env.SMTP_USER) {
+      if (!smtpUser) {
         console.log(`[AUTH] SUCCESS (Simulated): Verification code for ${email}: ${code}`);
         return res.json({ 
           success: true, 
           code,
-          message: `Verification code generated (Simulation Mode). For testing, please check server logs for the code, or configure an SMTP server.`,
+          message: `Verification code generated in Simulation Mode. Checked in server logs.`,
           simulated: true 
         });
       }
 
       try {
         await transporter.sendMail({
-          from: process.env.FROM_EMAIL || '"Perseus Bot" <verification@perseusbot.com>',
+          from: smtpFrom,
           to: email,
           subject: "Verify your account - Perseus Bot",
           text: `Your verification code is: ${code}`,
@@ -1131,13 +1241,14 @@ async function startServer() {
         console.log(`[AUTH] Verification email sent successfully to: ${email}`);
         res.json({ success: true, message: "Code sent successfully" });
       } catch (mailError: any) {
-        console.warn(`[AUTH] Failed to dispatch SMTP email to ${email}:`, mailError.message);
-        console.log(`[AUTH] SUCCESS (Simulated Fallback): Verification code for ${email}: ${code}`);
-        return res.json({
-          success: true,
-          code,
-          message: `Verification code generated (SMTP Fallback Mode). Code: ${code} (Check server logs if needed)`,
-          simulated: true
+        console.error(`[AUTH] Failed to dispatch SMTP email to ${email}:`, mailError);
+        // If SMTP credentials are set but email delivery failed, we MUST report the error to help users fix it in their settings.
+        return res.status(500).json({
+          error: `SMTP Dispatch Error: ${mailError.message || mailError}.\n\n` +
+                 `Diagnostic Details for Verification:\n` +
+                 `- Host: "mail.perseusbot.com"\n` +
+                 `- User: "verification@perseusbot.com"\n\n` +
+                 `Please verify if port 465 and SMTP server parameters are correctly configured on your server.`
         });
       }
     } catch (error: any) {
@@ -1175,6 +1286,7 @@ async function startServer() {
           password: storedData.password, // This was already hashed in send-verification
           fullName: storedData.fullName || email.split('@')[0],
           workspaceId: "ws_" + Math.random().toString(36).substring(7),
+          workspaceName: storedData.workspaceName || `${storedData.fullName || email.split('@')[0]}'s Workspace`,
           ip: clientIp, 
           createdAt: FieldValue.serverTimestamp() 
         };
@@ -1200,6 +1312,306 @@ async function startServer() {
     }
   });
 
+  // Reusable function to check if a Facebook user is already connected to another workspace or user
+  async function checkFacebookDuplicate(fbUserId: string, fbName: string, userEmail: string, workspaceId: string, res: any): Promise<boolean> {
+    const db = await getDb();
+    if (!db) return false;
+
+    try {
+      const usersSnap = await db.collection("users").get();
+      for (const doc of usersSnap.docs) {
+        const u = doc.data();
+        const email = doc.id; // user's email
+
+        // 1) Verify default/global FB connection
+        if (u.facebook && u.facebook.id === fbUserId) {
+          const userWorkspaces = u.workspaces || [];
+          const defaultWorkspaceId = userWorkspaces[0]?.id || "1";
+          if (email !== userEmail || workspaceId !== defaultWorkspaceId) {
+            const wsName = userWorkspaces[0]?.name || "Default Workspace";
+            const ownerMsg = email === userEmail ? `your workspace "${wsName}"` : `another user (${email})`;
+            
+            res.send(`
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <title>Facebook Connection Blocked</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                  body {
+                    font-family: 'Inter', -apple-system, sans-serif;
+                    background-color: #f8fafc;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 100vh;
+                    margin: 0;
+                    color: #0f172a;
+                  }
+                  .card {
+                    background: white;
+                    padding: 2.5rem;
+                    border-radius: 1rem;
+                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+                    max-width: 440px;
+                    width: 100%;
+                    text-align: center;
+                    border: 1px solid #fee2e2;
+                  }
+                  .icon-container {
+                    width: 64px;
+                    height: 64px;
+                    background-color: #fee2e2;
+                    color: #ef4444;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    margin: 0 auto 1.5rem;
+                  }
+                  .icon {
+                    width: 32px;
+                    height: 32px;
+                  }
+                  h2 {
+                    margin: 0 0 1rem;
+                    font-size: 1.5rem;
+                    font-weight: 700;
+                    color: #991b1b;
+                  }
+                  p {
+                    color: #4b5563;
+                    font-size: 0.95rem;
+                    line-height: 1.6;
+                    margin: 0 0 1.75rem;
+                  }
+                  .btn {
+                    display: inline-block;
+                    width: 100%;
+                    padding: 0.875rem 1.5rem;
+                    background-color: #dc2626;
+                    color: white;
+                    border: none;
+                    border-radius: 0.5rem;
+                    font-weight: 600;
+                    font-size: 1rem;
+                    cursor: pointer;
+                    transition: background-color 0.2s;
+                    text-decoration: none;
+                    box-sizing: border-box;
+                  }
+                  .btn:hover {
+                    background-color: #b91c1c;
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="icon-container">
+                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                  </div>
+                  <h2>Connection Failed</h2>
+                  <div style="text-align: left; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                    <span style="font-size: 11px; font-weight: 800; color: #b91c1c; text-transform: uppercase;">Facebook Profile Mapped Elsewhere</span>
+                    <p style="font-size: 13px; color: #7f1d1d; margin: 4px 0 0 0;">
+                      The Facebook profile (<strong>${fbName}</strong>) is already connected to <strong>${ownerMsg}</strong>.
+                    </p>
+                  </div>
+                  <p style="font-size: 13px; text-align: left; color: #4b5563;">
+                    A Facebook profile can only be linked to a single workspace at a time. If you wish to connect to this workspace, please choose or sign into another Facebook account.
+                  </p>
+                  
+                  <button onclick="closeAndReturn()" class="btn">Return / Dismiss</button>
+                </div>
+        
+                <script>
+                  try {
+                    localStorage.setItem('FB_AUTH_ERROR', JSON.stringify({
+                      message: 'Connection failed: This Facebook account is already connected to another workspace.',
+                      timestamp: Date.now()
+                    }));
+                  } catch (e) {
+                    console.error(e);
+                  }
+        
+                  if (window.opener) {
+                    try {
+                      window.opener.postMessage({ 
+                        type: 'FB_AUTH_ERROR', 
+                        message: 'Connection failed: This Facebook account is already connected to another workspace.' 
+                      }, '*');
+                    } catch (e) {
+                      console.error(e);
+                    }
+                  }
+        
+                  function closeAndReturn() {
+                    if (window.opener) {
+                      window.close();
+                    } else {
+                      window.location.href = "/";
+                    }
+                  }
+                </script>
+              </body>
+              </html>
+            `);
+            return true;
+          }
+        }
+
+        // 2) Verify workspace-specific FB connections
+        if (u.facebookWorkspaces) {
+          for (const wsId of Object.keys(u.facebookWorkspaces)) {
+            const fbProj = u.facebookWorkspaces[wsId];
+            if (fbProj && fbProj.id === fbUserId) {
+              if (email !== userEmail || wsId !== workspaceId) {
+                const wsName = u.workspaces?.find((w: any) => w.id === wsId)?.name || wsId;
+                const ownerMsg = email === userEmail ? `your workspace "${wsName}"` : `another user (${email})`;
+                
+                res.send(`
+                  <!DOCTYPE html>
+                  <html>
+                  <head>
+                    <title>Facebook Connection Blocked</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+                    <style>
+                      body {
+                        font-family: 'Inter', -apple-system, sans-serif;
+                        background-color: #f8fafc;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        min-height: 100vh;
+                        margin: 0;
+                        color: #0f172a;
+                      }
+                      .card {
+                        background: white;
+                        padding: 2.5rem;
+                        border-radius: 1rem;
+                        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+                        max-width: 440px;
+                        width: 100%;
+                        text-align: center;
+                        border: 1px solid #fee2e2;
+                      }
+                      .icon-container {
+                        width: 64px;
+                        height: 64px;
+                        background-color: #fee2e2;
+                        color: #ef4444;
+                        border-radius: 50%;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin: 0 auto 1.5rem;
+                      }
+                      .icon {
+                        width: 32px;
+                        height: 32px;
+                      }
+                      h2 {
+                        margin: 0 0 1rem;
+                        font-size: 1.5rem;
+                        font-weight: 700;
+                        color: #991b1b;
+                      }
+                      p {
+                        color: #4b5563;
+                        font-size: 0.95rem;
+                        line-height: 1.6;
+                        margin: 0 0 1.75rem;
+                      }
+                      .btn {
+                        display: inline-block;
+                        width: 100%;
+                        padding: 0.875rem 1.5rem;
+                        background-color: #dc2626;
+                        color: white;
+                        border: none;
+                        border-radius: 0.5rem;
+                        font-weight: 600;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: background-color 0.2s;
+                        text-decoration: none;
+                        box-sizing: border-box;
+                      }
+                      .btn:hover {
+                        background-color: #b91c1c;
+                      }
+                    </style>
+                  </head>
+                  <body>
+                    <div class="card">
+                      <div class="icon-container">
+                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                      </div>
+                      <h2>Connection Failed</h2>
+                      <div style="text-align: left; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                        <span style="font-size: 11px; font-weight: 800; color: #b91c1c; text-transform: uppercase;">Facebook Profile Mapped Elsewhere</span>
+                        <p style="font-size: 13px; color: #7f1d1d; margin: 4px 0 0 0;">
+                          The Facebook profile (<strong>${fbName}</strong>) is already connected to <strong>${ownerMsg}</strong>.
+                        </p>
+                      </div>
+                      <p style="font-size: 13px; text-align: left; color: #4b5563;">
+                        A Facebook profile can only be linked to a single workspace at a time. If you wish to connect to this workspace, please choose or sign into another Facebook account.
+                      </p>
+                      
+                      <button onclick="closeAndReturn()" class="btn">Return / Dismiss</button>
+                    </div>
+            
+                    <script>
+                      try {
+                        localStorage.setItem('FB_AUTH_ERROR', JSON.stringify({
+                          message: 'Connection failed: This Facebook account is already connected to another workspace.',
+                          timestamp: Date.now()
+                        }));
+                      } catch (e) {
+                        console.error(e);
+                      }
+            
+                      if (window.opener) {
+                        try {
+                          window.opener.postMessage({ 
+                            type: 'FB_AUTH_ERROR', 
+                            message: 'Connection failed: This Facebook account is already connected to another workspace.' 
+                          }, '*');
+                        } catch (e) {
+                          console.error(e);
+                        }
+                      }
+            
+                      function closeAndReturn() {
+                        if (window.opener) {
+                          window.close();
+                        } else {
+                          window.location.href = "/";
+                        }
+                      }
+                    </script>
+                  </body>
+                  </html>
+                `);
+                return true;
+              }
+            }
+          }
+        }
+      }
+    } catch (e: any) {
+      console.warn("Error checking duplicate facebook workspaces:", e.message);
+    }
+    return false;
+  }
+
   // Facebook OAuth Routes
   app.get("/api/auth/facebook/url", (req, res) => {
     const appId = process.env.FACEBOOK_APP_ID;
@@ -1210,10 +1622,11 @@ async function startServer() {
     const currentOrigin = host ? `${protocol}://${host}` : '';
     const appUrl = process.env.APP_URL || currentOrigin;
     const userEmail = (req.query.email || (req.session.user && req.session.user.email) || "ahsan.shabbir292@gmail.com") as string;
+    const workspaceId = (req.query.workspaceId || req.headers['x-workspace-id'] || "") as string;
     
     if (!appId || appId === "" || appId === "YOUR_FACEBOOK_APP_ID") {
-      console.log(`[FB-Simulator] No FACEBOOK_APP_ID found. Standard OAuth fallback to simulation for ${userEmail}`);
-      const simulateUrl = `${appUrl}/auth/facebook/simulate?email=${encodeURIComponent(userEmail)}`;
+      console.log(`[FB-Simulator] No FACEBOOK_APP_ID found. Standard OAuth fallback to simulation for ${userEmail}, workspace: ${workspaceId}`);
+      const simulateUrl = `${appUrl}/auth/facebook/simulate?email=${encodeURIComponent(userEmail)}&workspaceId=${encodeURIComponent(workspaceId)}`;
       return res.json({ url: simulateUrl });
     }
 
@@ -1227,7 +1640,8 @@ async function startServer() {
       "public_profile"
     ].join(",");
 
-    const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(userEmail)}`;
+    const stateValue = workspaceId ? `${userEmail}||${workspaceId}` : userEmail;
+    const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(stateValue)}`;
     
     res.json({ url: authUrl });
   });
@@ -1235,6 +1649,7 @@ async function startServer() {
   // Gorgeous Facebook Connection Simulator (Sandbox Mode)
   app.get("/auth/facebook/simulate", (req, res) => {
     const userEmail = (req.query.email || "ahsan.shabbir292@gmail.com") as string;
+    const workspaceId = (req.query.workspaceId || "") as string;
     
     res.send(`
       <!DOCTYPE html>
@@ -1410,6 +1825,7 @@ async function startServer() {
           </div>
           <form action="/auth/facebook/simulate/callback" method="POST" class="fb-body">
             <input type="hidden" name="email" value="${userEmail}" />
+            <input type="hidden" name="workspaceId" value="${workspaceId}" />
             
             <div class="app-info">
               <div class="app-logo">P</div>
@@ -1417,6 +1833,12 @@ async function startServer() {
                 <h3>Perseus Bot (AI Agent)</h3>
                 <p>recommends connecting Facebook to launch auto-messaging triggers.</p>
               </div>
+            </div>
+
+            <div style="background-color: #f7f8f9; padding: 14px; border-radius: 8px; border: 1px dashed #dddfe2; margin-bottom: 16px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: #4b4f56; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">Facebook Profile Name / Account:</label>
+              <input type="text" name="fb_name" value="Ahsan Shabbir" style="width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #ccd0d5; border-radius: 6px; font-size: 14px; font-family: inherit; font-weight: 600;" placeholder="e.g., Ahsan Shabbir, Zain Fatima" required />
+              <span style="font-size: 10px; color: #8d949e; display: block; margin-top: 5px; line-height: 1.4;">Tip: To connect different Facebook accounts in other workspaces, enter a unique profile name above.</span>
             </div>
 
             <div class="permissions-list">
@@ -1477,6 +1899,9 @@ async function startServer() {
   // Handle post submit from Simulator (updates DB & closes the window)
   app.post("/auth/facebook/simulate/callback", async (req, res) => {
     let userEmail = req.body.email as string;
+    const workspaceId = req.body.workspaceId as string;
+    const fbName = req.body.fb_name as string || "Ahsan Shabbir";
+
     if (!userEmail) {
       userEmail = req.session?.user?.email || "ahsan.shabbir292@gmail.com";
     }
@@ -1516,39 +1941,49 @@ async function startServer() {
 
     const pages = allModelPages.filter(p => selectedPageIdsList.includes(p.id));
     const userAccessToken = "simulated_fb_user_token_abc123";
+    const fbUserId = "sim_" + fbName.trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
+
+    // Check duplicate
+    const isDuplicate = await checkFacebookDuplicate(fbUserId, fbName, userEmail, workspaceId, res);
+    if (isDuplicate) {
+      console.log(`[FB-Simulator] Simulated login blocked for ${userEmail}. Account ${fbName} (${fbUserId}) is already connected to another workspace.`);
+      return;
+    }
     
     req.session.fbSessionId = `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
-    console.log(`[FB-Simulator] Saving simulated Facebook payload for ${userEmail}. Pages connected:`, pages.map(p => p.name));
+    console.log(`[FB-Simulator] Saving simulated Facebook payload for ${userEmail} (workspace ${workspaceId}, fb_name: ${fbName}). Pages connected:`, pages.map(p => p.name));
 
     const db = await getDb();
     if (db) {
       try {
-        await db.collection("sessions").doc(req.session.fbSessionId).set({
+        const fbPayload = {
           userAccessToken,
           pages,
-          selectedPageIds: []
-        });
+          selectedPageIds: [],
+          name: fbName,
+          id: fbUserId
+        };
+
+        await db.collection("sessions").doc(req.session.fbSessionId).set(fbPayload);
 
         // Save directly to Firestore users document too
         const userDocRef = db.collection("users").doc(userEmail);
         const snap = await userDocRef.get();
+        
+        const updates: any = {
+          facebook: fbPayload
+        };
+        if (workspaceId) {
+          updates[`facebookWorkspaces.${workspaceId}`] = fbPayload;
+        }
+
         if (snap.exists) {
-          await userDocRef.update({
-            facebook: {
-              userAccessToken,
-              pages,
-              selectedPageIds: []
-            }
-          });
+          await userDocRef.update(updates);
         } else {
           await userDocRef.set({
             email: userEmail,
-            facebook: {
-              userAccessToken,
-              pages,
-              selectedPageIds: []
-            }
+            ...updates
           });
         }
       } catch (err: any) {
@@ -1734,6 +2169,46 @@ async function startServer() {
 
       const userAccessToken = tokenResponse.data.access_token;
 
+      // 1.5 Fetch user profile details to get unique ID & Name
+      let fbUserId = "";
+      let fbUserName = "Facebook User";
+      try {
+        const meResponse = await axios.get(`https://graph.facebook.com/v19.0/me`, {
+          params: {
+            access_token: userAccessToken,
+            fields: "name,id"
+          }
+        });
+        fbUserId = meResponse.data.id || "";
+        fbUserName = meResponse.data.name || "Facebook User";
+      } catch (err: any) {
+        console.warn("[FB] Error fetching profile /me details during callback:", err.response?.data || err.message);
+      }
+
+      let userEmail = "ahsan.shabbir292@gmail.com";
+      let workspaceId = "";
+      const stateStr = state ? (state as string) : "";
+      if (stateStr.includes("||")) {
+        const parts = stateStr.split("||");
+        userEmail = parts[0] || userEmail;
+        workspaceId = parts[1] || "";
+      } else if (stateStr) {
+        userEmail = stateStr;
+      }
+
+      if (!userEmail || userEmail === "anonymous") {
+        userEmail = "ahsan.shabbir292@gmail.com";
+      }
+
+      // Check duplicates for real Facebook User ID
+      if (fbUserId) {
+        const isDuplicate = await checkFacebookDuplicate(fbUserId, fbUserName, userEmail, workspaceId, res);
+        if (isDuplicate) {
+          console.log(`[FB-Callback] Real FB login blocked. Account ${fbUserName} (${fbUserId}) already linked elsewhere.`);
+          return;
+        }
+      }
+
       // 2. Get user's pages and their access tokens
       const pagesResponse = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
         params: { 
@@ -1743,42 +2218,40 @@ async function startServer() {
       });
 
       const pages = pagesResponse.data.data || [];
-      let userEmail = (state as string) || (req.session?.user && req.session.user.email) || "ahsan.shabbir292@gmail.com";
-      if (!userEmail || userEmail === "anonymous") {
-        userEmail = "ahsan.shabbir292@gmail.com";
-      }
 
       // 3. Store in session
       req.session.fbSessionId = `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`; 
 
       const db = await getDb();
       if (db) {
-        await db.collection("sessions").doc(req.session.fbSessionId).set({ 
+        const fbPayload = { 
           userAccessToken, 
           pages,
-          selectedPageIds: [] 
-        });
+          selectedPageIds: [],
+          name: fbUserName,
+          id: fbUserId
+        };
+
+        await db.collection("sessions").doc(req.session.fbSessionId).set(fbPayload);
 
         if (userEmail && userEmail !== "anonymous") {
-          console.log(`[Firebase] Merging Facebook state directly into user document for ${userEmail}`);
+          console.log(`[Firebase] Merging Facebook state directly into user document for ${userEmail}, workspace: ${workspaceId}`);
           const userDocRef = db.collection("users").doc(userEmail);
           const snap = await userDocRef.get();
+          
+          const updates: any = {
+            facebook: fbPayload
+          };
+          if (workspaceId) {
+            updates[`facebookWorkspaces.${workspaceId}`] = fbPayload;
+          }
+
           if (snap.exists) {
-            await userDocRef.update({
-              facebook: {
-                userAccessToken,
-                pages,
-                selectedPageIds: []
-              }
-            });
+            await userDocRef.update(updates);
           } else {
             await userDocRef.set({
               email: userEmail,
-              facebook: {
-                userAccessToken,
-                pages,
-                selectedPageIds: []
-              }
+              ...updates
             });
           }
         }

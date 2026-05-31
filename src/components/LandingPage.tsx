@@ -295,10 +295,10 @@ const SOLUTIONS_DATA = [
     description: "Connect your Shopify, WooCommerce, or custom ERP. The AI instantly answers pricing queries, checks local warehouse stock, recommends size options, and shares secure check-out links directly in the Facebook Messenger chat thread.",
     features: ["Instant Cart Recovery", "Live SKU Checks", "Visual Multi-Variant Cards", "In-Chat Direct Checkout"],
     chatMock: [
-      { sender: "user", text: "Khaadi lawn suit medium size in black color available hai stock me?" },
-      { sender: "bot", text: "Ji bilkul! **Khaadi Premium Black Lawn Suit (Medium)** hamare pass abhi stock me available hai. \n\nKiamat: **Rs. 5,490**.\n\nKya aapka checkout link share karoon ya details check karain?" },
-      { sender: "user", text: "Haan check out kr do link do please" },
-      { sender: "bot", text: "Perfect! 🛍️ Aapka order cart link generate kar diya hai niche checkout button par click kar k orders complete karein:\n\n*Secure checkout via Stripe / Lemon Squeezy.*" }
+      { sender: "user", text: "Is the Premium Linen lawn suit in medium size and black color available in stock?" },
+      { sender: "bot", text: "Yes, absolutely! **Premium Linen Lawn Suit (Medium - Black)** is currently available in stock. \n\nPrice: **$54.90**.\n\nWould you like me to share the secure checkout link or provide more product specifications?" },
+      { sender: "user", text: "Yes, check it out and share the link please." },
+      { sender: "bot", text: "Perfect! 🛍️ I have generated a checkout cart link for you. Click the button below to complete your order:\n\n*Secure checkout via Stripe / Lemon Squeezy.*" }
     ]
   },
   {
@@ -312,8 +312,8 @@ const SOLUTIONS_DATA = [
     chatMock: [
       { sender: "user", text: "I am looking to book a real estate consultation. What are your pricing brackets?" },
       { sender: "bot", text: "I can absolutely assist you with listing brackets! To match you with the right specialist group:\n\nCould you please share your preferred location and approximate design budget (e.g. $100k - $250k)?" },
-      { sender: "user", text: "Lahore DHA area, budget around 3 crore." },
-      { sender: "bot", text: "Excellent choice! DHA Lahore is seeing premier growths. 🏡 I have matched you with our Elite Segment executive. Let's schedule a brief 10-min Google Meet call.\n\nPlease share your phone number so we can register your appointment:" }
+      { sender: "user", text: "Downtown area, budget around $300k." },
+      { sender: "bot", text: "Excellent choice! Downtown is seeing premier growth. 🏡 I have matched you with our Elite Segment executive. Let's schedule a brief 10-min Google Meet call.\n\nPlease share your phone number so we can register your appointment:" }
     ]
   },
   {
@@ -325,10 +325,10 @@ const SOLUTIONS_DATA = [
     description: "No more waiting hours for an agent response. AI handles standard FAQs about refunds, order tracking status, shipping delays, and office hours. If a customer is frustrated, the bot automatically flags a support agent via Meta Handover.",
     features: ["NLP Intent Detection", "Meta Handover Protocol", "Sentiment Analysis tracking", "Dynamic PDF Knowledge Base Base"],
     chatMock: [
-      { sender: "user", text: "Mera refund abhi tak nahi aya, 3 din ho gaye hain" },
-      { sender: "bot", text: "Aapka delayed status check karne k liye maazrat chahti hoon. 😔\n\nPlease share your **Order ID** (jese #MESS-1049) ta k main real-time transaction API check kr k batayein." },
-      { sender: "user", text: "#MESS-8842 wala h order" },
-      { sender: "bot", text: "Thank you! Order #MESS-8842 check kya hai, refund approved hai aur hamare end se dispatch ho chuka hai. Aapke bank me ye **24-48 hours** me credit ho jaye ga." }
+      { sender: "user", text: "My refund hasn't arrived yet, it has been 3 days." },
+      { sender: "bot", text: "I am very sorry for the delayed status check! 😔\n\nPlease share your **Order ID** (such as #MESS-1049) so that I can look up the real-time transaction API." },
+      { sender: "user", text: "My order is #MESS-8842" },
+      { sender: "bot", text: "Thank you! I have checked Order #MESS-8842. The refund is approved and has been dispatched from our end. It will credit to your local bank account in **24-48 hours**." }
     ]
   },
   {
@@ -340,8 +340,8 @@ const SOLUTIONS_DATA = [
     description: "Are you uploading this code onto Vercel, VPS, or Cloud Run containers? Perseus Bot is completely optimized for custom domain mapping, providing secure SSL handshakes, and bypassing standard IP blockades so authentication works flawlessly without blank screens.",
     features: ["Custom Domain mapping", "SMTP Relay Fallback support", "Vercel edge functions ready", "Bypass trial-IP limitations"],
     chatMock: [
-      { sender: "user", text: "App ko Vercel pe lagaya par validation email nahi aa raha?" },
-      { sender: "bot", text: "Ye common issue tab aata hai jab custom hosting variables, secure DB access rules rules ya standard SMTP endpoints configuration missing hon. \n\nSolution: Apne `.env` me **SMTP_HOST**, **SMTP_PORT**, **SMTP_PASS**, aur **FIREBASE_PROJECT_ID** ko map karein. AI simulated fallbacks automatically launch go jati hain." }
+      { sender: "user", text: "I deployed the app to Vercel but the validation email is not arriving?" },
+      { sender: "bot", text: "This common issue happens when custom host variables, secure DB access rules, or standard SMTP server parameters are unconfigured.\n\nSolution: Map **SMTP_HOST**, **SMTP_PORT**, **SMTP_PASS**, and **FIREBASE_PROJECT_ID** in your `.env`. Otherwise, system-simulated code warnings automatically launch as sandboxed safe fallbacks." }
     ]
   }
 ];

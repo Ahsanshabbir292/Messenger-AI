@@ -82,56 +82,23 @@ export default function AuthPage({
     }
     setLoading(true);
     try {
-      // 1. Firebase createUserWithEmailAndPassword()
-      const userCredentials = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-      const user = userCredentials.user;
-
-      // 2. Verification email sent (sendEmailVerification)
-      try {
-        await sendEmailVerification(user);
-        console.log("[Firebase] Verification email has been sent successfully.");
-      } catch (mailErr: any) {
-        console.warn("[Firebase] Failed to send verification email automatically:", mailErr.message);
-      }
-
-      // 3. Generate a compatible workspace ID
-      const generatedWorkspaceId = "ws_" + Math.random().toString(36).substring(7);
-
-      // 4. Firestore user document create
-      const userDocRef = doc(db, 'users', formData.email);
-      try {
-        await withTimeout(
-          setDoc(userDocRef, {
-            name: formData.fullName,
-            email: formData.email,
-            workspace: formData.workspaceName || `${formData.fullName}'s Workspace`,
-            fullName: formData.fullName, // Backwards compatibility field
-            workspaceId: generatedWorkspaceId, // Backwards compatibility field
-            role: "admin", // Backwards compatibility field
-            createdAt: new Date().toISOString(),
-            verified: false
-          }),
-          7500,
-          "Firestore database setup timeout! (Database create nahi hai ya security rules block kar rahi hain.) Please ensure you have created the cloud Firestore database in your Firebase console and configured security rules."
-        );
-      } catch (dbErr: any) {
-        console.warn("[Firebase] Could not write user document to Firestore, proceeding with fallback logic:", dbErr.message);
-      }
-
-      // 5. Save credentials to localStorage and redirect to dashboard
-      const appUserObj = {
+      const res = await axios.post('/api/auth/send-verification', {
         email: formData.email,
+        password: formData.password,
         fullName: formData.fullName,
-        workspaceId: generatedWorkspaceId,
-        role: "admin"
-      };
-      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = formData.email;
+        workspaceName: formData.workspaceName || `${formData.fullName}'s Workspace`
+      });
+
+      if (res.data.simulated && res.data.code) {
+        setSimulatedCode(res.data.code);
+      } else {
+        setSimulatedCode(null);
+      }
       
-      onLoginSuccess();
+      setMode('verify');
     } catch (err: any) {
-      const errMsg = err.message || String(err);
-      console.error("[Firebase] Signup operation failed:", errMsg);
+      const errMsg = err.response?.data?.error || err.message || String(err);
+      console.error("[Backend] Signup send-verification failed:", errMsg);
       setError(errMsg);
     } finally {
       setLoading(false);
@@ -168,13 +135,54 @@ export default function AuthPage({
     setError(null);
     setLoading(true);
     try {
-      await axios.post('/api/auth/verify-code', { 
+      const res = await axios.post('/api/auth/verify-code', { 
         email: formData.email, 
         code: verificationCode 
       });
+      
+      const registeredUser = res.data.user || {
+        email: formData.email,
+        fullName: formData.fullName,
+        workspaceId: "ws_" + Math.random().toString(36).substring(7),
+        role: "admin"
+      };
+
+      const appUserObj = {
+        email: registeredUser.email,
+        fullName: registeredUser.fullName || registeredUser.name || registeredUser.email.split('@')[0],
+        workspaceId: registeredUser.workspaceId,
+        role: registeredUser.role || "admin"
+      };
+
+      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
+      axios.defaults.headers.common['x-user-email'] = registeredUser.email;
+      
       onLoginSuccess();
     } catch (error: any) {
       setError(error.response?.data?.error || "Invalid verification code");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await axios.post('/api/auth/send-verification', {
+        email: formData.email,
+        password: formData.password,
+        fullName: formData.fullName,
+        workspaceName: formData.workspaceName || `${formData.fullName}'s Workspace`
+      });
+      if (res.data.simulated && res.data.code) {
+        setSimulatedCode(res.data.code);
+      } else {
+        setSimulatedCode(null);
+      }
+      alert("Bhai, verification code resent successfully!");
+    } catch (err: any) {
+      setError(err.response?.data?.error || "Failed to resend verification code.");
     } finally {
       setLoading(false);
     }
@@ -315,22 +323,25 @@ export default function AuthPage({
                   </p>
                   
                   {simulatedCode && (
-                    <div className="mt-6 bg-amber-50 border border-amber-200 rounded-2xl p-5 text-amber-950 animate-in fade-in duration-300">
-                      <div className="flex items-center gap-2 text-amber-700 font-bold text-[10px] uppercase tracking-widest mb-2">
+                    <div className="mt-5 bg-amber-50 border border-amber-200/65 rounded-[1.5rem] p-5 text-slate-800 animate-in fade-in duration-350">
+                      <div className="flex items-center gap-2 text-amber-700 font-black text-[9px] uppercase tracking-widest mb-2">
                         <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-                        Development OTP Bypass active
+                        SMTP credentials not configured in system environment
                       </div>
-                      <p className="text-[12px] font-medium leading-relaxed mb-3 text-slate-700">
-                        Bhai, since SMTP email parameters are not fully configured in your dynamic variables, Perseus Bot generated this bypass code for you to copy and verify instantly:
+                      <p className="text-[12px] font-bold leading-normal mb-1.5 text-slate-700">
+                        SMTP server credentials are not fully configured, so the verification email could not be dispatched.
                       </p>
-                      <div className="bg-amber-100 border border-amber-200 rounded-xl py-3 px-4 text-center font-black text-3xl tracking-[0.25em] text-amber-950 select-all cursor-pointer" title="Click to copy" onClick={() => {
+                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed mb-4">
+                        If you'd like to test real emails to <strong>{formData.email}</strong>, please configure your custom SMTP credentials in your system environment (.env file / settings).
+                      </p>
+                      <div className="bg-amber-100/40 border border-amber-250/50 rounded-2xl py-3 px-4 text-center font-black text-3xl tracking-[0.2em] text-amber-950 select-all cursor-pointer hover:bg-amber-100/60 transition-all" title="Click to copy" onClick={() => {
                         navigator.clipboard.writeText(simulatedCode);
-                        alert("Bhai, verification code copied to clipboard: " + simulatedCode);
+                        alert("Verification code copied to clipboard: " + simulatedCode);
                       }}>
                         {simulatedCode}
                       </div>
-                      <p className="text-[10px] text-amber-600 font-bold text-center mt-2 uppercase tracking-wide">
-                        💡 Click the code to copy instantly
+                      <p className="text-[9px] text-amber-600 font-black text-center mt-2.5 uppercase tracking-widest">
+                        💡 Click the code box above to copy instantly
                       </p>
                     </div>
                   )}
@@ -370,8 +381,9 @@ export default function AuthPage({
                   <div className="text-center mt-6">
                     <button 
                       type="button"
-                      className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors"
-                      onClick={() => alert("Code resent!")}
+                      disabled={loading}
+                      className="text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-indigo-600 transition-colors disabled:opacity-50"
+                      onClick={handleResendCode}
                     >
                       Didn't receive code? Resend
                     </button>
