@@ -228,6 +228,19 @@ class CompatFirestore {
   }
 }
 
+function deepSet(obj: any, pathStr: string, value: any) {
+  const parts = pathStr.split(".");
+  let current = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!(part in current) || typeof current[part] !== "object" || current[part] === null) {
+      current[part] = {};
+    }
+    current = current[part];
+  }
+  current[parts[parts.length - 1]] = value;
+}
+
 class MemoryDocumentReference {
   constructor(private col: string, private id: string) {}
 
@@ -288,7 +301,16 @@ class MemoryDocumentReference {
       if (!dbData[this.col]) dbData[this.col] = {};
       const existing = dbData[this.col][this.id] || {};
       const processed = this.replaceServerTimestamp(data);
-      dbData[this.col][this.id] = { ...existing, ...processed };
+      
+      const updated = JSON.parse(JSON.stringify(existing));
+      for (const key of Object.keys(processed)) {
+        if (key.includes(".")) {
+          deepSet(updated, key, processed[key]);
+        } else {
+          updated[key] = processed[key];
+        }
+      }
+      dbData[this.col][this.id] = updated;
       this.writeDb(dbData);
     } catch (e: any) {
       console.error(`[MemoryDB] Error update() for ${this.col}/${this.id}:`, e.message);
@@ -515,84 +537,16 @@ async function startServer() {
     }
   });
 
-  // Helper to resolve the root owner of the account if the user is an invited team member
-  async function resolveTargetUserEmail(req: any): Promise<string> {
-    const db = await getDb();
-    let email = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!email || email === "anonymous") {
-      email = "ahsan.shabbir292@gmail.com";
-    }
-    if (db && email) {
-      try {
-        const doc = await db.collection("users").doc(email.toLowerCase()).get();
-        if (doc.exists) {
-          const data = doc.data();
-          if (data?.invited && !data?.inviterEmail) {
-            // Self-heal/bridge older team invites
-            const inviteDoc = await db.collection("invitations").doc(email.toLowerCase()).get();
-            if (inviteDoc.exists) {
-              const inviter = inviteDoc.data()?.inviterEmail;
-              if (inviter) {
-                await db.collection("users").doc(email.toLowerCase()).update({ inviterEmail: inviter });
-                return inviter;
-              }
-            }
-          }
-          if (data?.inviterEmail) {
-            return data.inviterEmail;
-          }
-        }
-      } catch (err) {
-        console.error("resolveTargetUserEmail error:", err);
-      }
-    }
-    return email;
-  }
-
-  // Merges the admin owner's workspace and layout settings so team members share the dashboard perfectly
-  async function resolveUserSession(user: any, db: any) {
-    if (!user || !db) return user;
-    let resolvedUser = { ...user };
-    let userEmail = resolvedUser.email;
-    
-    if (resolvedUser.invited && !resolvedUser.inviterEmail && userEmail) {
-      try {
-        const inviteDoc = await db.collection("invitations").doc(userEmail.toLowerCase()).get();
-        if (inviteDoc.exists) {
-          resolvedUser.inviterEmail = inviteDoc.data()?.inviterEmail;
-          await db.collection("users").doc(userEmail).update({ inviterEmail: resolvedUser.inviterEmail });
-        }
-      } catch (e) {}
-    }
-
-    if (resolvedUser.inviterEmail) {
-      try {
-        const adminDoc = await db.collection("users").doc(resolvedUser.inviterEmail).get();
-        if (adminDoc.exists) {
-          const adminData = adminDoc.data();
-          if (adminData) {
-            resolvedUser.workspaces = adminData.workspaces || [{ id: '1', name: adminData.workspaceName || `${adminData.fullName}'s Workspace` }];
-            resolvedUser.workspaceId = adminData.workspaceId;
-            resolvedUser.workspaceName = adminData.workspaceName;
-            resolvedUser.facebook = adminData.facebook || null;
-            resolvedUser.facebookWorkspaces = adminData.facebookWorkspaces || null;
-            resolvedUser.adminFullName = adminData.fullName;
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load admin workspaces for team member:", e);
-      }
-    }
-    return resolvedUser;
-  }
-
   // Helper to fetch Facebook config from either User document or Session
   async function getFacebookData(req: any) {
     const db = await getDb();
     if (!db) return null;
 
     // 1. Check logged-in user in DB (preferred/most robust!)
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
+    }
     const workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId;
 
     if (userEmail) {
@@ -605,6 +559,10 @@ async function startServer() {
             if (workspaceId && u.facebookWorkspaces && u.facebookWorkspaces[workspaceId]) {
               console.log(`[Firebase] Loaded FB data from user document for workspace: ${workspaceId}`);
               return u.facebookWorkspaces[workspaceId];
+            }
+            if (workspaceId && u[`facebookWorkspaces.${workspaceId}`]) {
+              console.log(`[Firebase] Loaded FB data from flat legacy key for workspace: ${workspaceId}`);
+              return u[`facebookWorkspaces.${workspaceId}`];
             }
             // Fallback to global facebook
             if (u.facebook) {
@@ -829,23 +787,19 @@ async function startServer() {
     const db = await getDb();
     const headerEmail = req.headers['x-user-email'] as string || req.query.email as string;
     
-    if (db) {
-      const emailToLoad = req.session.user?.email || headerEmail;
-      if (emailToLoad) {
-        try {
-          const userDoc = await db.collection("users").doc(emailToLoad).get();
-          if (userDoc.exists) {
-            const u = userDoc.data();
-            if (u) {
-              const { password, ...userWithoutPassword } = u;
-              const resolved = await resolveUserSession({ email: emailToLoad, ...userWithoutPassword }, db);
-              req.session.user = resolved;
-              console.log(`[AUTH] Refreshed and resolved session from DB for ${emailToLoad}`);
-            }
+    if (!req.session.user && headerEmail && db) {
+      try {
+        const userDoc = await db.collection("users").doc(headerEmail).get();
+        if (userDoc.exists) {
+          const u = userDoc.data();
+          if (u) {
+            const { password, ...userWithoutPassword } = u;
+            req.session.user = { email: headerEmail, ...userWithoutPassword };
+            console.log(`[AUTH] Restored session from header/query email for ${headerEmail}`);
           }
-        } catch (err: any) {
-          console.error("Failed to restore resolved session:", err.message);
         }
+      } catch (err: any) {
+        console.error("Failed to restore session via header email:", err.message);
       }
     }
 
@@ -898,12 +852,11 @@ async function startServer() {
       // Cleanup password from response
       const { password: _, ...userWithoutPassword } = user;
       
-      // Resolve team member context if any
-      const resolved = await resolveUserSession(userWithoutPassword, db);
-      req.session.user = resolved;
+      // Store in session
+      req.session.user = userWithoutPassword;
       
       console.log(`[AUTH] Signin successful for: ${email}`);
-      res.json({ success: true, user: resolved });
+      res.json({ success: true, user: userWithoutPassword });
     } catch (err: any) {
       console.error("[AUTH] Signin database error:", err);
       res.status(500).json({ error: formatDbError(err) });
@@ -919,40 +872,27 @@ async function startServer() {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
     try {
-      const targetUserEmail = await resolveTargetUserEmail(req);
-      const userRef = db.collection("users").doc(targetUserEmail);
+      const userRef = db.collection("users").doc(userEmail);
       const userDoc = await userRef.get();
       if (!userDoc.exists) {
         return res.status(404).json({ error: "User profile not found." });
       }
 
       const updates: any = {};
-      if (fullName !== undefined) {
-        if (targetUserEmail === userEmail) {
-          updates.fullName = fullName;
-        } else {
-          // Team member updating their OWN full name
-          await db.collection("users").doc(userEmail).update({ fullName });
-        }
-      }
+      if (fullName !== undefined) updates.fullName = fullName;
       if (workspaceName !== undefined) updates.workspaceName = workspaceName;
       if (req.body.workspaces !== undefined) updates.workspaces = req.body.workspaces;
 
-      if (Object.keys(updates).length > 0) {
-        await userRef.update(updates);
-      }
+      await userRef.update(updates);
 
-      // Reload the current logged-in user profile with workspace resolution
-      const currentLoggedInRef = db.collection("users").doc(userEmail);
-      const currentLoggedInDoc = await currentLoggedInRef.get();
-      const currentLoggedInData = currentLoggedInDoc.data();
-      if (currentLoggedInData) {
-        const { password, ...userWithoutPassword } = currentLoggedInData;
-        const resolved = await resolveUserSession({ email: userEmail, ...userWithoutPassword }, db);
-        req.session.user = resolved;
-        return res.json({ success: true, user: resolved });
+      // Fetch the updated doc and store in session
+      const updatedDoc = await userRef.get();
+      const updatedData = updatedDoc.data();
+      if (updatedData) {
+        const { password, ...userWithoutPassword } = updatedData;
+        req.session.user = userWithoutPassword;
+        return res.json({ success: true, user: userWithoutPassword });
       }
-      
       return res.json({ success: true });
     } catch (err: any) {
       console.error("[AUTH] Update settings error:", err);
@@ -962,12 +902,15 @@ async function startServer() {
 
   // --- TEAM MEMBER INVITATIONS & ROSTER MANAGEMENT API ---
   app.get("/api/team/members", async (req, res) => {
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
-    const targetEmail = await resolveTargetUserEmail(req);
 
     try {
-      const userDoc = await db.collection("users").doc(targetEmail).get();
+      const userDoc = await db.collection("users").doc(userEmail).get();
       if (userDoc.exists) {
         const data = userDoc.data();
         const team = data?.teamMembers || [];
@@ -1138,7 +1081,7 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
 
       // Create user
-      const userData: any = {
+      const userData = {
         email: email.toLowerCase(),
         password: hashedPassword,
         fullName: fullName || inviteData.name || email.split('@')[0],
@@ -1146,7 +1089,6 @@ async function startServer() {
         role: role || inviteData.role || "member",
         assignedPages: assignedPages || inviteData.assignedPages || [],
         invited: true,
-        inviterEmail: inviteData.inviterEmail || "",
         createdAt: new Date().toISOString()
       };
 
@@ -1163,8 +1105,8 @@ async function startServer() {
       if (inviterEmail) {
         const inviterDoc = await db.collection("users").doc(inviterEmail).get();
         if (inviterDoc.exists) {
-          const inviterDataObj = inviterDoc.data();
-          const team = inviterDataObj?.teamMembers || [];
+          const inviterData = inviterDoc.data();
+          const team = inviterData.teamMembers || [];
           const idx = team.findIndex((m: any) => m.email.toLowerCase() === email.toLowerCase());
           if (idx > -1) {
             team[idx].status = "active";
@@ -1176,10 +1118,9 @@ async function startServer() {
 
       // Login the user in session
       const { password: _, ...userWithoutPassword } = userData;
-      const resolved = await resolveUserSession(userWithoutPassword, db);
-      req.session.user = resolved;
+      req.session.user = userWithoutPassword;
 
-      res.json({ success: true, user: resolved });
+      res.json({ success: true, user: userWithoutPassword });
     } catch (err: any) {
       console.error("[Verify and Register Error]:", err);
       res.status(500).json({ error: "Register process error: " + err.message });
@@ -1402,20 +1343,78 @@ async function startServer() {
     const db = await getDb();
     if (!db) return false;
 
+    const normalizedUserEmail = userEmail.trim().toLowerCase();
+    const normalizedFbUserId = String(fbUserId).trim();
+
     try {
       const usersSnap = await db.collection("users").get();
       for (const doc of usersSnap.docs) {
         const u = doc.data();
-        const email = doc.id; // user's email
+        if (!u) continue;
+        const email = doc.id.trim().toLowerCase(); // user's email
+
+        // Keep track of connected Facebook accounts in this user document
+        const matches: Array<{ wsId: string; wsName: string; details: any }> = [];
 
         // 1) Verify default/global FB connection
-        if (u.facebook && u.facebook.id === fbUserId) {
+        if (u.facebook && String(u.facebook.id).trim() === normalizedFbUserId) {
           const userWorkspaces = u.workspaces || [];
-          const defaultWorkspaceId = userWorkspaces[0]?.id || "1";
-          if (email !== userEmail || workspaceId !== defaultWorkspaceId) {
-            const wsName = userWorkspaces[0]?.name || "Default Workspace";
-            const ownerMsg = email === userEmail ? `your workspace "${wsName}"` : `another user (${email})`;
-            
+          const defaultWorkspaceId = String(userWorkspaces[0]?.id || "1");
+          const wsName = userWorkspaces[0]?.name || "Default Workspace";
+          matches.push({
+            wsId: defaultWorkspaceId,
+            wsName,
+            details: u.facebook
+          });
+        }
+
+        // 2) Verify workspace-specific FB connections (nested under u.facebookWorkspaces)
+        if (u.facebookWorkspaces && typeof u.facebookWorkspaces === "object") {
+          for (const key of Object.keys(u.facebookWorkspaces)) {
+            const fbProj = u.facebookWorkspaces[key];
+            if (fbProj && String(fbProj.id).trim() === normalizedFbUserId) {
+              const wsName = u.workspaces?.find((w: any) => String(w.id) === String(key))?.name || key;
+              matches.push({
+                wsId: String(key),
+                wsName,
+                details: fbProj
+              });
+            }
+          }
+        }
+
+        // 3) Verify flat legacy keys (e.g. facebookWorkspaces.workspaceId)
+        for (const key of Object.keys(u)) {
+          if (key.startsWith("facebookWorkspaces.")) {
+            const fbProj = u[key];
+            if (fbProj && String(fbProj.id).trim() === normalizedFbUserId) {
+              const wsId = key.substring("facebookWorkspaces.".length);
+              const wsName = u.workspaces?.find((w: any) => String(w.id) === String(wsId))?.name || wsId;
+              // Avoid duplicate match if already added
+              if (!matches.some(m => m.wsId === wsId)) {
+                matches.push({
+                  wsId,
+                  wsName,
+                  details: fbProj
+                });
+              }
+            }
+          }
+        }
+
+        // Check if any of the matches require blocking
+        for (const match of matches) {
+          const isSameUser = email === normalizedUserEmail;
+          const isSameWorkspace = String(match.wsId) === String(workspaceId);
+
+          // We block if it is a different user entirely OR if it represents a different workspace
+          if (!isSameUser || !isSameWorkspace) {
+            const ownerMsg = isSameUser 
+              ? `your workspace "${match.wsName}"` 
+              : `another user (${doc.id})`;
+
+            console.log(`[FB-DuplicateCheck] Connection blocked. fbUserId=${fbUserId} is already connected to user=${doc.id}, workspaceId=${match.wsId}`);
+
             res.send(`
               <!DOCTYPE html>
               <html>
@@ -1545,149 +1544,6 @@ async function startServer() {
               </html>
             `);
             return true;
-          }
-        }
-
-        // 2) Verify workspace-specific FB connections
-        if (u.facebookWorkspaces) {
-          for (const wsId of Object.keys(u.facebookWorkspaces)) {
-            const fbProj = u.facebookWorkspaces[wsId];
-            if (fbProj && fbProj.id === fbUserId) {
-              if (email !== userEmail || wsId !== workspaceId) {
-                const wsName = u.workspaces?.find((w: any) => w.id === wsId)?.name || wsId;
-                const ownerMsg = email === userEmail ? `your workspace "${wsName}"` : `another user (${email})`;
-                
-                res.send(`
-                  <!DOCTYPE html>
-                  <html>
-                  <head>
-                    <title>Facebook Connection Blocked</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-                    <style>
-                      body {
-                        font-family: 'Inter', -apple-system, sans-serif;
-                        background-color: #f8fafc;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        min-height: 100vh;
-                        margin: 0;
-                        color: #0f172a;
-                      }
-                      .card {
-                        background: white;
-                        padding: 2.5rem;
-                        border-radius: 1rem;
-                        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-                        max-width: 440px;
-                        width: 100%;
-                        text-align: center;
-                        border: 1px solid #fee2e2;
-                      }
-                      .icon-container {
-                        width: 64px;
-                        height: 64px;
-                        background-color: #fee2e2;
-                        color: #ef4444;
-                        border-radius: 50%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        margin: 0 auto 1.5rem;
-                      }
-                      .icon {
-                        width: 32px;
-                        height: 32px;
-                      }
-                      h2 {
-                        margin: 0 0 1rem;
-                        font-size: 1.5rem;
-                        font-weight: 700;
-                        color: #991b1b;
-                      }
-                      p {
-                        color: #4b5563;
-                        font-size: 0.95rem;
-                        line-height: 1.6;
-                        margin: 0 0 1.75rem;
-                      }
-                      .btn {
-                        display: inline-block;
-                        width: 100%;
-                        padding: 0.875rem 1.5rem;
-                        background-color: #dc2626;
-                        color: white;
-                        border: none;
-                        border-radius: 0.5rem;
-                        font-weight: 600;
-                        font-size: 1rem;
-                        cursor: pointer;
-                        transition: background-color 0.2s;
-                        text-decoration: none;
-                        box-sizing: border-box;
-                      }
-                      .btn:hover {
-                        background-color: #b91c1c;
-                      }
-                    </style>
-                  </head>
-                  <body>
-                    <div class="card">
-                      <div class="icon-container">
-                        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                      </div>
-                      <h2>Connection Failed</h2>
-                      <div style="text-align: left; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
-                        <span style="font-size: 11px; font-weight: 800; color: #b91c1c; text-transform: uppercase;">Facebook Profile Mapped Elsewhere</span>
-                        <p style="font-size: 13px; color: #7f1d1d; margin: 4px 0 0 0;">
-                          The Facebook profile (<strong>${fbName}</strong>) is already connected to <strong>${ownerMsg}</strong>.
-                        </p>
-                      </div>
-                      <p style="font-size: 13px; text-align: left; color: #4b5563;">
-                        A Facebook profile can only be linked to a single workspace at a time. If you wish to connect to this workspace, please choose or sign into another Facebook account.
-                      </p>
-                      
-                      <button onclick="closeAndReturn()" class="btn">Return / Dismiss</button>
-                    </div>
-            
-                    <script>
-                      try {
-                        localStorage.setItem('FB_AUTH_ERROR', JSON.stringify({
-                          message: 'Connection failed: This Facebook account is already connected to another workspace.',
-                          timestamp: Date.now()
-                        }));
-                      } catch (e) {
-                        console.error(e);
-                      }
-            
-                      if (window.opener) {
-                        try {
-                          window.opener.postMessage({ 
-                            type: 'FB_AUTH_ERROR', 
-                            message: 'Connection failed: This Facebook account is already connected to another workspace.' 
-                          }, '*');
-                        } catch (e) {
-                          console.error(e);
-                        }
-                      }
-            
-                      function closeAndReturn() {
-                        if (window.opener) {
-                          window.close();
-                        } else {
-                          window.location.href = "/";
-                        }
-                      }
-                    </script>
-                  </body>
-                  </html>
-                `);
-                return true;
-              }
-            }
           }
         }
       }
@@ -2576,7 +2432,10 @@ async function startServer() {
     }
 
     // A. Update in user document directly
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
+    }
 
     if (userEmail) {
       try {
@@ -2624,7 +2483,10 @@ async function startServer() {
     }
 
     // A. Update in user document directly
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
+    }
 
     if (userEmail) {
       try {
@@ -2661,7 +2523,10 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
 
     try {
       const userRef = db.collection("users").doc(userEmail);
@@ -2738,7 +2603,10 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
 
     try {
       const fbData = await getFacebookData(req);
@@ -2810,7 +2678,10 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
 
     try {
       const userRef = db.collection("users").doc(userEmail);
@@ -2866,7 +2737,10 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
 
     try {
       const userRef = db.collection("users").doc(userEmail);
@@ -2985,7 +2859,10 @@ async function startServer() {
   }
 
   async function getOrCreateSimulatedConversations(db: any, req: any, pageId: string) {
-    const userEmail = await resolveTargetUserEmail(req);
+    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!userEmail || userEmail === "anonymous") {
+      userEmail = "ahsan.shabbir292@gmail.com";
+    }
 
     try {
       const simColRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
