@@ -535,7 +535,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
       getConversations(selectedPage.id);
     } catch (err: any) {
       console.error("Failed to send attachment", err);
-      alert("Attachment send nahi ho saka.");
+      alert("Failed to send attachment. Please try again.");
     } finally {
       setIsSending(false);
     }
@@ -644,7 +644,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         setFbSyncModalOpen(true);
       }
     } catch (err: any) {
-      alert(formatAxiosError(err, "Facebook URL nahi mil saka."));
+      alert(formatAxiosError(err, "Failed to retrieve Facebook auth URL."));
     } finally {
       setSyncing(false);
     }

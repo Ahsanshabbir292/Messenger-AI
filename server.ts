@@ -515,16 +515,84 @@ async function startServer() {
     }
   });
 
+  // Helper to resolve the root owner of the account if the user is an invited team member
+  async function resolveTargetUserEmail(req: any): Promise<string> {
+    const db = await getDb();
+    let email = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    if (!email || email === "anonymous") {
+      email = "ahsan.shabbir292@gmail.com";
+    }
+    if (db && email) {
+      try {
+        const doc = await db.collection("users").doc(email.toLowerCase()).get();
+        if (doc.exists) {
+          const data = doc.data();
+          if (data?.invited && !data?.inviterEmail) {
+            // Self-heal/bridge older team invites
+            const inviteDoc = await db.collection("invitations").doc(email.toLowerCase()).get();
+            if (inviteDoc.exists) {
+              const inviter = inviteDoc.data()?.inviterEmail;
+              if (inviter) {
+                await db.collection("users").doc(email.toLowerCase()).update({ inviterEmail: inviter });
+                return inviter;
+              }
+            }
+          }
+          if (data?.inviterEmail) {
+            return data.inviterEmail;
+          }
+        }
+      } catch (err) {
+        console.error("resolveTargetUserEmail error:", err);
+      }
+    }
+    return email;
+  }
+
+  // Merges the admin owner's workspace and layout settings so team members share the dashboard perfectly
+  async function resolveUserSession(user: any, db: any) {
+    if (!user || !db) return user;
+    let resolvedUser = { ...user };
+    let userEmail = resolvedUser.email;
+    
+    if (resolvedUser.invited && !resolvedUser.inviterEmail && userEmail) {
+      try {
+        const inviteDoc = await db.collection("invitations").doc(userEmail.toLowerCase()).get();
+        if (inviteDoc.exists) {
+          resolvedUser.inviterEmail = inviteDoc.data()?.inviterEmail;
+          await db.collection("users").doc(userEmail).update({ inviterEmail: resolvedUser.inviterEmail });
+        }
+      } catch (e) {}
+    }
+
+    if (resolvedUser.inviterEmail) {
+      try {
+        const adminDoc = await db.collection("users").doc(resolvedUser.inviterEmail).get();
+        if (adminDoc.exists) {
+          const adminData = adminDoc.data();
+          if (adminData) {
+            resolvedUser.workspaces = adminData.workspaces || [{ id: '1', name: adminData.workspaceName || `${adminData.fullName}'s Workspace` }];
+            resolvedUser.workspaceId = adminData.workspaceId;
+            resolvedUser.workspaceName = adminData.workspaceName;
+            resolvedUser.facebook = adminData.facebook || null;
+            resolvedUser.facebookWorkspaces = adminData.facebookWorkspaces || null;
+            resolvedUser.adminFullName = adminData.fullName;
+          }
+        }
+      } catch (e) {
+        console.error("Failed to load admin workspaces for team member:", e);
+      }
+    }
+    return resolvedUser;
+  }
+
   // Helper to fetch Facebook config from either User document or Session
   async function getFacebookData(req: any) {
     const db = await getDb();
     if (!db) return null;
 
     // 1. Check logged-in user in DB (preferred/most robust!)
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
-    }
+    const userEmail = await resolveTargetUserEmail(req);
     const workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId;
 
     if (userEmail) {
@@ -761,19 +829,23 @@ async function startServer() {
     const db = await getDb();
     const headerEmail = req.headers['x-user-email'] as string || req.query.email as string;
     
-    if (!req.session.user && headerEmail && db) {
-      try {
-        const userDoc = await db.collection("users").doc(headerEmail).get();
-        if (userDoc.exists) {
-          const u = userDoc.data();
-          if (u) {
-            const { password, ...userWithoutPassword } = u;
-            req.session.user = { email: headerEmail, ...userWithoutPassword };
-            console.log(`[AUTH] Restored session from header/query email for ${headerEmail}`);
+    if (db) {
+      const emailToLoad = req.session.user?.email || headerEmail;
+      if (emailToLoad) {
+        try {
+          const userDoc = await db.collection("users").doc(emailToLoad).get();
+          if (userDoc.exists) {
+            const u = userDoc.data();
+            if (u) {
+              const { password, ...userWithoutPassword } = u;
+              const resolved = await resolveUserSession({ email: emailToLoad, ...userWithoutPassword }, db);
+              req.session.user = resolved;
+              console.log(`[AUTH] Refreshed and resolved session from DB for ${emailToLoad}`);
+            }
           }
+        } catch (err: any) {
+          console.error("Failed to restore resolved session:", err.message);
         }
-      } catch (err: any) {
-        console.error("Failed to restore session via header email:", err.message);
       }
     }
 
@@ -826,11 +898,12 @@ async function startServer() {
       // Cleanup password from response
       const { password: _, ...userWithoutPassword } = user;
       
-      // Store in session
-      req.session.user = userWithoutPassword;
+      // Resolve team member context if any
+      const resolved = await resolveUserSession(userWithoutPassword, db);
+      req.session.user = resolved;
       
       console.log(`[AUTH] Signin successful for: ${email}`);
-      res.json({ success: true, user: userWithoutPassword });
+      res.json({ success: true, user: resolved });
     } catch (err: any) {
       console.error("[AUTH] Signin database error:", err);
       res.status(500).json({ error: formatDbError(err) });
@@ -846,27 +919,40 @@ async function startServer() {
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
     try {
-      const userRef = db.collection("users").doc(userEmail);
+      const targetUserEmail = await resolveTargetUserEmail(req);
+      const userRef = db.collection("users").doc(targetUserEmail);
       const userDoc = await userRef.get();
       if (!userDoc.exists) {
         return res.status(404).json({ error: "User profile not found." });
       }
 
       const updates: any = {};
-      if (fullName !== undefined) updates.fullName = fullName;
+      if (fullName !== undefined) {
+        if (targetUserEmail === userEmail) {
+          updates.fullName = fullName;
+        } else {
+          // Team member updating their OWN full name
+          await db.collection("users").doc(userEmail).update({ fullName });
+        }
+      }
       if (workspaceName !== undefined) updates.workspaceName = workspaceName;
       if (req.body.workspaces !== undefined) updates.workspaces = req.body.workspaces;
 
-      await userRef.update(updates);
-
-      // Fetch the updated doc and store in session
-      const updatedDoc = await userRef.get();
-      const updatedData = updatedDoc.data();
-      if (updatedData) {
-        const { password, ...userWithoutPassword } = updatedData;
-        req.session.user = userWithoutPassword;
-        return res.json({ success: true, user: userWithoutPassword });
+      if (Object.keys(updates).length > 0) {
+        await userRef.update(updates);
       }
+
+      // Reload the current logged-in user profile with workspace resolution
+      const currentLoggedInRef = db.collection("users").doc(userEmail);
+      const currentLoggedInDoc = await currentLoggedInRef.get();
+      const currentLoggedInData = currentLoggedInDoc.data();
+      if (currentLoggedInData) {
+        const { password, ...userWithoutPassword } = currentLoggedInData;
+        const resolved = await resolveUserSession({ email: userEmail, ...userWithoutPassword }, db);
+        req.session.user = resolved;
+        return res.json({ success: true, user: resolved });
+      }
+      
       return res.json({ success: true });
     } catch (err: any) {
       console.error("[AUTH] Update settings error:", err);
@@ -876,15 +962,12 @@ async function startServer() {
 
   // --- TEAM MEMBER INVITATIONS & ROSTER MANAGEMENT API ---
   app.get("/api/team/members", async (req, res) => {
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const targetEmail = await resolveTargetUserEmail(req);
 
     try {
-      const userDoc = await db.collection("users").doc(userEmail).get();
+      const userDoc = await db.collection("users").doc(targetEmail).get();
       if (userDoc.exists) {
         const data = userDoc.data();
         const team = data?.teamMembers || [];
@@ -1055,7 +1138,7 @@ async function startServer() {
       const hashedPassword = await bcrypt.hash(password, 10);
 
       // Create user
-      const userData = {
+      const userData: any = {
         email: email.toLowerCase(),
         password: hashedPassword,
         fullName: fullName || inviteData.name || email.split('@')[0],
@@ -1063,6 +1146,7 @@ async function startServer() {
         role: role || inviteData.role || "member",
         assignedPages: assignedPages || inviteData.assignedPages || [],
         invited: true,
+        inviterEmail: inviteData.inviterEmail || "",
         createdAt: new Date().toISOString()
       };
 
@@ -1079,8 +1163,8 @@ async function startServer() {
       if (inviterEmail) {
         const inviterDoc = await db.collection("users").doc(inviterEmail).get();
         if (inviterDoc.exists) {
-          const inviterData = inviterDoc.data();
-          const team = inviterData.teamMembers || [];
+          const inviterDataObj = inviterDoc.data();
+          const team = inviterDataObj?.teamMembers || [];
           const idx = team.findIndex((m: any) => m.email.toLowerCase() === email.toLowerCase());
           if (idx > -1) {
             team[idx].status = "active";
@@ -1092,9 +1176,10 @@ async function startServer() {
 
       // Login the user in session
       const { password: _, ...userWithoutPassword } = userData;
-      req.session.user = userWithoutPassword;
+      const resolved = await resolveUserSession(userWithoutPassword, db);
+      req.session.user = resolved;
 
-      res.json({ success: true, user: userWithoutPassword });
+      res.json({ success: true, user: resolved });
     } catch (err: any) {
       console.error("[Verify and Register Error]:", err);
       res.status(500).json({ error: "Register process error: " + err.message });
@@ -2485,16 +2570,13 @@ async function startServer() {
       }
     } else {
       if (selectedIds.includes(pageId)) {
-        return res.status(400).json({ error: "Bhai, ek dafa page ko trial k liye active kar liya to phir us ko remove karne ka option nahi hota." });
+        return res.status(400).json({ error: "Once a page has been activated for the trial, it cannot be removed." });
       }
       selectedIds = selectedIds.filter((id: string) => id !== pageId);
     }
 
     // A. Update in user document directly
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     if (userEmail) {
       try {
@@ -2542,10 +2624,7 @@ async function startServer() {
     }
 
     // A. Update in user document directly
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     if (userEmail) {
       try {
@@ -2582,10 +2661,7 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     try {
       const userRef = db.collection("users").doc(userEmail);
@@ -2662,10 +2738,7 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     try {
       const fbData = await getFacebookData(req);
@@ -2737,10 +2810,7 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     try {
       const userRef = db.collection("users").doc(userEmail);
@@ -2796,10 +2866,7 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     try {
       const userRef = db.collection("users").doc(userEmail);
@@ -2918,10 +2985,7 @@ async function startServer() {
   }
 
   async function getOrCreateSimulatedConversations(db: any, req: any, pageId: string) {
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await resolveTargetUserEmail(req);
 
     try {
       const simColRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
@@ -3163,7 +3227,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
           console.error("FB Reply Fallback Error:", JSON.stringify(fbFallbackError, null, 2));
           
           return res.status(500).json({
-            error: "Facebook 24-Hour limit check failed. (Aap 24 gantay k bad user ko direct reply nahi bhej saktay, jab tk k standard 'HUMAN_AGENT' or 'pages_messaging' Advanced permission allow na ho and and receiver apke Meta App me role/tester registered ho).",
+            error: "Facebook 24-Hour limit check failed. You cannot send a direct message reply after 24 hours has elapsed unless the standard 'HUMAN_AGENT' or 'pages_messaging' Advanced access tier has been approved on your Meta app, and the recipient is registered as a team developer/tester role.",
             details: fbFallbackError
           });
         }
@@ -3172,7 +3236,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
       // 2. Friendly explain other bugs
       let friendlyError = "Failed to send message.";
       if (fbErrorCode === 10 || fbErrorMessage.includes("permission") || fbErrorMessage.includes("tester")) {
-        friendlyError = "Permission Check: Aapka Facebook developer app abi Development mode me hai, isliye messaging sirf registered App developers ya testers k liye chalegi. Ya phr 'pages_messaging' Advanced permission allow nahi ha.";
+        friendlyError = "Permission Error: Your Facebook developer app is in development mode. Messaging will only function for registered developers or tester accounts, unless 'pages_messaging' Advanced access has been approved.";
       } else if (fbErrorMessage) {
         friendlyError = fbErrorMessage;
       }
