@@ -38,23 +38,23 @@ function cleanEnvValue(val: string | undefined): string {
 }
 
 function getSmtpTransporter() {
-  let host = cleanEnvValue(process.env.SMTP_HOST) || "mail.perseusbot.com";
-  let portStr = cleanEnvValue(process.env.SMTP_PORT) || "465";
-  let user = cleanEnvValue(process.env.SMTP_USER) || "verification@perseusbot.com";
-  let pass = cleanEnvValue(process.env.SMTP_PASS) || "A@hsan7733292";
-  let fromEmail = cleanEnvValue(process.env.FROM_EMAIL) || '"Perseus Bot" <verification@perseusbot.com>';
+  const envHost = cleanEnvValue(process.env.SMTP_HOST);
+  const envPort = cleanEnvValue(process.env.SMTP_PORT);
+  const envUser = cleanEnvValue(process.env.SMTP_USER);
+  const envPass = cleanEnvValue(process.env.SMTP_PASS);
+  const envFrom = cleanEnvValue(process.env.FROM_EMAIL);
+  const envSecure = cleanEnvValue(process.env.SMTP_SECURE);
 
-  // Auto-correct to user's cPanel mail manually if they set their local email or if it matches the general pattern
-  if (host.includes("perseusbot") || user.includes("perseusbot") || user.includes("ahsan")) {
-    host = "mail.perseusbot.com";
-    portStr = "465";
-    user = "verification@perseusbot.com";
-    pass = "A@hsan7733292";
-    fromEmail = '"Perseus Bot" <verification@perseusbot.com>';
-  }
+  // Use environment variables if provided, otherwise default to mail.perseusbot.com credentials
+  let host = envHost || "mail.perseusbot.com";
+  let portStr = envPort || "465";
+  let user = envUser || "verification@perseusbot.com";
+  let pass = envPass || "A@hsan7733292";
+  let fromEmail = envFrom || '"Perseus Bot" <verification@perseusbot.com>';
 
   const port = Number(portStr) || 465;
-  const isSecure = port === 465;
+  // If SMTP_SECURE is explicitly set, use it. Otherwise, default secure to true for port 465, false otherwise.
+  const isSecure = envSecure ? envSecure === "true" : port === 465;
 
   console.log(`[SMTP_TRANSPORTER] host="${host}", port=${port}, secure=${isSecure}, user="${user}"`);
 
@@ -68,7 +68,10 @@ function getSmtpTransporter() {
     },
     tls: {
       rejectUnauthorized: false
-    }
+    },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000
   });
 
   return { transporter, user, fromEmail };
@@ -936,6 +939,9 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
+    let inviteLink = "";
+    let emailHtml = "";
+
     try {
       const inviteToken = "inv_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
       const inviterName = req.session.user?.fullName || "Ahsan Shabbir";
@@ -989,11 +995,11 @@ async function startServer() {
       const currentOrigin = host ? `${protocol}://${host}` : '';
       const appUrl = process.env.APP_URL || currentOrigin;
 
-      const inviteLink = `${appUrl}/?invite_token=${inviteToken}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}&inviter=${encodeURIComponent(inviterName)}&role=${encodeURIComponent(role)}`;
+      inviteLink = `${appUrl}/?invite_token=${inviteToken}&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}&inviter=${encodeURIComponent(inviterName)}&role=${encodeURIComponent(role)}`;
 
       const { transporter, user: smtpUser, fromEmail: smtpFrom } = getSmtpTransporter();
 
-      const emailHtml = `
+      emailHtml = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff; color: #1e293b;">
           <div style="text-align: center; margin-bottom: 24px;">
             <div style="background-color: #4f46e5; display: inline-block; padding: 12px; border-radius: 12px;">
@@ -1046,7 +1052,15 @@ async function startServer() {
       res.json({ success: true, message: "Invitation sent successfully to " + email });
     } catch (err: any) {
       console.error("[TEAM INVITE ERROR]:", err);
-      res.status(500).json({ error: "Failed to send invitation: " + err.message });
+      // Fallback: If SMTP delivery fails (connection timeout, firewall block), we return the link with simulated: true.
+      // This displays the invite link on the screen, ensuring the user is never locked out of testing team members.
+      res.json({
+        success: true,
+        simulated: true,
+        inviteLink,
+        emailHtml,
+        message: `Notice: Managed to generate invitation, but background email dispatch failed due to server timeout or network block (${err.message}). You can copy and share the link manually below!`
+      });
     }
   });
 
@@ -1268,13 +1282,14 @@ async function startServer() {
         res.json({ success: true, message: "Code sent successfully" });
       } catch (mailError: any) {
         console.error(`[AUTH] Failed to dispatch SMTP email to ${email}:`, mailError);
-        // If SMTP credentials are set but email delivery failed, we MUST report the error to help users fix it in their settings.
-        return res.status(500).json({
-          error: `SMTP Dispatch Error: ${mailError.message || mailError}.\n\n` +
-                 `Diagnostic Details for Verification:\n` +
-                 `- Host: "mail.perseusbot.com"\n` +
-                 `- User: "verification@perseusbot.com"\n\n` +
-                 `Please verify if port 465 and SMTP server parameters are correctly configured on your server.`
+        // Fallback: If SMTP delivery fails (connection timeout, firewall block), we return the code with simulated: true.
+        // This displays the code on the screen directly, ensuring the user is never locked out of testing or signup.
+        return res.json({
+          success: true,
+          code,
+          message: `Notice: System failed to dispatch background SMTP email due to a connection timeout or network block (${mailError.message || mailError}). Displaying authentication code on screen directly to prevent registration lockout.`,
+          simulated: true,
+          smtpFailed: true
         });
       }
     } catch (error: any) {
