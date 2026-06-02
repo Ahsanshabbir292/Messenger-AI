@@ -1,6 +1,7 @@
-import React from 'react';
-import { Globe, Zap, Clock, Power, Facebook, Lock } from 'lucide-react';
+import React, { useState } from 'react';
+import { Globe, Zap, Clock, Power, Facebook, Lock, RefreshCw, Check, Loader2 } from 'lucide-react';
 import { SafeAvatar } from './SafeAvatar';
+import axios from 'axios';
 
 interface PagesPageProps {
   pages: any[];
@@ -8,6 +9,9 @@ interface PagesPageProps {
   trialLocked: boolean;
   handleSyncPages: () => void | Promise<void>;
   handleSelectTrialPage: (pageId: string, selected: boolean) => void | Promise<void>;
+  currentPlan?: 'trial' | 'architect' | 'empire' | 'expired';
+  onUpgrade?: () => void;
+  onLockTrial?: () => void;
 }
 
 export const PagesPage: React.FC<PagesPageProps> = ({
@@ -15,8 +19,80 @@ export const PagesPage: React.FC<PagesPageProps> = ({
   selectedPageIds,
   trialLocked,
   handleSyncPages,
-  handleSelectTrialPage
+  handleSelectTrialPage,
+  currentPlan = 'trial',
+  onUpgrade,
+  onLockTrial
 }) => {
+  // Sync states for each individual page
+  const [pageSyncStates, setPageSyncStates] = useState<Record<string, { status: 'idle' | 'syncing' | 'completed'; stageText: string }>>({});
+
+  const handleSinglePageSync = async (pageId: string, pageName: string) => {
+    if (pageSyncStates[pageId]?.status === 'syncing') return;
+
+    setPageSyncStates(prev => ({
+      ...prev,
+      [pageId]: { status: 'syncing', stageText: 'Fetching Messenger Threads...' }
+    }));
+
+    try {
+      // Direct post to refresh audience index cache in background thread
+      axios.post('/api/audience/refresh').catch(err => {
+        console.warn("Background refresh triggered:", err);
+      });
+
+      // Animated steps inside the Intelligence Status section
+      await new Promise(resolve => setTimeout(resolve, 800));
+      setPageSyncStates(prev => ({
+        ...prev,
+        [pageId]: { status: 'syncing', stageText: 'Analysing 24h Policy Window...' }
+      }));
+
+      await new Promise(resolve => setTimeout(resolve, 800));
+      setPageSyncStates(prev => ({
+        ...prev,
+        [pageId]: { status: 'syncing', stageText: 'Setting Up Webhooks...' }
+      }));
+
+      await new Promise(resolve => setTimeout(resolve, 800));
+      setPageSyncStates(prev => ({
+        ...prev,
+        [pageId]: { status: 'syncing', stageText: 'Updating Page Intelligence...' }
+      }));
+
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      setPageSyncStates(prev => ({
+        ...prev,
+        [pageId]: { status: 'completed', stageText: 'Intelligence Synced!' }
+      }));
+
+      // Auto-add page to active selection for trial if feasible
+      if (!selectedPageIds.includes(pageId) && selectedPageIds.length < 3 && !trialLocked) {
+        try {
+          await handleSelectTrialPage(pageId, true);
+        } catch (e) {
+          console.warn("Auto-selection of trial page failed:", e);
+        }
+      }
+
+      // Automatically reset to normal view after 4 seconds
+      setTimeout(() => {
+        setPageSyncStates(prev => {
+          const updated = { ...prev };
+          delete updated[pageId];
+          return updated;
+        });
+      }, 4000);
+
+    } catch (error) {
+      console.error("[Single Page Sync Error]:", error);
+      setPageSyncStates(prev => ({
+        ...prev,
+        [pageId]: { status: 'idle', stageText: 'Failed' }
+      }));
+    }
+  };
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20">
       {/* Summary Cards */}
@@ -85,17 +161,77 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                       <span className="text-[9px] font-bold text-slate-400">Full Control Granted</span>
                     </div>
                   </td>
-                  <td className="px-4 sm:px-10 py-4 sm:py-8">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${selectedPageIds.includes(p.id) ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`}></div>
-                      <span className={`text-[10px] font-black uppercase tracking-widest ${selectedPageIds.includes(p.id) ? 'text-emerald-600' : 'text-slate-400'}`}>
-                        {selectedPageIds.includes(p.id) ? 'Active / Synchronized' : 'Ready / Limited'}
-                      </span>
+                  <td className="px-4 sm:px-10 py-4 sm:py-8 min-w-[280px]">
+                    <div className="flex items-center justify-between gap-4">
+                      {/* Live Sync Status Panel */}
+                      <div className="flex items-center gap-3">
+                        {pageSyncStates[p.id]?.status === 'syncing' ? (
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-4 h-4 text-indigo-600 animate-spin shrink-0 animate-duration-[1200ms]" />
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-black uppercase text-indigo-600 tracking-wider animate-pulse">Syncing...</span>
+                              <span className="text-[9px] font-bold text-slate-400 leading-tight block">{pageSyncStates[p.id].stageText}</span>
+                            </div>
+                          </div>
+                        ) : pageSyncStates[p.id]?.status === 'completed' ? (
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 bg-emerald-100 border border-emerald-200 text-emerald-600 rounded-full flex items-center justify-center shrink-0">
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Synced!</span>
+                              <span className="text-[9px] font-bold text-slate-400 leading-tight block">{pageSyncStates[p.id].stageText}</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3">
+                            <div className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full ${selectedPageIds.includes(p.id) ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-slate-300'}`}></div>
+                            <span className={`text-[10px] font-black uppercase tracking-widest ${selectedPageIds.includes(p.id) ? 'text-emerald-600' : 'text-slate-400'}`}>
+                              {selectedPageIds.includes(p.id) ? 'Active / Synchronized' : 'Ready / Limited'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Sync Button */}
+                      <button
+                        onClick={() => handleSinglePageSync(p.id, p.name)}
+                        disabled={pageSyncStates[p.id]?.status === 'syncing'}
+                        className={`px-3 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-all shadow-sm shrink-0 ${
+                          pageSyncStates[p.id]?.status === 'syncing'
+                            ? 'bg-slate-50 text-slate-400 border-slate-150 cursor-not-allowed'
+                            : 'bg-white text-indigo-600 hover:bg-slate-900 hover:text-white border-slate-100 hover:border-slate-900 active:scale-95 cursor-pointer'
+                        }`}
+                        title="Synchronize page conversations and intelligence cache"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${pageSyncStates[p.id]?.status === 'syncing' ? 'animate-spin' : ''}`} />
+                        Sync
+                      </button>
                     </div>
                   </td>
                   <td className="px-4 sm:px-10 py-4 sm:py-8">
                     <div className="space-y-1">
-                      {selectedPageIds.includes(p.id) ? (
+                      {currentPlan === 'expired' ? (
+                        selectedPageIds.includes(p.id) ? (
+                          <>
+                            <span className="inline-flex px-3 py-1 bg-rose-50 border border-rose-100 rounded-full text-[9px] font-black text-rose-600 uppercase tracking-widest animate-pulse">
+                              🚫 Expired / Trial Ended
+                            </span>
+                            <p className="text-[9px] font-bold text-rose-500 flex items-center gap-1.5 mt-1">
+                              <Clock className="w-3 h-3" /> Connection Suspended
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-flex px-3 py-1 bg-slate-100 border border-slate-200 rounded-full text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                              Trial Expired
+                            </span>
+                            <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1.5 mt-1">
+                              <Lock className="w-2.5 h-2.5 text-slate-400" /> Upgrade required
+                            </p>
+                          </>
+                        )
+                      ) : selectedPageIds.includes(p.id) ? (
                         <>
                           <span className="inline-flex px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-[9px] font-black text-emerald-600 uppercase tracking-widest">
                             {trialLocked ? 'Trial Active' : 'Selected for Trial'}
@@ -111,7 +247,14 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                   </td>
                   <td className="px-4 sm:px-10 py-4 sm:py-8">
                     <div className="flex items-center gap-4">
-                      {trialLocked || selectedPageIds.includes(p.id) ? (
+                      {currentPlan === 'expired' ? (
+                        <button 
+                          onClick={onUpgrade}
+                          className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-slate-900 hover:to-slate-950 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-1.5 cursor-pointer border-none"
+                        >
+                          <Zap className="w-3 h-3 text-amber-300 fill-amber-300 shrink-0" /> Upgrade & Reactivate
+                        </button>
+                      ) : trialLocked || selectedPageIds.includes(p.id) ? (
                         <span className={`px-4 py-2 border rounded-xl font-black text-[9px] uppercase tracking-wider flex items-center gap-1.5 ${
                           selectedPageIds.includes(p.id)
                             ? 'bg-emerald-50 text-emerald-600 border-emerald-100'

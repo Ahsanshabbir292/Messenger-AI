@@ -5,6 +5,7 @@ interface MemberPage {
   id: string;
   name: string;
   subscriberCount?: number;
+  eligibleCount?: number;
   picture?: {
     data?: {
       url?: string;
@@ -26,6 +27,7 @@ interface BroadcastSingleProps {
     messageTag: string;
     scheduleDate: string;
     scheduleTime: string;
+    targetAudience: 'all' | 'eligible';
   }) => void;
   isSubmitting: boolean;
 }
@@ -38,6 +40,7 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
   isSubmitting
 }) => {
   const [pageId, setPageId] = useState<string>('');
+  const [targetAudience, setTargetAudience] = useState<'all' | 'eligible'>('all');
   const [sendTo, setSendTo] = useState<'all' | 'group'>('all');
   const [groupId, setGroupId] = useState<string>('g1');
   const [msgType, setMsgType] = useState<'text' | 'image' | 'both'>('text');
@@ -58,6 +61,10 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
   // Recipient subscriber size mapping for pages derived from actual data
   const getPageSubscriberCount = (id: string) => {
     const page = pages.find(p => p.id === id);
+    if (!page) return 0;
+    if (targetAudience === 'eligible') {
+      return page.eligibleCount || 0;
+    }
     return page?.subscriberCount || 0;
   };
 
@@ -140,7 +147,8 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
       groupId,
       messageTag,
       scheduleDate: isScheduleChecked ? scheduleDate : '',
-      scheduleTime: isScheduleChecked ? scheduleTime : ''
+      scheduleTime: isScheduleChecked ? scheduleTime : '',
+      targetAudience
     });
   };
 
@@ -179,13 +187,23 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {pages.map((p) => {
                 const isSelected = p.id === pageId;
+                const hasNoContacts = (p.subscriberCount || 0) === 0;
+
                 return (
                   <div
                     key={p.id}
-                    onClick={() => setPageId(p.id)}
+                    onClick={() => {
+                      if (hasNoContacts) {
+                        alert(`Page "${p.name}" has 0 subscribers in its chat inbox logs. Broadcasts can only be dispatched to pages with active message histories.`);
+                        return;
+                      }
+                      setPageId(p.id);
+                    }}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3 ${
-                      isSelected 
-                        ? 'border-indigo-600 bg-indigo-50/10' 
+                      hasNoContacts
+                        ? 'opacity-65 bg-slate-50 border-slate-100 cursor-not-allowed'
+                        : isSelected 
+                        ? 'border-indigo-600 bg-indigo-50/10 shadow-sm' 
                         : 'border-slate-100 hover:border-slate-150 bg-slate-50'
                     }`}
                   >
@@ -198,9 +216,6 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
                     </div>
                     <div className="min-w-0 text-left">
                       <p className="text-xs font-black text-slate-800 truncate leading-tight">{p.name}</p>
-                      <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
-                        {getPageSubscriberCount(p.id).toLocaleString()} Contacts
-                      </p>
                     </div>
                   </div>
                 );
@@ -208,6 +223,8 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
             </div>
           )}
         </div>
+
+
 
         {/* Step 3: Message Type Selector */}
         <div className="bg-white p-6 sm:p-8 rounded-[2rem] border border-slate-150 shadow-sm space-y-4">

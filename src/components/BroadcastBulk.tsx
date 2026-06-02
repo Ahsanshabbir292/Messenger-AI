@@ -5,6 +5,7 @@ interface MemberPage {
   id: string;
   name: string;
   subscriberCount?: number;
+  eligibleCount?: number;
   picture?: {
     data?: {
       url?: string;
@@ -26,6 +27,7 @@ interface BroadcastBulkProps {
     messageTag: string;
     scheduleDate: string;
     scheduleTime: string;
+    targetAudience: 'all' | 'eligible';
   }) => void;
   isSubmitting: boolean;
 }
@@ -38,6 +40,7 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
   isSubmitting
 }) => {
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const [targetAudience, setTargetAudience] = useState<'all' | 'eligible'>('all');
   const [sendTo, setSendTo] = useState<'all' | 'group'>('all');
   const [groupId, setGroupId] = useState<string>('g1');
   const [msgType, setMsgType] = useState<'text' | 'image' | 'both'>('text');
@@ -59,6 +62,13 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
     return page?.subscriberCount || 0;
   };
 
+  const getPageRecipientCount = (page: MemberPage) => {
+    if (targetAudience === 'eligible') {
+      return page.eligibleCount || 0;
+    }
+    return page.subscriberCount || 0;
+  };
+
   const togglePageSelection = (id: string) => {
     if (selectedPageIds.includes(id)) {
       setSelectedPageIds(prev => prev.filter(pId => pId !== id));
@@ -68,17 +78,19 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
   };
 
   const selectAllPages = () => {
-    if (selectedPageIds.length === pages.length) {
+    const validPages = pages.filter(p => (p.subscriberCount || 0) > 0);
+    if (selectedPageIds.length === validPages.length) {
       setSelectedPageIds([]);
     } else {
-      setSelectedPageIds(pages.map(p => p.id));
+      setSelectedPageIds(validPages.map(p => p.id));
     }
   };
 
   // Compute aggregate total recipients based on actual data
   const getCombinedRecipients = () => {
     return selectedPageIds.reduce((sum, id) => {
-      return sum + getPageSubscriberCount(id);
+      const p = pages.find(page => page.id === id);
+      return sum + (p ? getPageRecipientCount(p) : 0);
     }, 0);
   };
 
@@ -147,7 +159,8 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
       groupId,
       messageTag,
       scheduleDate: isScheduleChecked ? scheduleDate : '',
-      scheduleTime: isScheduleChecked ? scheduleTime : ''
+      scheduleTime: isScheduleChecked ? scheduleTime : '',
+      targetAudience
     });
   };
 
@@ -198,36 +211,46 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {pages.map((p) => {
                 const isSelected = selectedPageIds.includes(p.id);
+                const subCount = p.subscriberCount || 0;
+                const hasNoContacts = subCount === 0;
+
                 return (
                   <div
                     key={p.id}
-                    onClick={() => togglePageSelection(p.id)}
-                    className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center justify-between gap-3 ${
-                      isSelected 
-                        ? 'border-indigo-600 bg-indigo-50/10' 
+                    onClick={() => {
+                      if (hasNoContacts) {
+                        alert(`Page "${p.name}" has 0 subscribers in its chat inbox logs. Broadcasts can only be dispatched to pages with active message histories.`);
+                        return;
+                      }
+                      togglePageSelection(p.id);
+                    }}
+                    className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3 ${
+                      hasNoContacts
+                        ? 'opacity-65 bg-slate-50 border-slate-100 cursor-not-allowed'
+                        : isSelected 
+                        ? 'border-indigo-600 bg-indigo-50/10 shadow-sm' 
                         : 'border-slate-100 hover:border-slate-150 bg-slate-50'
                     }`}
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-200 border shrink-0 flex items-center justify-center font-bold text-slate-500 uppercase">
-                        {p.picture?.data?.url ? (
-                          <img src={p.picture.data.url} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                        ) : (
-                          p.name.substring(0, 2)
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-black text-slate-800 truncate leading-tight">{p.name}</p>
-                        <p className="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-wider">
-                          {getPageSubscriberCount(p.id).toLocaleString()} Subs
-                        </p>
-                      </div>
+                    {/* Checkbox */}
+                    <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
+                      hasNoContacts ? 'border-slate-200 bg-slate-100' : isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
+                    }`}>
+                      {!hasNoContacts && isSelected && <Check className="w-3.5 h-3.5 stroke-[4px]" />}
                     </div>
 
-                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                      isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
-                    }`}>
-                      {isSelected && <Check className="w-3.5 h-3.5 stroke-[4px]" />}
+                    {/* Avatar */}
+                    <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-200 border shrink-0 flex items-center justify-center font-bold text-slate-500 uppercase">
+                      {p.picture?.data?.url ? (
+                        <img src={p.picture.data.url} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                        p.name.substring(0, 2)
+                      )}
+                    </div>
+
+                    {/* Page Name */}
+                    <div className="min-w-0 text-left">
+                      <p className="text-xs font-black text-slate-800 truncate leading-tight">{p.name}</p>
                     </div>
                   </div>
                 );
@@ -235,6 +258,8 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
             </div>
           )}
         </div>
+
+
 
         {/* Step 3: Message Sub-type */}
         <div className="bg-white p-6 sm:p-8 rounded-[2rem] border border-slate-150 shadow-sm space-y-4">

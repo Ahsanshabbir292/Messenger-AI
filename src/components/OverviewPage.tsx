@@ -2,7 +2,7 @@ import React from 'react';
 import { 
   Layers, MessageSquare, MessageCircle, CircleDollarSign, 
   Megaphone, Sparkles, Zap, Clock, ChevronRight, Facebook, 
-  RefreshCw, Globe, CreditCard, Users, Settings 
+  RefreshCw, Globe, CreditCard, Users, Settings, AlertCircle
 } from 'lucide-react';
 import { SafeAvatar } from './SafeAvatar';
 
@@ -11,7 +11,7 @@ interface OverviewPageProps {
   broadcastsHistory: any[];
   workspaceCredits: Record<string, number>;
   currentWorkspaceId: string;
-  currentPlan: 'trial' | 'architect' | 'empire';
+  currentPlan: 'trial' | 'architect' | 'empire' | 'expired';
   userProfile: any;
   appUser: any;
   syncing: boolean;
@@ -19,6 +19,8 @@ interface OverviewPageProps {
   setActiveTab: (tab: string) => void;
   setBillingSubView: (view: 'list' | 'buy' | 'history') => void;
   addToast: (message: string, type?: 'success' | 'err' | 'info') => void;
+  setCurrentPlan?: (plan: 'trial' | 'architect' | 'empire' | 'expired') => void;
+  onUpgradePlan?: () => void;
 }
 
 export const OverviewPage: React.FC<OverviewPageProps> = ({
@@ -34,9 +36,12 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
   setActiveTab,
   setBillingSubView,
   addToast,
+  setCurrentPlan,
+  onUpgradePlan,
 }) => {
-  const totalBroadcastsSent = broadcastsHistory.reduce((acc: number, curr: any) => acc + (curr.successCount || 0), 0);
-  const remainingTrialCredits = Math.max(0, 5000 - totalBroadcastsSent);
+  const totalMessagesSent = broadcastsHistory.reduce((acc: number, curr: any) => acc + (curr.successCount || 0), 0);
+  const remainingTrialCredits = Math.max(0, 5000 - totalMessagesSent);
+  const totalCampaignsRun = broadcastsHistory.length;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
@@ -106,15 +111,15 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           </button>
         </div>
 
-        {/* Total Broadcast Sent */}
+        {/* Total Broadcasts */}
         <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
           <div className="p-4 sm:p-5 flex items-center gap-4 flex-1">
             <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#FFF1F2] rounded-xl flex items-center justify-center shrink-0">
               <Megaphone className="w-5 h-5 sm:w-6 sm:h-6 text-[#F43F5E]" />
             </div>
             <div>
-              <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Total Broadcast Sent</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{totalBroadcastsSent.toLocaleString()}</h4>
+              <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Total Broadcasts</p>
+              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{totalCampaignsRun.toLocaleString()}</h4>
             </div>
           </div>
           <button onClick={() => setActiveTab('broadcast')} className="px-4 sm:px-5 py-3 bg-slate-50/50 border-t border-slate-100 text-indigo-600 text-[10px] sm:text-xs font-semibold flex items-center gap-1 hover:bg-slate-50 transition-colors">
@@ -143,57 +148,115 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
         {/* Left Area: Page Status */}
         <div className="lg:col-span-8 space-y-6 sm:space-y-8">
           <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden h-fit">
-            <div className="p-5 sm:p-6 md:p-8 border-b border-slate-50">
+            <div className="p-5 sm:p-6 md:p-8 border-b border-slate-50 flex items-center justify-between gap-4">
               <h3 className="text-base sm:text-lg font-bold text-slate-900">Page Status</h3>
-            </div>
-            <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6">
-              <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 ${
-                currentPlan === 'empire' ? 'bg-purple-50 text-purple-600' :
-                currentPlan === 'architect' ? 'bg-emerald-50 text-emerald-600' :
-                'bg-indigo-50 text-indigo-600'
-              }`}>
-                {currentPlan === 'empire' ? <Sparkles className="w-6 sm:w-7 sm:h-7" /> :
-                 currentPlan === 'architect' ? <Zap className="w-6 sm:w-7 sm:h-7" /> :
-                 <Clock className="w-6 sm:w-7 sm:h-7" />}
-              </div>
-              <div className="flex-1">
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
-                  <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
-                    {currentPlan === 'empire' ? 'Empire Plan' :
-                     currentPlan === 'architect' ? 'Architect Plan' :
-                     'Free Trial'}
-                  </h4>
-                  <span className={`inline-block self-center text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                    currentPlan === 'empire' ? 'bg-purple-100 text-purple-700' :
-                    currentPlan === 'architect' ? 'bg-emerald-100 text-emerald-700' :
-                    'bg-[#E9EFFF] text-[#4F46E5]'
-                  }`}>
-                    {currentPlan === 'empire' ? 'Premium Enterprise' :
-                     currentPlan === 'architect' ? 'Active Subscription' :
-                     '3 pages on trial'}
-                  </span>
+              {setCurrentPlan && (
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
+                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Preview State:</span>
+                  <select
+                    value={currentPlan}
+                    onChange={(e) => {
+                      setCurrentPlan(e.target.value as any);
+                      addToast(`Switched page status preview to: ${e.target.value.toUpperCase()}`, "info");
+                    }}
+                    className="text-[10px] font-black text-slate-700 bg-transparent border-none outline-none cursor-pointer focus:ring-0 p-0"
+                  >
+                    <option value="trial">Free Trial</option>
+                    <option value="architect">Architect Plan</option>
+                    <option value="empire">Empire Plan</option>
+                    <option value="expired">Expired State</option>
+                  </select>
                 </div>
-                <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
-                  {currentPlan === 'empire' ? (
-                    <span>You are currently on the supreme <strong className="text-slate-800">Empire Plan</strong> ($199/mo). Unlimited Facebook pages authorized.</span>
-                  ) : currentPlan === 'architect' ? (
-                    <span>You have upgraded to the <strong className="text-slate-800">Architect Plan</strong> ($49/mo). 10 Synced Pages authorized under your subscription.</span>
-                  ) : (
-                    <span>Your pages have up to <span className="font-bold text-slate-700">3 days</span> remaining in trial.</span>
-                  )}
-                </p>
-                <button 
-                  onClick={() => {
-                    setActiveTab('billing');
-                    setBillingSubView('buy');
-                    addToast("Navigated to secure prepaid billing gateway", "info");
-                  }}
-                  className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-700 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg shadow-blue-100 cursor-pointer border-none"
-                >
-                  <Sparkles className="w-4 h-4" /> {currentPlan === 'trial' ? 'Upgrade Now' : 'Change Plan'}
-                </button>
-              </div>
+              )}
             </div>
+            
+            {currentPlan === 'expired' ? (
+              <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6 animate-in fade-in zoom-in-95 duration-500">
+                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-rose-50 border border-rose-100 text-rose-500 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-6 sm:w-7 sm:h-7 stroke-[2]" />
+                </div>
+                <div className="flex-1 text-center sm:text-left">
+                  <div className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 sm:gap-3 mb-2">
+                    <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
+                      No Active Pages
+                    </h4>
+                    <span className="inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider bg-red-100 text-red-600 border border-red-200">
+                      Expired
+                    </span>
+                  </div>
+                  <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
+                    All page trials/subscriptions have expired. Subscribe to regain access to your inbox.
+                  </p>
+                  <button 
+                    onClick={() => {
+                      if (onUpgradePlan) {
+                        onUpgradePlan();
+                      } else {
+                        setActiveTab('billing');
+                        setBillingSubView('buy');
+                        addToast("Opening billing subscriptions setup...", "info");
+                      }
+                    }}
+                    className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-750 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg hover:shadow-blue-200 active:scale-95 cursor-pointer border-none"
+                  >
+                    <Sparkles className="w-4 h-4" /> Subscribe Now
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6">
+                <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 ${
+                  currentPlan === 'empire' ? 'bg-purple-50 text-purple-600' :
+                  currentPlan === 'architect' ? 'bg-emerald-50 text-emerald-600' :
+                  'bg-indigo-50 text-indigo-600'
+                }`}>
+                  {currentPlan === 'empire' ? <Sparkles className="w-6 sm:w-7 sm:h-7" /> :
+                   currentPlan === 'architect' ? <Zap className="w-6 sm:w-7 sm:h-7" /> :
+                   <Clock className="w-6 sm:w-7 sm:h-7" />}
+                </div>
+                <div className="flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
+                    <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
+                      {currentPlan === 'empire' ? 'Empire Plan' :
+                       currentPlan === 'architect' ? 'Architect Plan' :
+                       'Free Trial'}
+                    </h4>
+                    <span className={`inline-block self-center text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                      currentPlan === 'empire' ? 'bg-purple-100 text-purple-700' :
+                      currentPlan === 'architect' ? 'bg-emerald-100 text-emerald-700' :
+                      'bg-[#E9EFFF] text-[#4F46E5]'
+                    }`}>
+                      {currentPlan === 'empire' ? 'Premium Enterprise' :
+                       currentPlan === 'architect' ? 'Active Subscription' :
+                       '3 pages on trial'}
+                    </span>
+                  </div>
+                  <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
+                    {currentPlan === 'empire' ? (
+                      <span>You are currently on the supreme <strong className="text-slate-800">Empire Plan</strong> ($199/mo). Unlimited Facebook pages authorized.</span>
+                    ) : currentPlan === 'architect' ? (
+                      <span>You have upgraded to the <strong className="text-slate-800">Architect Plan</strong> ($49/mo). 10 Synced Pages authorized under your subscription.</span>
+                    ) : (
+                      <span>Your pages have up to <span className="font-bold text-slate-700">3 days</span> remaining in trial.</span>
+                    )}
+                  </p>
+                  <button 
+                    onClick={() => {
+                      if (onUpgradePlan) {
+                        onUpgradePlan();
+                      } else {
+                        setActiveTab('billing');
+                        setBillingSubView('buy');
+                        addToast("Navigated to secure prepaid billing gateway", "info");
+                      }
+                    }}
+                    className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-750 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg shadow-blue-100 cursor-pointer border-none"
+                  >
+                    <Sparkles className="w-4 h-4" /> {currentPlan === 'trial' ? 'Upgrade Now' : 'Change Plan'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

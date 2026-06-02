@@ -2993,18 +2993,26 @@ async function startServer() {
     const data = await getFacebookData(req);
     if (!data) return res.json({ pages: [], selectedPageIds: [], trialLocked: false });
 
-    // Dynamically map pages to use permanent public non-expiring Graph API picture URLs and true subscriber counts
+    // Dynamically map pages to use permanent public non-expiring Graph API picture URLs and true subscriber and eligible counts
     const rawPages = data.pages || [];
     const mappedPages = await Promise.all(
       rawPages.map(async (p: any) => {
         let subscriberCount = 0;
+        let eligibleCount = 0;
         if (p.access_token && p.access_token.startsWith("sim_")) {
           const simAudience = getSimulatedAudienceForPages([p]);
           subscriberCount = simAudience.length;
+          eligibleCount = simAudience.filter((u: any) => u.status === "eligible").length;
         } else if (p.access_token) {
           try {
-            const conversations = await fetchAllPageConversations(p.id, p.access_token, "id");
+            // Include updated_time to calculate eligible counts
+            const conversations = await fetchAllPageConversations(p.id, p.access_token, "participants{name,id},updated_time");
             subscriberCount = conversations.length;
+            eligibleCount = conversations.filter((conv: any) => {
+              const lastActivity = conv.updated_time || new Date().toISOString();
+              const diffHrs = (Date.now() - new Date(lastActivity).getTime()) / (1000 * 60 * 60);
+              return diffHrs <= 24;
+            }).length;
           } catch (err: any) {
             console.warn(`Failed to fetch real conversations count for page ${p.id}:`, err.message);
           }
@@ -3012,7 +3020,8 @@ async function startServer() {
 
         const basePage = {
           ...p,
-          subscriberCount
+          subscriberCount,
+          eligibleCount
         };
 
         if (p.id && /^\d+$/.test(p.id)) {
@@ -3901,7 +3910,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
   });
 
   app.post("/api/facebook/broadcast", upload.single("file"), async (req: any, res) => {
-    const { pageId, message, attachmentType } = req.body;
+    const { pageId, message, attachmentType, targetAudience } = req.body;
     const file = req.file;
 
     const db = await getDb();
@@ -3927,20 +3936,28 @@ Write a realistic, short and natural response expressing your reaction, query, o
         recipients.push({
           id: u.id,
           name: u.name,
-          pictureUrl: u.picture_url
+          pictureUrl: u.picture_url,
+          lastActivity: u.last_activity,
+          status: u.status || "eligible"
         });
       }
     } else {
       // Fetch from real FB Page
       try {
-        const pageConvs = await fetchAllPageConversations(pageId, page.access_token, "participants{name,picture.type(large){url},id}");
+        const pageConvs = await fetchAllPageConversations(pageId, page.access_token, "participants{name,picture.type(large){url},id},updated_time");
         for (const conv of pageConvs) {
           const other = conv.participants?.data?.find((p: any) => p.id !== pageId);
           if (other) {
+            const lastActivity = conv.updated_time || new Date().toISOString();
+            const diffHrs = (Date.now() - new Date(lastActivity).getTime()) / (1000 * 60 * 60);
+            const status = diffHrs <= 24 ? "eligible" : "24h_window";
+
             recipients.push({
               id: other.id,
               name: other.name,
-              pictureUrl: other.picture?.data?.url || `https://graph.facebook.com/${other.id}/picture?type=large`
+              pictureUrl: other.picture?.data?.url || `https://graph.facebook.com/${other.id}/picture?type=large`,
+              lastActivity,
+              status
             });
           }
         }
@@ -3953,36 +3970,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
     // Deduplicate recipients
     const uniqueMap = new Map();
     for (const r of recipients) {
+      if (targetAudience === "eligible" && r.status !== "eligible") {
+        continue;
+      }
       uniqueMap.set(r.id, r);
     }
     recipients = Array.from(uniqueMap.values());
-
-    // Expand to 150 simulated/test contacts so that they can test "unlimited" broadcasting
-    if (!isSimulated && recipients.length < 150) {
-      const pNames = [
-        "Sajid Khan", "Aisha Rehman", "Zainab Malik", "Fatima Shah", "Haris Jamil", 
-        "Kamran Akmal", "Bilal Butt", "Sara Ahmed", "Zain Ul Abideen", "Amna Tariq", 
-        "Usman Ghani", "Hafsa Latif", "Hamza Ali", "Mariam Bibi", "Ali Raza", 
-        "Sana Fatima", "Omer Sheikh", "Nida Khan", "Fahad Mustafa", "Sadia Imam", 
-        "Junaid Khan", "Mahnoor Baloch", "Hassan Nawaz", "Iqra Aziz", "Danish Taimoor",
-        "Ayeza Khan", "Feroze Khan", "Sajal Aly", "Ahad Raza Mir", "Yumna Zaidi",
-        "Wahaj Ali", "Hania Amir", "Bilal Abbas", "Ramsha Khan", "Sheheryar Munawar",
-        "Syra Yousuf", "Asim Azhar", "Momina Mustehsan", "Atif Aslam", "Rahat Fateh",
-        "Ali Zafar", "Aima Baig", "Fawad Khan", "Mahira Khan", "Humayun Saeed",
-        "Mehwish Hayat", "Saba Qamar", "Zahid Ahmed", "Minal Khan", "Aiman Khan",
-        "Farhan Saeed", "Urwa Hocane", "Mawra Hocane", "Imran Ashraf", "Sarah Khan",
-        "Falish Khan", "Reema Khan", "Meera Jee", "Shaan Shahid", "Adnan Siddiqui"
-      ];
-      const currentLen = recipients.length;
-      for (let i = currentLen; i < 150; i++) {
-        const name = pNames[i % pNames.length] + (i >= pNames.length ? ` ${Math.floor(i / pNames.length) + 1}` : "");
-        recipients.push({
-          id: `usr_sim_${1000000 + i}`,
-          name,
-          pictureUrl: `https://images.unsplash.com/photo-${1500000000000 + (i * 100000)}?auto=format&fit=crop&w=150&q=80`
-        });
-      }
-    }
 
     if (recipients.length === 0) {
       const broadcastStatusId = `bcast_${Date.now()}`;
@@ -4008,6 +4001,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
       // Emit to socket room to let the client know immediately
       io.to(`page_${pageId}`).emit("broadcast_completed", {
         broadcastId: broadcastStatusId,
+        pageId,
         sentCount: 0,
         successCount: 0,
         failCount: 0,
@@ -4099,7 +4093,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
         const recipientIsSimulated = isSimulated || (recipient.id && recipient.id.startsWith("usr_sim_"));
 
-        if (recipientIsSimulated) {
+        if (recipient.status === "24h_window") {
+          deliverySuccess = false;
+          errorMessage = "Outside 24-hour standard messaging window (Ineligible)";
+          // Sleep briefly to simulate ticking progress
+          await new Promise(resolve => setTimeout(resolve, 80));
+        } else if (recipientIsSimulated) {
           try {
             const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
             const snap = await simDocRef.get();
@@ -4219,6 +4218,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
         // Live emit progression update to client via room page_${pageId}
         io.to(`page_${pageId}`).emit("broadcast_progress", {
           broadcastId,
+          pageId,
           sentCount,
           successCount,
           failCount,
@@ -4253,6 +4253,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
       // Emit complete confirmation
       io.to(`page_${pageId}`).emit("broadcast_completed", {
         broadcastId,
+        pageId,
         sentCount,
         successCount,
         failCount,
@@ -4378,6 +4379,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
               // Fire progression updates so that the BroadcastDetailsView screen receives the live increase immediately!
               io.to(`page_${pageId}`).emit("broadcast_progress", {
                 broadcastId,
+                pageId,
                 sentCount,
                 successCount,
                 failCount,

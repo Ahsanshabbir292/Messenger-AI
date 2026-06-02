@@ -260,7 +260,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const [isSending, setIsSending] = useState(false);
   const [socket, setSocket] = useState<any>(null);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
-  const [currentPlan, setCurrentPlan] = useState<'trial' | 'architect' | 'empire'>(() => {
+  const [currentPlan, setCurrentPlan] = useState<'trial' | 'architect' | 'empire' | 'expired'>(() => {
     const saved = localStorage.getItem('current_plan_v1');
     return (saved as any) || 'trial';
   });
@@ -484,6 +484,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       formData.append("file", data.file);
       formData.append("attachmentType", data.attachmentType);
     }
+    if (data.targetAudience) {
+      formData.append("targetAudience", data.targetAudience);
+    }
 
     try {
       const res = await axios.post("/api/facebook/broadcast", formData, {
@@ -527,6 +530,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
         if (data.file) {
           formData.append("file", data.file);
           formData.append("attachmentType", data.attachmentType);
+        }
+        if (data.targetAudience) {
+          formData.append("targetAudience", data.targetAudience);
         }
         
         try {
@@ -1423,7 +1429,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                 Your current security clearance level (<strong className="text-indigo-650 font-black">{currentActiveRole.toUpperCase()}</strong>) does not permit access to this secure division.
               </p>
               
-              <div className="my-6 p-4 bg-slate-50 rounded-2xl border border-slate-150 text-left space-y-2">
+              <div className="my-6 p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left space-y-2">
                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-wider text-slate-400 border-b border-slate-100 pb-1.5">
                   <span>Division</span>
                   <span>Requires Role</span>
@@ -1472,6 +1478,8 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                   setActiveTab={setActiveTab}
                   setBillingSubView={setBillingSubView}
                   addToast={addToast}
+                  setCurrentPlan={setCurrentPlan}
+                  onUpgradePlan={() => setIsUpgradeModalOpen(true)}
                 />
               )}
 
@@ -1482,6 +1490,8 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               trialLocked={trialLocked}
               handleSyncPages={handleSyncPages}
               handleSelectTrialPage={handleSelectTrialPage}
+              currentPlan={currentPlan}
+              onUpgrade={() => setActiveTab('billing')}
             />
           )}
 
@@ -2240,7 +2250,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                             setConfirmPassword("");
                             setIsChangePasswordModalOpen(true);
                           }}
-                          className="w-full sm:w-auto text-center px-4 py-2.5 sm:px-6 sm:py-3 border border-slate-150 hover:border-[#2563EB] text-slate-800 hover:text-[#2563EB] bg-transparent rounded-lg sm:rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer"
+                          className="w-full sm:w-auto text-center px-4 py-2.5 sm:px-6 sm:py-3 border border-slate-200 hover:border-[#2563EB] text-slate-800 hover:text-[#2563EB] bg-transparent rounded-lg sm:rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer"
                         >
                           Change
                         </button>
@@ -2252,7 +2262,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                         </div>
                         <button 
                           onClick={() => setIsManageSessionsModalOpen(true)}
-                          className="w-full sm:w-auto text-center px-4 py-2.5 sm:px-6 sm:py-3 border border-slate-150 hover:border-[#2563EB] text-slate-800 hover:text-[#2563EB] bg-transparent rounded-lg sm:rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer"
+                          className="w-full sm:w-auto text-center px-4 py-2.5 sm:px-6 sm:py-3 border border-slate-200 hover:border-[#2563EB] text-slate-800 hover:text-[#2563EB] bg-transparent rounded-lg sm:rounded-xl font-bold text-xs sm:text-sm transition-all cursor-pointer"
                         >
                           Manage
                         </button>
@@ -2555,7 +2565,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                       </button>
                       <button 
                         onClick={() => setIsManageSessionsModalOpen(false)}
-                        className="py-3.5 px-6 bg-slate-105 hover:bg-slate-200 text-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all cursor-pointer border-none"
+                        className="py-3.5 px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all cursor-pointer border-none"
                       >
                         Close
                       </button>
@@ -2758,17 +2768,17 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
             });
 
             return (
-              <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 text-left">
+              <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 text-left w-full">
                 
                 {/* 1. Free Trial Active Top Banner */}
-                <div id="trial-active-banner" className="bg-[#E6F7F0]/80 border border-[#D1F2E0] text-[#027A48] px-4 py-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs sm:text-sm font-medium gap-3">
+                <div id="trial-active-banner" className="bg-[#E6F7F0]/85 border border-[#D1F2E0] text-[#027A48] px-4.5 py-3.5 rounded-[1.25rem] flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs sm:text-sm font-semibold gap-3">
                   <div className="flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-[#10B981] fill-[#10B981]" />
                     <span>Free Trial active — <span className="font-bold">3 days</span> remaining</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-4">
-                    <span className="flex items-center gap-1.5 text-slate-600 bg-[#D1F2E0]/40 px-2.5 py-1 rounded-md text-xs border border-emerald-150/40 border-solid font-semibold">
-                      <CreditCard className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+                    <span className="flex items-center gap-1.5 text-slate-600 bg-[#D1F2E0]/45 px-3 py-1 rounded-xl text-xs border border-emerald-200 border-solid font-bold">
+                      <CreditCard className="w-3.5 h-3.5 text-[#10B981] animate-pulse" />
                       <span className="font-extrabold text-[#027A48]">5,000</span> trial credits
                     </span>
                     <button className="text-[#027A48] hover:text-[#025A38] font-black flex items-center gap-1 underline decoration-2 cursor-pointer bg-transparent border-none">
@@ -2780,43 +2790,45 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                 {/* 2. Main Header Section */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div>
-                    <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Broadcasts</h2>
-                    <p className="text-sm text-slate-500 mt-1">Manage and monitor your message campaigns</p>
+                    <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight">Campaign Broadcasts</h2>
+                    <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">Design, dispatch, and track high-impact message campaigns across connected pages</p>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">
                     {/* Live Badge */}
-                    <span id="badge-live" className="px-3 py-1.5 bg-white border border-slate-205 text-slate-700 font-bold text-xs rounded-full flex items-center gap-2 shadow-sm border-solid">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live
+                    <span id="badge-live" className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-full flex items-center gap-2 shadow-sm">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span className="uppercase tracking-wider text-[10px]">Live Monitor</span>
                     </span>
                     
                     {/* Total Badge */}
-                    <span id="badge-total" className="px-3 py-1.5 bg-white border border-slate-205 text-slate-700 font-bold text-xs rounded-full flex items-center gap-1.5 shadow-sm border-solid">
-                      <Radio className="w-3.5 h-3.5 text-slate-400" />
-                      {broadcastsHistory.length} total
+                    <span id="badge-total" className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-full flex items-center gap-1.5 shadow-sm">
+                      <Radio className="w-3.5 h-3.5 text-indigo-500" />
+                      <span className="uppercase tracking-wider text-[10px]">{broadcastsHistory.length} Total</span>
                     </span>
 
                     {/* New Broadcast Button */}
                     <button
                       onClick={() => setBroadcastView('choice')}
-                      className="bg-[#155EEF] hover:bg-[#124EC3] text-white px-4 py-2.5 rounded-lg font-bold text-xs sm:text-sm shadow-sm flex items-center gap-1.5 border-none cursor-pointer hover:shadow-md transition-all active:scale-95"
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-[1.25rem] font-bold text-xs sm:text-sm shadow-sm flex items-center gap-1.5 border-none cursor-pointer hover:shadow-indigo-100 transition-all active:scale-95"
                     >
-                      <Plus className="w-4 h-4 shrink-0" /> New Broadcast
+                      <Plus className="w-4 h-4 shrink-0" />
+                      <span>New Broadcast</span>
                     </button>
                   </div>
                 </div>
 
                 {/* 3. Search & Control Panel Row */}
-                <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-sm">
+                <div className="bg-white border border-slate-200 rounded-2xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-sm">
                   {/* Search bar inputs */}
                   <div className="relative flex-1 max-w-md">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      placeholder="Search broadcasts..."
+                      placeholder="Search campaigns..."
                       value={broadcastSearchQuery}
                       onChange={(e) => setBroadcastSearchQuery(e.target.value)}
-                      className="pl-9 pr-4 py-2 w-full border border-slate-200 focus:border-[#155EEF] focus:outline-none rounded-lg text-sm text-slate-800 placeholder-slate-400 bg-white"
+                      className="pl-9 pr-4 py-2 w-full border border-slate-200 focus:border-indigo-500 focus:outline-none rounded-xl text-sm text-slate-800 placeholder-slate-400 bg-white transition-all shadow-inner"
                     />
                   </div>
 
@@ -2826,33 +2838,33 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                     <div className="relative">
                       <button 
                         onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-                        className={`flex items-center gap-2 border px-3.5 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all ${
+                        className={`flex items-center gap-2 border px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer transition-all ${
                           isFilterDropdownOpen || hasActiveFilters 
-                            ? 'border-[#155EEF] bg-[#F4F8FF] text-[#155EEF] ring-2 ring-[#EFF5FF]' 
-                            : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                            ? 'border-indigo-600 bg-indigo-50/50 text-indigo-700 ring-2 ring-indigo-50 shadow-sm' 
+                            : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-solid'
                         }`}
                       >
-                        <Filter className={`w-4 h-4 ${isFilterDropdownOpen || hasActiveFilters ? 'text-[#155EEF]' : 'text-slate-500'}`} />
+                        <Filter className={`w-4 h-4 ${isFilterDropdownOpen || hasActiveFilters ? 'text-indigo-600' : 'text-slate-500'}`} />
                         <span>Filters</span>
                         {hasActiveFilters && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#155EEF]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
                         )}
                       </button>
 
                       {/* POPUP OVERLAY */}
                       {isFilterDropdownOpen && (
-                        <div id="filter-dropdown-menu" className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-xl p-5 z-50 text-left animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div id="filter-dropdown-menu" className="absolute right-0 mt-2.5 w-80 sm:w-96 bg-white border border-slate-200 rounded-2xl shadow-xl p-5.5 z-50 text-left animate-in fade-in slide-in-from-top-2 duration-150">
                           {/* Grid Columns */}
                           <div className="grid grid-cols-2 gap-4">
                             {/* Status */}
                             <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Status</label>
+                              <label className="block text-[10px] font-black text-slate-450 mb-1.5 uppercase tracking-widest">Status</label>
                               <select 
                                 value={filterStatus}
                                 onChange={(e) => setFilterStatus(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-semibold rounded-xl text-slate-700 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-150 cursor-pointer"
                               >
-                                <option value="all">All</option>
+                                <option value="all">All Statuses</option>
                                 <option value="completed">Completed</option>
                                 <option value="running">Running</option>
                                 <option value="failed">Failed</option>
@@ -2861,13 +2873,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
                             {/* Page */}
                             <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Page</label>
+                              <label className="block text-[10px] font-black text-slate-450 mb-1.5 uppercase tracking-widest">Page</label>
                               <select 
                                 value={filterPageId}
                                 onChange={(e) => setFilterPageId(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer max-w-full truncate"
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-semibold rounded-xl text-slate-700 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-150 cursor-pointer max-w-full truncate"
                               >
-                                <option value="all">All</option>
+                                <option value="all">All Pages</option>
                                 {pages.map(p => (
                                   <option key={p.id} value={p.id}>{p.name}</option>
                                 ))}
@@ -2878,11 +2890,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                           <div className="grid grid-cols-2 gap-4 mt-4">
                             {/* Type */}
                             <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Type</label>
+                              <label className="block text-[10px] font-black text-slate-450 mb-1.5 uppercase tracking-widest">Type</label>
                               <select 
                                 value={filterType}
                                 onChange={(e) => setFilterType(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-semibold rounded-xl text-slate-700 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-150 cursor-pointer"
                               >
                                 <option value="all">All Types</option>
                                 <option value="text">Text Only</option>
@@ -2894,13 +2906,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
                             {/* Tag */}
                             <div>
-                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Tag</label>
+                              <label className="block text-[10px] font-black text-slate-450 mb-1.5 uppercase tracking-widest">Tag</label>
                               <select 
                                 value={filterTag}
                                 onChange={(e) => setFilterTag(e.target.value)}
-                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-semibold rounded-xl text-slate-700 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-150 cursor-pointer"
                               >
-                                <option value="all">All</option>
+                                <option value="all">All Tags</option>
                                 <option value="UTILITY">UTILITY</option>
                                 <option value="CONFIRMED_EVENT_UPDATE">CONFIRMED_EVENT_UPDATE</option>
                                 <option value="ACCOUNT_UPDATE">ACCOUNT_UPDATE</option>
@@ -2911,20 +2923,20 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
                           {/* Date Range Option */}
                           <div className="mt-4">
-                            <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Date Range</label>
+                            <label className="block text-[10px] font-black text-slate-450 mb-1.5 uppercase tracking-widest">Date Range</label>
                             <div className="flex items-center gap-2">
                               <input 
                                 type="date"
                                 value={filterStartDate}
                                 onChange={(e) => setFilterStartDate(e.target.value)}
-                                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 text-xs font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 text-xs font-semibold rounded-xl text-slate-700 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-150 cursor-pointer"
                               />
                               <span className="text-slate-400 text-xs font-semibold">to</span>
                               <input 
                                 type="date"
                                 value={filterEndDate}
                                 onChange={(e) => setFilterEndDate(e.target.value)}
-                                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 text-xs font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 text-xs font-semibold rounded-xl text-slate-700 focus:outline-none focus:border-indigo-550 focus:ring-1 focus:ring-indigo-150 cursor-pointer"
                               />
                             </div>
                           </div>
@@ -2936,9 +2948,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                               id="failures-only"
                               checked={filterOnlyFailures}
                               onChange={(e) => setFilterOnlyFailures(e.target.checked)}
-                              className="w-4 h-4 text-[#155EEF] border-[#155EEF] rounded focus:ring-[#155EEF] cursor-pointer"
+                              className="w-4 h-4 text-indigo-600 border-indigo-200 rounded focus:ring-indigo-550 cursor-pointer"
                             />
-                            <label htmlFor="failures-only" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                            <label htmlFor="failures-only" className="text-xs font-bold text-slate-650 cursor-pointer select-none">
                               Show only with failures
                             </label>
                           </div>
@@ -2969,7 +2981,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                 });
                                 setIsFilterDropdownOpen(false);
                               }}
-                              className="text-xs sm:text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors bg-transparent border-none cursor-pointer p-1"
+                              className="text-xs sm:text-sm font-semibold text-slate-400 hover:text-slate-700 transition-colors bg-transparent border-none cursor-pointer p-1"
                             >
                               Clear all
                             </button>
@@ -2987,24 +2999,24 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                 });
                                 setIsFilterDropdownOpen(false);
                               }}
-                              className="bg-[#155EEF] hover:bg-[#124EC3] text-white px-5 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all shadow-sm border-none cursor-pointer"
+                              className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all shadow-sm border-none cursor-pointer"
                             >
-                              Apply
+                              Apply Filters
                             </button>
                           </div>
                         </div>
                       )}
                     </div>
                     <button 
-                      className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors"
+                      className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors shadow-sm"
                     >
-                      <CheckSquare className="w-4 h-4 text-slate-400" />
+                      <CheckSquare className="w-4 h-4 text-slate-400 shrink-0" />
                       <span>Select</span>
                     </button>
                     <button 
                       onClick={getBroadcastHistory}
                       title="Refresh"
-                      className="flex items-center justify-center p-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-lg cursor-pointer transition-colors"
+                      className="flex items-center justify-center p-2.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-xl cursor-pointer transition-colors shadow-sm"
                     >
                       <RefreshCw className="w-4 h-4" />
                     </button>
@@ -3051,7 +3063,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                       })()}
 
                       {/* Quick Stats Grid */}
-                      <div className="grid grid-cols-3 gap-4 mt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
                         <div className="bg-emerald-50/65 rounded-2xl p-4 border border-emerald-100 text-center">
                           <p className="text-[10px] font-black tracking-widest uppercase text-emerald-600">Delivered</p>
                           <p className="text-2xl font-black text-emerald-700 mt-1">{broadcastProgress.successCount}</p>
@@ -3073,160 +3085,195 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
                 {/* 4. Main workspace block: Empty State OR Campaign List items */}
                 {filteredHistory.length === 0 ? (
-                  <div className="bg-white border border-slate-200 rounded-xl p-16 flex flex-col items-center justify-center shadow-sm min-h-[440px] text-center">
+                  <div className="bg-white border border-slate-200 rounded-[2rem] p-16 flex flex-col items-center justify-center shadow-sm min-h-[440px] text-center w-full">
                     {/* Blue central block radio badge */}
-                    <div className="w-14 h-14 bg-[#E0EAFF] text-[#444CE7] rounded-xl flex items-center justify-center mb-6">
-                      <Radio className="w-6 h-6 text-[#155EEF]" />
+                    <div className="w-16 h-16 bg-slate-50 border border-slate-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-6 shadow-inner">
+                      <Radio className="w-7 h-7 text-indigo-600" />
                     </div>
                     
                     <h3 className="text-lg font-bold text-slate-900 mb-1">
-                      {broadcastSearchQuery ? "No broadcasts matched your search" : "No broadcasts yet"}
+                      {broadcastSearchQuery ? "No broadcasts matched your search" : "No broadcasts registered yet"}
                     </h3>
-                    <p className="text-sm text-slate-500 mb-6 max-w-sm">
-                      {broadcastSearchQuery ? "Try searching for a different keyword or check your spelling." : "Create your first broadcast to reach your subscribers"}
+                    <p className="text-xs sm:text-sm text-slate-500 mb-6 max-w-sm">
+                      {broadcastSearchQuery ? "Try searching for a different keyword or check your spelling." : "Design a new communication layout and broadcast your first blast to reach linked chat contacts."}
                     </p>
 
                     {!broadcastSearchQuery && (
                       <button
                         onClick={() => setBroadcastView('choice')}
-                        className="bg-[#155EEF] hover:bg-[#124EC3] text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm flex items-center justify-center gap-1.5 border-none cursor-pointer"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all shadow-sm flex items-center justify-center gap-1.5 border-none cursor-pointer"
                       >
                         <Plus className="w-4 h-4" /> Create Broadcast
                       </button>
                     )}
                   </div>
                 ) : (
-                  /* Beautiful layout when real history is populated */
-                  <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                    <div className="border-b border-slate-100 px-6 py-4 bg-slate-50 flex items-center justify-between">
-                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Campaign Activities and Outcomes</span>
-                      <span className="text-xs text-slate-500 font-semibold">{filteredHistory.length} campaigns found</span>
-                    </div>
+                  /* Elegant and modern neat & clean table layout when real history is populated */
+                  <div className="bg-white border border-slate-100 rounded-[1.5rem] sm:rounded-[2rem] shadow-sm overflow-hidden animate-in fade-in duration-300 w-full">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100 bg-slate-50/20">
+                            <th className="pl-6 pr-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Campaign Message</th>
+                            <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Connected Page</th>
+                            <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Status</th>
+                            <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Delivery Progress</th>
+                            <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Message Tag</th>
+                            <th className="pl-4 pr-6 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B] text-right">Created At</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {filteredHistory.map((b) => {
+                            const isCurrentlySelected = selectedBroadcastId === b.id;
+                            const success = b.successCount || 0;
+                            const fail = b.failCount || 0;
+                            const total = b.totalRecipients || (success + fail) || 1;
+                            const progressPercent = Math.round(((success + fail) / total) * 100) || 0;
+                            
+                            // Find page details from sync pages list to show the real picture
+                            const matchedPage = pages.find(p => p.id === b.pageId);
+                            const pagePicture = matchedPage?.picture?.data?.url;
+                            const finalPageName = b.pageName || matchedPage?.name || 'Connected Page';
 
-                    <div className="divide-y divide-slate-100 bg-white">
-                      {filteredHistory.map((b) => {
-                        const isCurrentlySelected = selectedBroadcastId === b.id;
-                        const success = b.successCount || 0;
-                        const fail = b.failCount || 0;
-                        const total = b.totalRecipients || (success + fail) || 1;
-                        const successRate = Math.round((success / total) * 100);
+                            // Format tag name nicely
+                            const rawTag = b.messageTag || b.tag || "UTILITY";
+                            const formattedTag = rawTag.toLowerCase().split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
-                        return (
-                          <div 
-                            key={b.id || Math.random().toString()}
-                            className="hover:bg-slate-50/50 transition-colors cursor-pointer"
-                            onClick={() => setSelectedBroadcastId(selectedBroadcastId === b.id ? null : b.id)}
-                          >
-                            <div className="p-6 flex flex-col md:flex-row gap-6 justify-between md:items-center">
-                              {/* Left details */}
-                              <div className="space-y-2 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="text-[10px] font-black uppercase text-[#155EEF] tracking-wider bg-blue-50 border border-blue-100 px-2.5 py-0.5 rounded-md">
-                                    {b.pageName || 'Connected Page'}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 font-medium">
-                                    {b.createdAt ? new Date(b.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}
-                                  </span>
-                                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border flex items-center gap-1.5 ${
-                                    b.status === 'running' 
-                                      ? 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse' 
-                                      : 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                  }`}>
-                                    <span className={`w-1.5 h-1.5 rounded-full ${
-                                      b.status === 'running' ? 'bg-amber-500 animate-ping' : 'bg-emerald-500'
-                                    }`}></span>
-                                    {b.status || 'completed'}
-                                  </span>
-                                </div>
-                                <p className="text-sm font-semibold text-slate-800 leading-relaxed rtl:text-right">
-                                  {b.message || "Sent an Attachment file."}
-                                </p>
-                                {b.hasAttachment && (
-                                  <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 border border-slate-150 rounded text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                                    <Paperclip className="w-3 h-3" />
-                                    {b.attachmentType} Attached
-                                  </div>
-                                )}
+                            // Format creation date beautifully
+                            const createdTimeStr = b.createdAt ? (() => {
+                              const diffMs = Date.now() - new Date(b.createdAt).getTime();
+                              const diffMins = Math.floor(diffMs / 60000);
+                              const diffHrs = Math.floor(diffMins / 60);
+                              const diffDays = Math.floor(diffHrs / 24);
+                              if (diffMins < 1) return 'Just now';
+                              if (diffMins < 60) return `${diffMins}m ago`;
+                              if (diffHrs < 24) return `${diffHrs}h ago`;
+                              if (diffDays < 30) return `${diffDays}d ago`;
+                              return new Date(b.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
+                            })() : 'N/A';
 
-                                {/* Competitor-style visual progress indicators */}
-                                <div className="mt-3 space-y-1.5 max-w-md">
-                                  <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold">
-                                    {b.status === 'running' ? (
-                                      <>
-                                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
-                                        <span>
-                                          {Math.round(((success + fail) / total) * 100) || 0}% &bull; {success.toLocaleString()} delivered &bull; {Math.max(0, total - success - fail).toLocaleString()} pending
-                                        </span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                                        <span>
-                                          100% &bull; {success.toLocaleString()} delivered
-                                        </span>
-                                      </>
-                                    )}
-                                  </div>
-                                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                                    <div 
-                                      className={`h-full rounded-full transition-all duration-300 ${
-                                        b.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
-                                      }`}
-                                      style={{ width: `${Math.round(((success + fail) / total) * 100) || 0}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
+                            const progressText = b.status === 'running' 
+                              ? `${(success + fail).toLocaleString()} / ${total.toLocaleString()} processed` 
+                              : `${success.toLocaleString()} delivered`;
 
-                              {/* Right indicators & counts */}
-                              <div className="flex flex-row md:flex-col gap-4 md:items-end shrink-0 justify-between md:justify-center pt-4 md:pt-0 border-t border-slate-100 md:border-t-0">
-                                <div className="text-left md:text-right">
-                                  <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">Success Factor</p>
-                                  <p className={`text-lg font-black mt-0.5 ${successRate >= 95 ? 'text-emerald-600' : successRate >= 85 ? 'text-amber-500' : 'text-rose-500'}`}>
-                                    {successRate}% Success
-                                  </p>
-                                </div>
-
-                                <div className="flex gap-4 text-[11px] font-bold text-slate-600">
-                                  <div className="text-center md:text-right">
-                                    <span className="block text-[8px] font-bold uppercase tracking-widest text-slate-400">Delivered</span>
-                                    <span className="font-extrabold text-slate-800 mt-0.5 block">{success.toLocaleString()}</span>
-                                  </div>
-                                  <div className="w-px h-6 bg-slate-200 self-center"></div>
-                                  <div className="text-center md:text-right">
-                                    <span className="block text-[8px] font-bold uppercase tracking-widest text-slate-400">Failed</span>
-                                    <span className="font-extrabold text-rose-600 mt-0.5 block">{fail.toLocaleString()}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Recipients log expandable list */}
-                            {isCurrentlySelected && b.recipientsStatus && (
-                              <div className="px-6 pb-6 pt-2 border-t border-slate-100/60 bg-slate-50/40 animate-in fade-in duration-200 max-h-56 overflow-y-auto">
-                                <p className="text-[9px] font-bold uppercase text-slate-400 tracking-wider mb-2">Delivery Log Details ({b.recipientsStatus.length})</p>
-                                <div className="space-y-1.5">
-                                  {b.recipientsStatus.map((r: any, idx: number) => (
-                                    <div key={idx} className="flex items-center justify-between gap-3 p-2 bg-white rounded-lg border border-slate-150 text-[11px] font-semibold text-slate-700">
-                                      <span className="truncate">{r.name}</span>
-                                      <div className="flex items-center gap-2 shrink-0">
-                                        <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${r.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                                          {r.status}
-                                        </span>
-                                        {r.error && (
-                                          <span className="text-[9px] text-rose-500 max-w-[150px] truncate" title={r.error}>
-                                            ({r.error})
+                            return (
+                              <React.Fragment key={b.id || Math.random().toString()}>
+                                <tr 
+                                  className={`hover:bg-slate-50/50 transition-colors cursor-pointer text-xs ${isCurrentlySelected ? 'bg-indigo-50/10' : ''}`}
+                                  onClick={() => setSelectedBroadcastId(selectedBroadcastId === b.id ? null : b.id)}
+                                >
+                                  {/* Campaign Name Column */}
+                                  <td className="pl-6 pr-4 py-4 min-w-[200px]">
+                                    <div className="flex items-center gap-2.5 min-w-0">
+                                      <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform shrink-0 ${isCurrentlySelected ? 'rotate-90 text-indigo-650 font-black' : ''}`} />
+                                      <div className="min-w-0">
+                                        <p className="truncate font-black text-slate-800 leading-tight" title={b.message}>
+                                          {b.message || "Sent an Attachment file."}
+                                        </p>
+                                        {b.hasAttachment && (
+                                          <span className="inline-flex items-center gap-1 text-[8px] font-black text-indigo-600 uppercase tracking-widest mt-1 bg-indigo-50 px-1.5 py-0.5 rounded-md border border-indigo-100/50">
+                                            📎 {b.attachmentType || 'File'} Attached
                                           </span>
                                         )}
                                       </div>
                                     </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                                  </td>
+
+                                  {/* Facebook Page Column */}
+                                  <td className="px-4 py-4 whitespace-nowrap">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className="w-8 h-8 rounded-xl overflow-hidden bg-slate-100 border shrink-0 flex items-center justify-center font-bold text-slate-500 uppercase text-[10px] shadow-inner">
+                                        {pagePicture ? (
+                                          <img src={pagePicture} alt={finalPageName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        ) : (
+                                          finalPageName.substring(0, 2)
+                                        )}
+                                      </div>
+                                      <span className="font-extrabold text-slate-700 text-xs truncate max-w-[150px]">
+                                        {finalPageName}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Status Column */}
+                                  <td className="px-4 py-4 whitespace-nowrap">
+                                    <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-700">
+                                      <span className={`w-2 h-2 rounded-full ${
+                                        b.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                                      }`} />
+                                      <span className="capitalize">{b.status || 'completed'}</span>
+                                    </span>
+                                  </td>
+
+                                  {/* Progress Column */}
+                                  <td className="px-4 py-4 whitespace-nowrap">
+                                    <div className="flex flex-col gap-1 w-44">
+                                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                        <div 
+                                          className={`h-full rounded-full transition-all duration-300 ${
+                                            b.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                                          }`}
+                                          style={{ width: `${progressPercent}%` }}
+                                        />
+                                      </div>
+                                      <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                                        <span className="text-emerald-600 font-black">{progressPercent}%</span> ({progressText})
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Tag Column */}
+                                  <td className="px-4 py-4 whitespace-nowrap">
+                                    <span className="inline-flex items-center px-2 py-0.5 bg-indigo-50 border border-indigo-100 rounded-md text-[9px] font-black text-indigo-700 uppercase tracking-widest">
+                                      {formattedTag}
+                                    </span>
+                                  </td>
+
+                                  {/* Created Date Column */}
+                                  <td className="pl-4 pr-6 py-4 text-right whitespace-nowrap text-xs font-extrabold text-slate-400">
+                                    {createdTimeStr}
+                                  </td>
+                                </tr>
+
+                                {/* Expansion Delivery Log Row */}
+                                {isCurrentlySelected && (
+                                  <tr className="bg-slate-50/15">
+                                    <td colSpan={6} className="px-6 py-4">
+                                      <div className="p-5 bg-slate-50/50 rounded-2xl border border-slate-200 shadow-inner max-h-60 overflow-y-auto space-y-3.5">
+                                        <div className="flex justify-between items-center text-[10px] font-black uppercase text-slate-450 tracking-wider">
+                                          <span>Delivery Log Details ({b.recipientsStatus?.length || 0} contacts)</span>
+                                          <span className="text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">Success Rate: {Math.round((success / total) * 100)}%</span>
+                                        </div>
+                                        {b.recipientsStatus && b.recipientsStatus.length > 0 ? (
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                            {b.recipientsStatus.map((r: any, idx: number) => (
+                                              <div key={idx} className="flex items-center justify-between gap-3 p-3 bg-white rounded-xl border border-slate-200/80 text-xs font-bold text-slate-700 shadow-sm">
+                                                <span className="truncate">{r.name}</span>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                  <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-md ${r.status === 'delivered' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-rose-50 text-rose-700 border border-rose-100'}`}>
+                                                    {r.status}
+                                                  </span>
+                                                  {r.error && (
+                                                    <span className="text-[10px] text-rose-500 max-w-[100px] truncate" title={r.error}>
+                                                      ({r.error})
+                                                    </span>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        ) : (
+                                          <p className="text-xs text-slate-400 font-medium italic text-center py-4">No individual contact delivery logs recorded yet.</p>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}
@@ -3408,7 +3455,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                   <div className="flex items-center gap-3 mb-6">
                     <button 
                       onClick={() => setTeamSubMode('list')}
-                      className="p-2 border border-slate-150 hover:bg-slate-50 text-slate-500 hover:text-slate-900 rounded-xl transition-all cursor-pointer bg-transparent"
+                      className="p-2 border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-900 rounded-xl transition-all cursor-pointer bg-transparent"
                     >
                       &larr; Back
                     </button>
@@ -3486,7 +3533,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                           setAddMemberRole(e.target.value);
                           setAddMemberAssignedPages([]);
                         }}
-                        className="w-full px-4 py-3.5 bg-slate-50 border border-slate-150 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-indigo-100 transition-all cursor-pointer"
+                        className="w-full px-4 py-3.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-indigo-100 transition-all cursor-pointer"
                       >
                         <option value="">Select a role...</option>
                         <option value="admin">Admin - Full access including billing & team</option>
@@ -3497,7 +3544,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
                     {/* ASSIGNED PAGES IF SUPPORT */}
                     {addMemberRole === 'support' && (
-                      <div className="p-6 bg-slate-50 rounded-3xl border border-slate-150 space-y-4">
+                      <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200 space-y-4">
                         <div>
                           <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">Designate Permitted Assets</h4>
                           <p className="text-[10.5px] text-slate-500 font-semibold leading-relaxed mt-1">This support member will be dynamically locked out of processing incoming messages for non-selected resources.</p>
