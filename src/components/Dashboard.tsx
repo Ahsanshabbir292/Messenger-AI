@@ -18,6 +18,13 @@ import { BroadcastSingle } from './BroadcastSingle';
 import { BroadcastBulk } from './BroadcastBulk';
 import { AudiencePage } from './AudiencePage';
 import { AnalyticsPage } from './AnalyticsPage';
+import { BroadcastDetailsView } from './BroadcastDetailsView';
+import { OverviewPage } from './OverviewPage';
+import { PagesPage } from './PagesPage';
+import { ChatPage } from './ChatPage';
+import { TeamPage } from './TeamPage';
+import { BillingPage } from './BillingPage';
+import { SettingsPage } from './SettingsPage';
 
 const getAvatarColors = (name: string) => {
   const themes = [
@@ -287,7 +294,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
   }, []);
 
   useEffect(() => {
-    if (activeTab === 'broadcast') {
+    if (activeTab === 'broadcast' || activeTab === 'analytics' || activeTab === 'overview') {
       getBroadcastHistory();
     }
   }, [activeTab, getBroadcastHistory]);
@@ -298,15 +305,81 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     const handleProgress = (data: any) => {
       setBroadcastProgress(data);
       setIsBroadcasting(true);
-      const logLine = `[${new Date().toLocaleTimeString()}] Delivered to ${data.latestRecipient}... ${data.latestStatus === 'delivered' ? '✅ SUCCESS' : '❌ FAILED'}`;
+      
+      const isReadOrReplied = data.latestStatus === 'read' || data.latestStatus === 'replied';
+      const logLine = isReadOrReplied
+        ? `[${new Date().toLocaleTimeString()}] Recipient "${data.latestRecipient}" ${data.latestStatus === 'replied' ? '💬 REPLIED' : '👁️ OPENED / READ'}`
+        : `[${new Date().toLocaleTimeString()}] Delivered to ${data.latestRecipient}... ${data.latestStatus === 'delivered' ? '✅ SUCCESS' : '❌ FAILED'}`;
+      
       setBroadcastLiveLogs(prev => [logLine, ...prev]);
+
+      // Update campaigns history list in real-time matching competitor live behavior
+      setBroadcastsHistory(prev => {
+        const exists = prev.some(b => b.id === data.broadcastId);
+        if (!exists) {
+          const newB = {
+            id: data.broadcastId,
+            status: "running",
+            sentCount: data.sentCount,
+            successCount: data.successCount,
+            failCount: data.failCount,
+            totalRecipients: data.total,
+            recipientsStatus: data.recipientsStatus || {},
+            created_at: new Date().toISOString()
+          };
+          return [newB, ...prev];
+        }
+        return prev.map(b => {
+          if (b.id === data.broadcastId) {
+            return {
+              ...b,
+              status: data.latestStatus === 'read' || data.latestStatus === 'replied' ? b.status : "running",
+              sentCount: data.sentCount,
+              successCount: data.successCount,
+              failCount: data.failCount,
+              totalRecipients: data.total,
+              recipientsStatus: data.recipientsStatus || b.recipientsStatus
+            };
+          }
+          return b;
+        });
+      });
     };
 
     const handleCompleted = (data: any) => {
       setIsBroadcasting(false);
       setBroadcastProgress(null);
       addToast(`Broadcast completed! Sent to ${data.total} users successfully.`, "success");
+      setBroadcastsHistory(prev => {
+        const exists = prev.some(b => b.id === data.broadcastId);
+        if (!exists) {
+          const newB = {
+            id: data.broadcastId,
+            status: "completed",
+            sentCount: data.sentCount || data.total,
+            successCount: data.successCount || data.total,
+            failCount: data.failCount || 0,
+            totalRecipients: data.total,
+            recipientsStatus: {},
+            created_at: new Date().toISOString()
+          };
+          return [newB, ...prev];
+        }
+        return prev.map(b => {
+          if (b.id === data.broadcastId) {
+            return {
+              ...b,
+              status: "completed",
+              sentCount: data.total,
+              successCount: data.successCount || data.total,
+              failCount: data.failCount || 0
+            };
+          }
+          return b;
+        });
+      });
       getBroadcastHistory();
+      getPages();
     };
 
     socket.on("broadcast_progress", handleProgress);
@@ -391,6 +464,9 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         setBroadcastMessage("");
         setBroadcastFile(null);
         getBroadcastHistory();
+        if (res.data.broadcastId) {
+          setSelectedBroadcastId(res.data.broadcastId);
+        }
       }
     } catch (err: any) {
       const friendlyErr = err.response?.data?.error || "Failed to start broadcast. Make sure your Page has conversation threads.";
@@ -686,6 +762,9 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
       setPages(res.data.pages || []);
       setSelectedPageIds(res.data.selectedPageIds || []);
       setTrialLocked(!!res.data.trialLocked);
+      if (typeof res.data.credits === 'number') {
+        setCreditBalance(res.data.credits);
+      }
     } catch (err) {
       console.error("Failed to get pages", err);
     }
@@ -739,8 +818,31 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
   const getConversations = async (pageId: string) => {
     setIsLoading(true);
     try {
-      const res = await axios.get(`/api/facebook/conversations/${pageId}`);
-      setConversations(res.data.conversations || []);
+      if (pageId === "all") {
+        const activePages = pages.filter(p => selectedPageIds.includes(p.id));
+        const promises = activePages.map(page => 
+          axios.get(`/api/facebook/conversations/${page.id}`)
+            .then(res => (res.data.conversations || []).map((c: any) => ({
+              ...c,
+              _associatedPageId: page.id
+            })))
+            .catch(err => {
+              console.error(`Failed to get conversations for page ${page.id}`, err);
+              return [];
+            })
+        );
+        const results = await Promise.all(promises);
+        const merged = results.flat();
+        merged.sort((a, b) => {
+          const tA = new Date(a.updated_time || 0).getTime();
+          const tB = new Date(b.updated_time || 0).getTime();
+          return tB - tA;
+        });
+        setConversations(merged);
+      } else {
+        const res = await axios.get(`/api/facebook/conversations/${pageId}`);
+        setConversations(res.data.conversations || []);
+      }
     } catch (err) {
       console.error("Failed to get conversations", err);
     } finally {
@@ -748,7 +850,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     }
   };
 
-  const handleOpenChatFromAudience = async (userId: string, pageId: string) => {
+  const handleOpenChatFromAudience = async (userId: string, pageId: string, userName?: string) => {
     let page = pages.find((p: any) => p.id === pageId);
     if (!page) {
       try {
@@ -780,18 +882,18 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           setSelectedConversation(targetConv);
           setShowChatDetail(true);
         } else {
-          const mockConv = {
+          const tempConv = {
             id: `conv_sim_${userId}`,
             participants: {
               data: [
-                { name: "Customer", id: userId },
+                { name: userName || "Customer", id: userId },
                 { name: page.name, id: pageId }
               ]
             },
             messages: { data: [] },
             updated_time: new Date().toISOString()
           };
-          setSelectedConversation(mockConv);
+          setSelectedConversation(tempConv);
           setShowChatDetail(true);
         }
       } catch (err) {
@@ -809,11 +911,12 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     
     setIsSending(true);
     try {
-      const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== selectedPage.id)?.id;
+      const activePageId = selectedConversation._associatedPageId || selectedPage.id;
+      const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.id;
       if (!recipientId) throw new Error("Could not find recipient");
 
       await axios.post('/api/facebook/reply', {
-        pageId: selectedPage.id,
+        pageId: activePageId,
         recipientId,
         message: replyMessage
       });
@@ -835,11 +938,12 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
 
     setIsSending(true);
     try {
-      const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== selectedPage.id)?.id;
+      const activePageId = selectedConversation._associatedPageId || selectedPage.id;
+      const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.id;
       if (!recipientId) throw new Error("Could not find recipient");
 
       const formData = new FormData();
-      formData.append('pageId', selectedPage.id);
+      formData.append('pageId', activePageId);
       formData.append('recipientId', recipientId);
       formData.append('type', pendingFile.type);
       formData.append('file', pendingFile.file);
@@ -1035,11 +1139,22 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
   }, [getPages, getUserProfile, currentWorkspaceId]);
 
   useEffect(() => {
-    if (selectedPage) {
-      if (socket) socket.emit("join_page", selectedPage.id);
+    if (socket) {
+      if (pages.length > 0) {
+        pages.forEach(p => socket.emit("join_page", p.id));
+      }
+      if (selectedPage) {
+        if (selectedPage.id === "all") {
+          selectedPageIds.forEach(id => socket.emit("join_page", id));
+        } else {
+          socket.emit("join_page", selectedPage.id);
+        }
+        getConversations(selectedPage.id);
+      }
+    } else if (selectedPage) {
       getConversations(selectedPage.id);
     }
-  }, [selectedPage, socket]);
+  }, [selectedPage, socket, selectedPageIds, pages]);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showChatDetail, setShowChatDetail] = useState(false);
@@ -1312,229 +1427,33 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           ) : (
             <>
               {activeTab === 'overview' && (
-            <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
-              {/* Metric Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-                {/* Active Pages */}
-                <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
-                  <div className="p-4 sm:p-6 flex items-center gap-4 flex-1">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#E9EFFF] rounded-xl flex items-center justify-center shrink-0">
-                      <Layers className="w-5 h-5 sm:w-6 sm:h-6 text-[#4F46E5]" />
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-xs sm:text-sm font-semibold">Active Pages</p>
-                      <h4 className="text-2xl sm:text-3xl font-black text-slate-900 mt-0.5">{pages.length}</h4>
-                    </div>
-                  </div>
-                  <button onClick={() => setActiveTab('pages')} className="px-4 sm:px-6 py-3 sm:py-4 bg-slate-50/50 border-t border-slate-100 text-indigo-600 text-xs sm:text-sm font-semibold flex items-center gap-1 hover:bg-slate-50 transition-colors">
-                    Manage pages <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Conversations */}
-                <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
-                  <div className="p-4 sm:p-6 flex items-center gap-4 flex-1">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#E8F8F0] rounded-xl flex items-center justify-center shrink-0">
-                      <MessageSquare className="w-5 h-5 sm:w-6 sm:h-6 text-[#10B981]" />
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-xs sm:text-sm font-semibold">Conversations</p>
-                      <h4 className="text-2xl sm:text-3xl font-black text-slate-900 mt-0.5">0</h4>
-                    </div>
-                  </div>
-                  <button onClick={() => setActiveTab('chat')} className="px-4 sm:px-6 py-3 sm:py-4 bg-slate-50/50 border-t border-slate-100 text-indigo-600 text-xs sm:text-sm font-semibold flex items-center gap-1 hover:bg-slate-50 transition-colors">
-                    View inbox <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Messages This Month */}
-                <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full text-left">
-                  <div className="p-4 sm:p-6 flex items-center gap-4 flex-1">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#F5F1FF] rounded-xl flex items-center justify-center shrink-0">
-                      <MessageCircle className="w-5 h-5 sm:w-6 sm:h-6 text-[#8B5CF6]" />
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-xs sm:text-sm font-semibold">Messages This Month</p>
-                      <h4 className="text-2xl sm:text-3xl font-black text-slate-900 mt-0.5">0</h4>
-                    </div>
-                  </div>
-                  <div className="px-4 sm:px-6 py-3 sm:py-4 bg-slate-50/50 border-t border-slate-100 text-slate-400 text-xs sm:text-sm font-medium">
-                    Since May 1
-                  </div>
-                </div>
-
-                {/* Credit Balance */}
-                <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
-                  <div className="p-4 sm:p-6 flex items-center gap-4 flex-1">
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#FEF9E7] rounded-xl flex items-center justify-center shrink-0">
-                      <CircleDollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-[#F59E0B]" />
-                    </div>
-                    <div>
-                      <p className="text-slate-500 text-xs sm:text-sm font-semibold">Credit Balance</p>
-                      <h4 className="text-2xl sm:text-3xl font-black text-slate-900 mt-0.5">${(workspaceCredits[currentWorkspaceId] || 0.00).toFixed(2)}</h4>
-                    </div>
-                  </div>
-                  <button onClick={() => setActiveTab('billing')} className="px-4 sm:px-6 py-3 sm:py-4 bg-slate-50/50 border-t border-slate-100 text-indigo-600 text-xs sm:text-sm font-semibold flex items-center gap-1 hover:bg-slate-50 transition-colors">
-                    View billing <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
-                {/* Left Area: Page Status */}
-                <div className="lg:col-span-8 space-y-6 sm:space-y-8">
-                  <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden h-fit">
-                    <div className="p-5 sm:p-6 md:p-8 border-b border-slate-50">
-                      <h3 className="text-base sm:text-lg font-bold text-slate-900">Page Status</h3>
-                    </div>
-                    <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6">
-                      <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 ${
-                        currentPlan === 'empire' ? 'bg-purple-50 text-purple-600' :
-                        currentPlan === 'architect' ? 'bg-emerald-50 text-emerald-600' :
-                        'bg-indigo-50 text-indigo-600'
-                      }`}>
-                        {currentPlan === 'empire' ? <Sparkles className="w-6 sm:w-7 sm:h-7" /> :
-                         currentPlan === 'architect' ? <Zap className="w-6 sm:w-7 sm:h-7" /> :
-                         <Clock className="w-6 sm:w-7 sm:h-7" />}
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
-                          <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
-                            {currentPlan === 'empire' ? 'Empire Plan' :
-                             currentPlan === 'architect' ? 'Architect Plan' :
-                             'Free Trial'}
-                          </h4>
-                          <span className={`inline-block self-center text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                            currentPlan === 'empire' ? 'bg-purple-100 text-purple-700' :
-                            currentPlan === 'architect' ? 'bg-emerald-100 text-emerald-700' :
-                            'bg-[#E9EFFF] text-[#4F46E5]'
-                          }`}>
-                            {currentPlan === 'empire' ? 'Premium Enterprise' :
-                             currentPlan === 'architect' ? 'Active Subscription' :
-                             '3 pages on trial'}
-                          </span>
-                        </div>
-                        <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
-                          {currentPlan === 'empire' ? (
-                            <span>You are currently on the supreme <strong className="text-slate-800">Empire Plan</strong> ($199/mo). Unlimited Facebook pages authorized.</span>
-                          ) : currentPlan === 'architect' ? (
-                            <span>You have upgraded to the <strong className="text-slate-800">Architect Plan</strong> ($49/mo). 10 Synced Pages authorized under your subscription.</span>
-                          ) : (
-                            <span>Your pages have up to <span className="font-bold text-slate-700">3 days</span> remaining in trial.</span>
-                          )}
-                        </p>
-                        <button 
-                          onClick={() => {
-                            setActiveTab('billing');
-                            setBillingSubView('buy');
-                            addToast("Navigated to secure prepaid billing gateway", "info");
-                          }}
-                          className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-700 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg shadow-blue-100 cursor-pointer border-none"
-                        >
-                          <Sparkles className="w-4 h-4" /> {currentPlan === 'trial' ? 'Upgrade Now' : 'Change Plan'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right Area: Sidebar Cards */}
-                <div className="lg:col-span-4 space-y-6 sm:space-y-8">
-                  {/* Facebook Account */}
-                  <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden h-fit">
-                    <div className="p-5 sm:p-6 border-b border-slate-50 flex items-center justify-between">
-                      <h3 className="text-base sm:text-lg font-bold text-slate-900">Facebook Account</h3>
-                      <div className={`w-2 h-2 rounded-full ${userProfile ? 'bg-emerald-500' : 'bg-slate-200'}`}></div>
-                    </div>
-                    <div className="p-5 sm:p-6">
-                      <div className="flex flex-col xs:flex-row items-center xs:items-start text-center xs:text-left gap-4 mb-6">
-                        <div className="relative">
-                          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden border-2 border-slate-50 shadow-sm bg-slate-50">
-                            <SafeAvatar src={userProfile?.picture?.data?.url} name={userProfile?.name || appUser?.fullName || "User"} className="w-full h-full" />
-                          </div>
-                          <div className="absolute -bottom-1 -right-1 w-6 h-6 sm:w-7 sm:h-7 bg-[#EBF5FF] border-2 border-white rounded-full flex items-center justify-center">
-                            <Facebook className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#1877F2]" />
-                          </div>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-slate-900 text-base sm:text-lg leading-tight truncate">
-                            {userProfile?.name || appUser?.fullName || "Not Connected"}
-                          </p>
-                          <p className="text-[10px] sm:text-xs font-semibold text-slate-400 mt-1">
-                            {userProfile ? "Synchronization active" : "Integration required"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        {!userProfile ? (
-                          <button 
-                            onClick={handleSyncPages}
-                            disabled={syncing}
-                            className="w-full py-3 bg-[#1877F2] hover:bg-[#166fe5] text-white rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-100 active:scale-[0.98]"
-                          >
-                            {syncing ? (
-                              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            ) : (
-                              <>
-                                <Facebook className="w-4 h-4" />
-                                Connect Facebook
-                              </>
-                            )}
-                          </button>
-                        ) : (
-                          <div className="space-y-3">
-                            <button 
-                               onClick={handleSyncPages}
-                               className="w-full py-2.5 border border-slate-100 text-slate-600 hover:bg-slate-50 rounded-xl font-bold text-[10px] sm:text-xs transition-all flex items-center justify-center gap-2"
-                            >
-                              <RefreshCw className="w-3.5 h-3.5" /> Refresh Permissions
-                            </button>
-                          </div>
-                        )}
-
-                        <div className="pt-4 border-t border-slate-50 flex justify-between items-center text-xs sm:text-sm font-semibold">
-                          <span className="text-slate-400">Linked Assets</span>
-                          <span className="text-slate-900 font-bold">{pages.length} Pages</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Quick Actions */}
-                  <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden h-fit">
-                    <div className="p-5 sm:p-6 border-b border-slate-50">
-                      <h3 className="text-base sm:text-lg font-bold text-slate-900">Quick Actions</h3>
-                    </div>
-                    <div className="flex flex-col divide-y divide-slate-50">
-                      {[
-                        { label: 'Manage Pages', icon: <Globe className="w-4 h-4 sm:w-5 sm:h-5" />, tab: 'pages' },
-                        { label: 'Billing & Orders', icon: <CreditCard className="w-4 h-4 sm:w-5 sm:h-5" />, tab: 'billing' },
-                        { label: 'Manage Team', icon: <Users className="w-4 h-4 sm:w-5 sm:h-5" />, tab: 'team' },
-                        { label: 'Workspace Settings', icon: <Settings className="w-4 h-4 sm:w-5 sm:h-5" />, tab: 'settings' }
-                      ].map((action, idx) => (
-                        <button 
-                          key={idx}
-                          onClick={() => setActiveTab(action.tab)}
-                          className="w-full flex items-center justify-between p-4 sm:p-5 hover:bg-slate-50 transition-colors group"
-                        >
-                          <div className="flex items-center gap-3 sm:gap-4">
-                            <div className="text-slate-400 group-hover:text-indigo-600 transition-colors">
-                              {action.icon}
-                            </div>
-                            <span className="font-bold text-slate-700 text-xs sm:text-sm">{action.label}</span>
-                          </div>
-                          <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-300 group-hover:text-indigo-600 transition-colors" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+                <OverviewPage
+                  pages={pages}
+                  broadcastsHistory={broadcastsHistory}
+                  workspaceCredits={workspaceCredits}
+                  currentWorkspaceId={currentWorkspaceId}
+                  currentPlan={currentPlan}
+                  userProfile={userProfile}
+                  appUser={appUser}
+                  syncing={syncing}
+                  handleSyncPages={handleSyncPages}
+                  setActiveTab={setActiveTab}
+                  setBillingSubView={setBillingSubView}
+                  addToast={addToast}
+                />
+              )}
 
           {activeTab === 'pages' && (
+            <PagesPage
+              pages={pages}
+              selectedPageIds={selectedPageIds}
+              trialLocked={trialLocked}
+              handleSyncPages={handleSyncPages}
+              handleSelectTrialPage={handleSelectTrialPage}
+            />
+          )}
+
+          {false && (
             <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20">
                {/* Summary Cards */}
                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -1673,8 +1592,40 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           )}
 
           {activeTab === 'chat' && (
+            <ChatPage
+              pages={pages}
+              conversations={conversations}
+              selectedPage={selectedPage}
+              setSelectedPage={setSelectedPage}
+              selectedPageIds={selectedPageIds}
+              chatSearch={chatSearch}
+              setChatSearch={setChatSearch}
+              chatFilter={chatFilter}
+              setChatFilter={setChatFilter}
+              showChatDetail={showChatDetail}
+              setShowChatDetail={setShowChatDetail}
+              selectedConversation={selectedConversation}
+              setSelectedConversation={setSelectedConversation}
+              replyMessage={replyMessage}
+              setReplyMessage={setReplyMessage}
+              pendingFile={pendingFile}
+              setPendingFile={setPendingFile}
+              isRecording={isRecording}
+              recordingTime={recordingTime}
+              startRecording={startRecording}
+              stopRecording={stopRecording}
+              isSending={isSending}
+              handleSendFile={handleSendFile}
+              handleReply={handleReply}
+              handleFileChange={handleFileChange}
+              isLoading={isLoading}
+              getPages={getPages}
+            />
+          )}
+
+
+          {false && (
             <div className="h-full flex flex-col lg:flex-row gap-0 bg-white rounded-[1.5rem] lg:rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-2xl">
-               {/* Left Panel: Conversation List */}
                <div className={`w-full lg:w-[26rem] bg-white border-r border-slate-100 flex flex-col h-full ${showChatDetail ? 'hidden lg:flex' : 'flex'}`}>
                   <div className="p-4 lg:p-8 border-b border-slate-50 space-y-4 lg:space-y-6">
                      <div className="flex justify-between items-center">
@@ -1692,13 +1643,16 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                        <select 
                           value={selectedPage?.id || ""} 
                           onChange={(e) => {
-                             const page = pages.find(p => p.id === e.target.value);
+                             const page = e.target.value === "all" ? { id: "all", name: "Select All Pages" } : pages.find(p => p.id === e.target.value);
                              setSelectedPage(page);
                           }}
                           className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl pl-12 pr-10 py-4 text-[10px] font-black uppercase tracking-widest focus:bg-white focus:border-indigo-100 outline-none appearance-none transition-all cursor-pointer"
                        >
                           <option value="">Select Facebook Page</option>
-                          {pages.filter(p => selectedPageIds.includes(p.id)).map((p: any) => (
+                          {pages.filter(p => selectedPageIds.includes(p.id)).length > 0 && (
+                              <option value="all">Select All Pages</option>
+                           )}
+                           {pages.filter(p => selectedPageIds.includes(p.id)).map((p: any) => (
                              <option key={p.id} value={p.id}>{p.name}</option>
                           ))}
                        </select>
@@ -1754,20 +1708,27 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                           <p className="text-[10px] font-black uppercase tracking-widest">No conversations found</p>
                        </div>
                     ) : (conversations || []).filter((c: any) => {
-                       const other = c.participants?.data?.find((p: any) => p.id !== selectedPage?.id);
+                       const activePageId = c._associatedPageId || selectedPage?.id;
+                       const other = c.participants?.data?.find((p: any) => p.id !== activePageId);
                        const matchesSearch = other?.name?.toLowerCase().includes(chatSearch.toLowerCase());
-                       const matchesUnread = chatFilter === 'all' || (c.unread_count > 0);
+                       const isUnread = c.unread_count > 0 || c.unread === true || (c.messages?.data?.[0]?.from?.id !== (c._associatedPageId || selectedPage?.id) && selectedConversation?.id !== c.id);
+                       const matchesUnread = chatFilter === 'all' || isUnread;
                        return matchesSearch && matchesUnread;
                     }).map((c: any) => {
-                       const other = c.participants.data.find((p: any) => p.id !== selectedPage?.id);
+                       const activePageId = c._associatedPageId || selectedPage?.id;
+                       const other = c.participants.data.find((p: any) => p.id !== activePageId);
                        const isActive = selectedConversation?.id === c.id;
                        const lastMsg = c.messages?.data?.[0]?.message;
+                       const isUnread = c.unread_count > 0 || c.unread === true || (c.messages?.data?.[0]?.from?.id !== activePageId && !isActive);
                        return (
                           <button 
                              key={c.id}
                              onClick={() => {
                                 setSelectedConversation(c);
                                 setShowChatDetail(true);
+                                // Clear unread property immediately client-side
+                                c.unread_count = 0;
+                                c.unread = false;
                              }}
                              className={`w-full p-4 sm:p-5 lg:p-6 flex gap-3 sm:gap-4 transition-all group relative border-b border-slate-50/50 ${isActive ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}
                           >
@@ -1780,10 +1741,15 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                              </div>
                              <div className="flex-1 min-w-0 pr-1 sm:pr-4">
                                 <div className="flex justify-between items-center mb-1">
-                                   <p className={`font-black text-[10px] sm:text-xs uppercase tracking-tight truncate ${isActive ? 'text-indigo-900' : 'text-slate-900'}`}>{other?.name || 'Customer'}</p>
-                                   <span className="text-[8px] font-black opacity-30 uppercase">{new Date(c.updated_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                   <p className={`font-black text-[10px] sm:text-xs uppercase tracking-tight truncate ${isActive ? 'text-indigo-900' : isUnread ? 'text-slate-900' : 'text-slate-700'}`}>{other?.name || 'Customer'}</p>
+                                   <div className="flex items-center gap-1.5">
+                                      <span className="text-[8px] font-black opacity-30 uppercase">{new Date(c.updated_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                      {isUnread && (
+                                         <div className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse shadow-[0_0_8px_rgba(79,70,229,0.8)] shrink-0"></div>
+                                      )}
+                                   </div>
                                 </div>
-                                <p className={`text-[10px] sm:text-[11px] truncate leading-relaxed ${isActive ? 'text-indigo-600/70 font-semibold' : 'text-slate-400 font-medium'}`}>{lastMsg || 'Sent an attachment...'}</p>
+                                <p className={`text-[10px] sm:text-[11px] truncate leading-relaxed ${isActive ? 'text-indigo-600/70 font-semibold' : isUnread ? 'text-slate-900 font-extrabold' : 'text-slate-400 font-medium'}`}>{lastMsg || 'Sent an attachment...'}</p>
                              </div>
                           </button>
                        )
@@ -1809,12 +1775,13 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                              </button>
                              <div className="w-10 h-10 lg:w-16 lg:h-16 rounded-xl lg:rounded-[1.5rem] overflow-hidden border-2 lg:border-4 border-slate-100 shadow-lg lg:shadow-xl">
                                 {(() => {
-                                   const other = selectedConversation.participants.data.find((p: any) => p.id !== selectedPage?.id);
+                                   const activePageId = selectedConversation._associatedPageId || selectedPage?.id;
+                                   const other = selectedConversation.participants.data.find((p: any) => p.id !== activePageId);
                                    return <SafeAvatar src={other?.picture?.data?.url} name={other?.name} className="w-full h-full" />;
                                 })()}
                              </div>
                              <div className="min-w-0">
-                                <h4 className="font-black text-sm lg:text-xl text-slate-900 tracking-tight truncate max-w-[120px] sm:max-w-none">{selectedConversation.participants.data.find((p: any) => p.id !== selectedPage?.id)?.name || 'Conversation'}</h4>
+                                <h4 className="font-black text-sm lg:text-xl text-slate-900 tracking-tight truncate max-w-[120px] sm:max-w-none">{selectedConversation.participants.data.find((p: any) => p.id !== (selectedConversation._associatedPageId || selectedPage?.id))?.name || 'Conversation'}</h4>
                                 <div className="flex items-center gap-1.5 lg:mt-1">
                                    <div className="w-1.5 lg:w-2 h-1.5 lg:h-2 bg-emerald-500 rounded-full animate-pulse"></div>
                                    <p className="text-[8px] lg:text-[10px] text-slate-400 font-bold uppercase tracking-widest whitespace-nowrap font-mono tracking-wider">Perseus Bot</p>
@@ -1830,7 +1797,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                        {/* Messages */}
                        <div className="flex-1 overflow-y-auto p-12 space-y-10 scrollbar-hide">
                           {[...(selectedConversation.messages?.data || [])].reverse().map((m: any, idx: number) => {
-                             const isMe = m.from.id === selectedPage?.id;
+                             const isMe = m.from.id === (selectedConversation._associatedPageId || selectedPage?.id);
                              const sender = selectedConversation.participants.data.find((p: any) => p.id === m.from.id);
                              return (
                                 <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-5'} group`}>
@@ -1949,10 +1916,61 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           )}
 
           {activeTab === 'analytics' && (
-            <AnalyticsPage pages={pages} creditBalance={creditBalance} broadcastsHistory={broadcastsHistory} addToast={addToast} />
+            <AnalyticsPage 
+              pages={pages} 
+              creditBalance={creditBalance} 
+              broadcastsHistory={broadcastsHistory} 
+              addToast={addToast} 
+              onSelectBroadcast={(id) => {
+                setActiveTab('broadcast');
+                setSelectedBroadcastId(id);
+              }}
+            />
           )}
 
           {activeTab === 'settings' && (
+            <SettingsPage
+              settingsSubTab={settingsSubTab}
+              setSettingsSubTab={setSettingsSubTab}
+              activeWorkspace={activeWorkspace}
+              editWorkspaceName={editWorkspaceName}
+              setEditWorkspaceName={setEditWorkspaceName}
+              isEditWorkspaceModalOpen={isEditWorkspaceModalOpen}
+              setIsEditWorkspaceModalOpen={setIsEditWorkspaceModalOpen}
+              userProfile={userProfile}
+              setUserProfile={setUserProfile}
+              pages={pages}
+              syncing={syncing}
+              handleSyncPages={handleSyncPages}
+              teamMembers={teamMembers}
+              setTeamSubMode={setTeamSubMode}
+              setActiveTab={setActiveTab}
+              addToast={addToast}
+              editProfileName={editProfileName}
+              setEditProfileName={setEditProfileName}
+              editProfileEmail={editProfileEmail}
+              setEditProfileEmail={setEditProfileEmail}
+              isEditProfileModalOpen={isEditProfileModalOpen}
+              setIsEditProfileModalOpen={setIsEditProfileModalOpen}
+              isChangePasswordModalOpen={isChangePasswordModalOpen}
+              setIsChangePasswordModalOpen={setIsChangePasswordModalOpen}
+              currentPassword={currentPassword}
+              setCurrentPassword={setCurrentPassword}
+              newPassword={newPassword}
+              setNewPassword={setNewPassword}
+              confirmPassword={confirmPassword}
+              setConfirmPassword={setConfirmPassword}
+              isManageSessionsModalOpen={isManageSessionsModalOpen}
+              setIsManageSessionsModalOpen={setIsManageSessionsModalOpen}
+              sessionsList={sessionsList}
+              setSessionsList={setSessionsList}
+              currentWorkspaceId={currentWorkspaceId}
+              setWorkspaces={setWorkspaces}
+              appUser={appUser}
+            />
+          )}
+
+          {false && (
             <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20">
               {/* Header */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
@@ -2540,24 +2558,15 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
               };
             }).reverse();
 
-            const mockChartData = [
-              { id: 'm1', name: 'May 15', dateLabel: '15 May 2026, 02:30 PM', messageShort: 'Assalam-o-Alaikum! New Deals Inside', messageFull: 'Assalam-o-Alaikum! Get flat 30% discount on all custom orders this week on our digital menu.', Delivered: 1450, Failed: 50, Total: 1500, successRate: 97, pageName: 'My Restaurant Page', status: 'completed' },
-              { id: 'm2', name: 'May 18', dateLabel: '18 May 2026, 11:15 AM', messageShort: 'Urdu Menu Card layout', messageFull: 'Updated digital high quality food menu card attached for family events.', Delivered: 2100, Failed: 120, Total: 2220, successRate: 95, pageName: 'My Restaurant Page', status: 'completed' },
-              { id: 'm3', name: 'May 22', dateLabel: '22 May 2026, 04:00 PM', messageShort: 'Flat 20% discount coupon code', messageFull: 'We are live with free takeaway delivery. Enter code FREE20 inside messenger.', Delivered: 2950, Failed: 50, Total: 3000, successRate: 98, pageName: 'My Pizza Joint', status: 'completed' },
-              { id: 'm4', name: 'May 26', dateLabel: '26 May 2026, 09:00 AM', messageShort: 'Video guide', messageFull: 'Watch how to easily register and book a table dynamically right inside our page inbox.', Delivered: 1200, Failed: 180, Total: 1380, successRate: 87, pageName: 'My Pizza Joint', status: 'completed' },
-              { id: 'm5', name: 'May 29', dateLabel: '29 May 2026, 05:40 PM', messageShort: 'Eid Mubarak Greetings pack', messageFull: 'Assalam-o-Alaikum! Eid Mubarak to you and your family members from our staff!', Delivered: 3480, Failed: 20, Total: 3500, successRate: 99, pageName: 'My Restaurant Page', status: 'completed' },
-              { id: 'm6', name: 'Jun 01', dateLabel: '01 Jun 2026, 10:30 AM', messageShort: 'Weekend Special Pizza Deal', messageFull: 'Our authentic hand tossed charcoal pizza specials are live today, order in seconds.', Delivered: 2800, Failed: 150, Total: 2950, successRate: 95, pageName: 'My Pizza Joint', status: 'completed' },
-            ];
-
-            const chartData = hasHistory ? realChartData : mockChartData;
+            const chartData = hasHistory ? realChartData : [];
 
             const totalDelivered = hasHistory 
               ? broadcastsHistory.reduce((acc, curr) => acc + (curr.successCount || 0), 0)
-              : mockChartData.reduce((acc, curr) => acc + curr.Delivered, 0);
+              : 0;
 
             const totalFailed = hasHistory 
               ? broadcastsHistory.reduce((acc, curr) => acc + (curr.failCount || 0), 0)
-              : mockChartData.reduce((acc, curr) => acc + curr.Failed, 0);
+              : 0;
 
             const outstandingRatio = totalDelivered + totalFailed;
             const finalSuccessPercentage = outstandingRatio > 0 ? Math.round((totalDelivered / outstandingRatio) * 100) : 0;
@@ -2616,6 +2625,24 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                   isSubmitting={isSubmittingBroadcast}
                 />
               );
+            }
+
+            // If a specific broadcast is selected, show the detailed design
+            if (selectedBroadcastId) {
+              const selectedBSelection = broadcastsHistory.find(x => x.id === selectedBroadcastId);
+              if (selectedBSelection) {
+                return (
+                  <BroadcastDetailsView 
+                    broadcast={selectedBSelection}
+                    onBack={() => {
+                      setSelectedBroadcastId(null);
+                      getBroadcastHistory();
+                    }}
+                    isLiveBroadcasting={isBroadcasting}
+                    liveProgress={broadcastProgress}
+                  />
+                );
+              }
             }
 
             const hasActiveFilters = 
@@ -3068,7 +3095,14 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                   <span className="text-[10px] text-slate-400 font-medium">
                                     {b.createdAt ? new Date(b.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}
                                   </span>
-                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${b.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse'}`}>
+                                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border flex items-center gap-1.5 ${
+                                    b.status === 'running' 
+                                      ? 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse' 
+                                      : 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                  }`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${
+                                      b.status === 'running' ? 'bg-amber-500 animate-ping' : 'bg-emerald-500'
+                                    }`}></span>
                                     {b.status || 'completed'}
                                   </span>
                                 </div>
@@ -3081,6 +3115,35 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                     {b.attachmentType} Attached
                                   </div>
                                 )}
+
+                                {/* Competitor-style visual progress indicators */}
+                                <div className="mt-3 space-y-1.5 max-w-md">
+                                  <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold">
+                                    {b.status === 'running' ? (
+                                      <>
+                                        <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping shrink-0" />
+                                        <span>
+                                          {Math.round(((success + fail) / total) * 100) || 0}% &bull; {success.toLocaleString()} delivered &bull; {Math.max(0, total - success - fail).toLocaleString()} pending
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                        <span>
+                                          100% &bull; {success.toLocaleString()} delivered
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                  <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                                    <div 
+                                      className={`h-full rounded-full transition-all duration-300 ${
+                                        b.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                                      }`}
+                                      style={{ width: `${Math.round(((success + fail) / total) * 100) || 0}%` }}
+                                    />
+                                  </div>
+                                </div>
                               </div>
 
                               {/* Right indicators & counts */}
@@ -3141,6 +3204,28 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           })()}
 
           {activeTab === 'team' && (
+            <TeamPage
+              teamSubMode={teamSubMode}
+              setTeamSubMode={setTeamSubMode}
+              currentActiveRole={currentActiveRole}
+              addMemberEmail={addMemberEmail}
+              setAddMemberEmail={setAddMemberEmail}
+              addMemberName={addMemberName}
+              setAddMemberName={setAddMemberName}
+              addMemberRole={addMemberRole}
+              setAddMemberRole={setAddMemberRole}
+              addMemberAssignedPages={addMemberAssignedPages}
+              setAddMemberAssignedPages={setAddMemberAssignedPages}
+              teamMembers={teamMembers}
+              setTeamMembers={setTeamMembers}
+              appUser={appUser}
+              pages={pages}
+              addToast={addToast}
+              setMemberToRemove={setMemberToRemove}
+            />
+          )}
+
+          {false && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
               {teamSubMode === 'list' ? (
                 <>
@@ -3448,6 +3533,43 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           )}
 
           {activeTab === 'billing' && (
+            <BillingPage
+              billingSubView={billingSubView}
+              setBillingSubView={setBillingSubView}
+              isBillingLoading={isBillingLoading}
+              billingData={billingData}
+              pages={pages}
+              selectedOrderId={selectedOrderId}
+              setSelectedOrderId={setSelectedOrderId}
+              buySelectedPageIds={buySelectedPageIds}
+              setBuySelectedPageIds={setBuySelectedPageIds}
+              searchPageQuery={searchPageQuery}
+              setSearchPageQuery={setSearchPageQuery}
+              billingDiscountCode={billingDiscountCode}
+              setBillingDiscountCode={setBillingDiscountCode}
+              promoError={promoError}
+              setPromoError={setPromoError}
+              appliedPromo={appliedPromo}
+              setAppliedPromo={setAppliedPromo}
+              cardholderName={cardholderName}
+              setCardholderName={setCardholderName}
+              cardNumber={cardNumber}
+              setCardNumber={setCardNumber}
+              cardExpiry={cardExpiry}
+              setCardExpiry={setCardExpiry}
+              cardCvc={cardCvc}
+              setCardCvc={setCardCvc}
+              isProcessingPayment={isProcessingPayment}
+              appUser={appUser}
+              handleCreateOrder={handleCreateOrder}
+              handleDeleteOrder={handleDeleteOrder}
+              handleEditOrder={handleEditOrder}
+              handlePayOrder={handlePayOrder}
+              fetchBillingData={fetchBillingData}
+            />
+          )}
+
+          {false && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
               {/* HEADING ACCENT */}
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-100 pb-6">
@@ -3498,7 +3620,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                       <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
                         <p className="text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1">Active Pages</p>
                         <h4 className="text-2xl font-black text-emerald-600">
-                          {pages.filter(p => billingData?.subscriptions[p.id]?.status === 'Active').length}
+                          {pages.filter(p => billingData?.subscriptions?.[p.id]?.status === 'Active').length}
                         </h4>
                       </div>
                       <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm">
@@ -3622,7 +3744,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                       </h3>
                       <div className="space-y-4 max-h-[22rem] overflow-y-auto pr-1">
                         {pages.map((p: any) => {
-                          const sub = billingData?.subscriptions[p.id];
+                          const sub = billingData?.subscriptions?.[p.id];
                           return (
                             <div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 hover:bg-indigo-50/20 rounded-2xl border border-slate-100 text-left transition-colors">
                               <div className="flex items-center gap-3">
@@ -3683,13 +3805,13 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                         <div>
                           <p className="text-[10px] font-bold text-slate-400">Active Pages</p>
                           <p className="text-base font-black text-emerald-400">
-                            {pages.filter(p => billingData?.subscriptions[p.id]?.status === 'Active').length} Page(s)
+                            {pages.filter(p => billingData?.subscriptions?.[p.id]?.status === 'Active').length} Page(s)
                           </p>
                         </div>
                         <div>
                           <p className="text-[10px] font-bold text-slate-400">Trial Pages</p>
                           <p className="text-base font-black text-sky-400">
-                            {pages.filter(p => billingData?.subscriptions[p.id]?.status === 'Trial').length} Page(s)
+                            {pages.filter(p => billingData?.subscriptions?.[p.id]?.status === 'Trial').length} Page(s)
                           </p>
                         </div>
                       </div>
@@ -3740,7 +3862,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                     <div className="space-y-3 max-h-[25rem] overflow-y-auto pr-2 mb-6">
                       {pages.filter(p => !searchPageQuery || p.name?.toLowerCase().includes(searchPageQuery.toLowerCase())).map((p: any) => {
                         const isChecked = buySelectedPageIds.includes(p.id);
-                        const sub = billingData?.subscriptions[p.id];
+                        const sub = billingData?.subscriptions?.[p.id];
                         
                         return (
                           <div 

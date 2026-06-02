@@ -49,7 +49,7 @@ const formatRelativeTime = (isoString?: string) => {
 };
 
 interface AudiencePageProps {
-  onOpenChat: (userId: string, pageId: string) => void;
+  onOpenChat: (userId: string, pageId: string, userName?: string) => void;
   addToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
@@ -331,7 +331,7 @@ export function AudiencePage({ onOpenChat, addToast }: AudiencePageProps) {
                       {/* ACTION Column */}
                       <td className="px-6 py-4.5 text-right">
                         <button
-                          onClick={() => onOpenChat(u.id, u.page_id)}
+                          onClick={() => onOpenChat(u.id, u.page_id, u.name || '')}
                           className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-black text-indigo-700 bg-indigo-50 border border-indigo-100 hover:bg-indigo-650 hover:text-white rounded-xl transition-all cursor-pointer shadow-sm active:scale-95"
                         >
                           <MessageSquare className="w-3.5 h-3.5" />

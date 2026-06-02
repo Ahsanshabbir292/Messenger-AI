@@ -4,6 +4,7 @@ import { ArrowLeft, User, Image as ImageIcon, Sparkles, Paperclip, Clock, Calend
 interface MemberPage {
   id: string;
   name: string;
+  subscriberCount?: number;
   picture?: {
     data?: {
       url?: string;
@@ -54,31 +55,16 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
   // Drag and drop / file input
   const [dragActive, setDragActive] = useState(false);
 
-  // Group options mockup
-  const groupOptions = [
-    { id: 'g1', name: 'VIP Buyers (450 contacts)', recipients: 450 },
-    { id: 'g2', name: 'Urdu Resellers (310 contacts)', recipients: 310 },
-    { id: 'g3', name: 'Rawalpindi Leads (180 contacts)', recipients: 180 },
-    { id: 'g4', name: 'Support Inbound (45 contacts)', recipients: 45 }
-  ];
-
-  // Recipient subscriber size mapping for pages
+  // Recipient subscriber size mapping for pages derived from actual data
   const getPageSubscriberCount = (id: string) => {
-    if (id === '113601507007941') return 1450; // AA Khaddar
-    if (id === '100471936194627') return 850;  // Muhammadan Educational Academy
-    if (id === '176596215532497') return 2100; // Microphone Hub
-    return 120; // fallback
+    const page = pages.find(p => p.id === id);
+    return page?.subscriberCount || 0;
   };
 
-  // Compute recipients based on sendTo & pageId
+  // Compute recipients based on pageId
   const getRecipientsCalculated = () => {
     if (!pageId) return 0;
-    const baseSubscribers = getPageSubscriberCount(pageId);
-    if (sendTo === 'group') {
-      const selectedGrp = groupOptions.find(g => g.id === groupId);
-      return Math.min(baseSubscribers, selectedGrp?.recipients || 50);
-    }
-    return baseSubscribers;
+    return getPageSubscriberCount(pageId);
   };
 
   const recipientCount = getRecipientsCalculated();
@@ -219,56 +205,6 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
                   </div>
                 );
               })}
-            </div>
-          )}
-        </div>
-
-        {/* Step 2: Send To */}
-        <div className="bg-white p-6 sm:p-8 rounded-[2rem] border border-slate-150 shadow-sm space-y-4">
-          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400">
-            Send To Audience
-          </label>
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => setSendTo('all')}
-              className={`flex-1 sm:flex-initial px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest border-2 transition-all cursor-pointer ${
-                sendTo === 'all'
-                  ? 'border-indigo-600 bg-indigo-50/10 text-indigo-700'
-                  : 'border-slate-100 hover:border-slate-150 bg-slate-50 text-slate-500'
-              }`}
-            >
-              All Audience
-            </button>
-            <button
-              type="button"
-              onClick={() => setSendTo('group')}
-              className={`flex-1 sm:flex-initial px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest border-2 transition-all cursor-pointer ${
-                sendTo === 'group'
-                  ? 'border-indigo-600 bg-indigo-50/10 text-indigo-700'
-                  : 'border-slate-100 hover:border-slate-150 bg-slate-50 text-slate-500'
-              }`}
-            >
-              A Group
-            </button>
-          </div>
-
-          {sendTo === 'group' && (
-            <div className="animate-in fade-in duration-200 pt-3">
-              <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                Select Subscriber Group Segment
-              </label>
-              <select
-                value={groupId}
-                onChange={(e) => setGroupId(e.target.value)}
-                className="w-full sm:max-w-md px-4 py-3.5 bg-slate-50 border border-slate-100 focus:border-indigo-500 text-xs font-bold text-slate-800 rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-100 transition-all font-mono"
-              >
-                {groupOptions.map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
             </div>
           )}
         </div>

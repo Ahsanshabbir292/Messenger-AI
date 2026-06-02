@@ -4,6 +4,7 @@ import { ArrowLeft, User, Image as ImageIcon, Sparkles, Paperclip, Clock, Calend
 interface MemberPage {
   id: string;
   name: string;
+  subscriberCount?: number;
   picture?: {
     data?: {
       url?: string;
@@ -53,18 +54,9 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
 
   const [dragActive, setDragActive] = useState(false);
 
-  const groupOptions = [
-    { id: 'g1', name: 'VIP Buyers (450 contacts)', recipients: 450 },
-    { id: 'g2', name: 'Urdu Resellers (310 contacts)', recipients: 310 },
-    { id: 'g3', name: 'Rawalpindi Leads (180 contacts)', recipients: 180 },
-    { id: 'g4', name: 'Support Inbound (45 contacts)', recipients: 45 }
-  ];
-
   const getPageSubscriberCount = (id: string) => {
-    if (id === '113601507007941') return 1450;
-    if (id === '100471936194627') return 850;
-    if (id === '176596215532497') return 2100;
-    return 120;
+    const page = pages.find(p => p.id === id);
+    return page?.subscriberCount || 0;
   };
 
   const togglePageSelection = (id: string) => {
@@ -83,15 +75,10 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
     }
   };
 
-  // Compute aggregate total recipients
+  // Compute aggregate total recipients based on actual data
   const getCombinedRecipients = () => {
     return selectedPageIds.reduce((sum, id) => {
-      const pageSubs = getPageSubscriberCount(id);
-      if (sendTo === 'group') {
-        const selectedGrp = groupOptions.find(g => g.id === groupId);
-        return sum + Math.min(pageSubs, selectedGrp?.recipients || 50);
-      }
-      return sum + pageSubs;
+      return sum + getPageSubscriberCount(id);
     }, 0);
   };
 
@@ -245,56 +232,6 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
                   </div>
                 );
               })}
-            </div>
-          )}
-        </div>
-
-        {/* Step 2: Target Audience */}
-        <div className="bg-white p-6 sm:p-8 rounded-[2rem] border border-slate-150 shadow-sm space-y-4">
-          <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400">
-            Send To Audience
-          </label>
-          <div className="flex gap-4">
-            <button
-              type="button"
-              onClick={() => setSendTo('all')}
-              className={`flex-1 sm:flex-initial px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest border-2 transition-all cursor-pointer ${
-                sendTo === 'all'
-                  ? 'border-indigo-600 bg-indigo-50/10 text-indigo-700'
-                  : 'border-slate-100 hover:border-slate-150 bg-slate-50 text-slate-500'
-              }`}
-            >
-              All Audience
-            </button>
-            <button
-              type="button"
-              onClick={() => setSendTo('group')}
-              className={`flex-1 sm:flex-initial px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest border-2 transition-all cursor-pointer ${
-                sendTo === 'group'
-                  ? 'border-indigo-600 bg-indigo-50/10 text-indigo-700'
-                  : 'border-slate-100 hover:border-slate-150 bg-slate-50 text-slate-500'
-              }`}
-            >
-              A Group
-            </button>
-          </div>
-
-          {sendTo === 'group' && (
-            <div className="animate-in fade-in duration-200 pt-3">
-              <label className="block text-[9px] font-black uppercase tracking-wider text-slate-400 mb-2">
-                Select Combined Subscriber Group
-              </label>
-              <select
-                value={groupId}
-                onChange={(e) => setGroupId(e.target.value)}
-                className="w-full sm:max-w-md px-4 py-3.5 bg-slate-50 border border-slate-100 focus:border-indigo-500 text-xs font-bold text-slate-800 rounded-xl focus:outline-none font-mono"
-              >
-                {groupOptions.map(g => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
-                  </option>
-                ))}
-              </select>
             </div>
           )}
         </div>

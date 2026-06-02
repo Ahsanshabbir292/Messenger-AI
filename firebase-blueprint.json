@@ -99,6 +99,27 @@
         "conversations": { "type": "array" }
       },
       "required": ["conversations"]
+    },
+    "Broadcast": {
+      "title": "Broadcast",
+      "description": "Bulk FB page conversation broadcast campaigns history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "pageId": { "type": "string" },
+        "pageName": { "type": "string" },
+        "message": { "type": "string" },
+        "hasAttachment": { "type": "boolean" },
+        "attachmentType": { "type": "string" },
+        "totalRecipients": { "type": "integer" },
+        "sentCount": { "type": "integer" },
+        "successCount": { "type": "integer" },
+        "failCount": { "type": "integer" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "recipientsStatus": { "type": "array" }
+      },
+      "required": ["id", "pageId", "totalRecipients", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -141,6 +162,10 @@
     "/users/{userEmail}/simulated_conversations/{pageId}": {
       "schema": "SimulatedConversation",
       "description": "Under-the-hood conversational state for sandbox Facebook Page simulation"
+    },
+    "/users/{userEmail}/broadcasts/{broadcastId}": {
+      "schema": "Broadcast",
+      "description": "Track record of broadcast campaigns executed per user"
     }
   }
 }
