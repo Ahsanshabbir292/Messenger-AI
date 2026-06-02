@@ -142,15 +142,16 @@ export default function AuthPage({
         });
 
         const registeredUser = res.data.user;
+        const finalEmail = registeredUser?.email || formData.email || "";
         const appUserObj = {
-          email: registeredUser.email,
-          fullName: registeredUser.fullName || registeredUser.email.split('@')[0],
-          workspaceId: registeredUser.workspaceId,
-          role: registeredUser.role || "admin"
+          email: finalEmail,
+          fullName: registeredUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
+          workspaceId: registeredUser?.workspaceId,
+          role: registeredUser?.role || "admin"
         };
 
         localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-        axios.defaults.headers.common['x-user-email'] = registeredUser.email;
+        axios.defaults.headers.common['x-user-email'] = finalEmail;
         
         onLoginSuccess();
       } catch (err: any) {
@@ -215,21 +216,24 @@ export default function AuthPage({
         throw new Error('Google Sign-In was successful but did not return email.');
       }
 
+      const googleEmail = result.user.email || "";
+      const googleFullName = result.user.displayName || (googleEmail ? googleEmail.split('@')[0] : "User");
       const res = await axios.post('/api/auth/google-login', {
-        email: result.user.email,
-        fullName: result.user.displayName || result.user.email.split('@')[0]
+        email: googleEmail,
+        fullName: googleFullName
       });
 
       const loggedUser = res.data.user;
+      const finalEmail = loggedUser?.email || googleEmail || "";
       const appUserObj = {
-        email: loggedUser.email,
-        fullName: loggedUser.fullName || loggedUser.email.split('@')[0],
-        workspaceId: loggedUser.workspaceId,
-        role: loggedUser.role || "admin"
+        email: finalEmail,
+        fullName: loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
+        workspaceId: loggedUser?.workspaceId,
+        role: loggedUser?.role || "admin"
       };
 
       localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = loggedUser.email;
+      axios.defaults.headers.common['x-user-email'] = finalEmail;
       onLoginSuccess();
     } catch (err: any) {
       console.error("[Google Auth Error]:", err);
@@ -254,15 +258,16 @@ export default function AuthPage({
       });
       
       const loggedUser = res.data.user;
+      const finalEmail = loggedUser?.email || formData.email || "";
       const appUserObj = {
-        email: loggedUser.email,
-        fullName: loggedUser.fullName || loggedUser.email.split('@')[0],
-        workspaceId: loggedUser.workspaceId,
-        role: loggedUser.role || "admin"
+        email: finalEmail,
+        fullName: loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
+        workspaceId: loggedUser?.workspaceId,
+        role: loggedUser?.role || "admin"
       };
 
       localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = loggedUser.email;
+      axios.defaults.headers.common['x-user-email'] = finalEmail;
       onLoginSuccess();
     } catch (err: any) {
       const errMsg = err.response?.data?.error || err.message || String(err);
