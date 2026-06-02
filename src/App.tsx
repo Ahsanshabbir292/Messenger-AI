@@ -18,6 +18,14 @@ import ContactPage from './components/ContactPage';
 
 type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support' | 'about' | 'contact';
 
+const DASHBOARD_TABS = ['overview', 'pages', 'chat', 'audience', 'broadcast', 'analytics', 'team', 'billing', 'settings'];
+
+const isDashboardRoute = (path: string) => {
+  if (path === '/dashboard') return true;
+  const segment = path.replace(/^\//, '').split('/')[0];
+  return DASHBOARD_TABS.includes(segment);
+};
+
 export default function App() {
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname);
   const [inviteData, setInviteData] = useState<any>(null);
@@ -87,7 +95,7 @@ export default function App() {
           localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
           axios.defaults.headers.common['x-user-email'] = res.data.user.email;
           if (currentPath === '/' || currentPath === '/signin' || currentPath === '/signup') {
-            navigateTo('/dashboard');
+            navigateTo('/overview');
           }
         }
       } catch (err) {
@@ -100,7 +108,7 @@ export default function App() {
               setAppUser(parsed);
               axios.defaults.headers.common['x-user-email'] = parsed.email;
               if (currentPath === '/' || currentPath === '/signin' || currentPath === '/signup') {
-                navigateTo('/dashboard');
+                navigateTo('/overview');
               }
               setLoading(false);
               return;
@@ -109,7 +117,7 @@ export default function App() {
         }
 
         // If trying to access protected dashboard, redirect to signin
-        if (currentPath === '/dashboard' || currentPath.startsWith('/dashboard/')) {
+        if (isDashboardRoute(currentPath)) {
           navigateTo('/signin');
         }
       } finally {
@@ -133,9 +141,9 @@ export default function App() {
         localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
         axios.defaults.headers.common['x-user-email'] = res.data.user.email;
       }
-      navigateTo('/dashboard');
+      navigateTo('/overview');
     } catch (err) {
-      navigateTo('/dashboard');
+      navigateTo('/overview');
     }
   };
 
@@ -163,7 +171,7 @@ export default function App() {
     view = 'signin';
   } else if (currentPath === '/signup') {
     view = 'signup';
-  } else if (currentPath === '/dashboard' || currentPath.startsWith('/dashboard/')) {
+  } else if (isDashboardRoute(currentPath)) {
     view = 'dashboard';
   } else if (currentPath === '/privacy') {
     view = 'privacy';

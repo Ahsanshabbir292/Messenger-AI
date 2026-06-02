@@ -152,6 +152,12 @@ const formatAxiosError = (err: any, fallbackMessage: string): string => {
 export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }: { onLogout: () => void, appUser?: any, currentPath?: string, navigateTo?: (path: string) => void }) {
   const getTabFromPath = (path?: string) => {
     if (!path) return 'overview';
+    const cleanPath = path.replace(/^\//, '');
+    const firstSegment = cleanPath.split('/')[0];
+    const tabs = ['overview', 'pages', 'chat', 'audience', 'broadcast', 'analytics', 'team', 'billing', 'settings'];
+    if (tabs.includes(firstSegment)) {
+      return firstSegment;
+    }
     const segments = path.split('/');
     if (segments[1] === 'dashboard' && segments[2]) {
       return segments[2];
@@ -174,11 +180,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const setActiveTab = (tab: string) => {
     setActiveTabInternal(tab);
     if (navigateTo) {
-      if (tab === 'overview') {
-        navigateTo('/dashboard');
-      } else {
-        navigateTo(`/dashboard/${tab}`);
-      }
+      navigateTo(`/${tab}`);
     }
   };
 
