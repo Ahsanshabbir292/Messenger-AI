@@ -1,15 +1,71 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Bot, LayoutDashboard, MessageSquare, Settings, 
-  Plus, MoreHorizontal, Activity, 
+  Plus, MoreHorizontal, Activity, BarChart2,
   ChevronDown, Bell, LogOut,
   Edit, Play, ExternalLink, Facebook, RefreshCw, Link2, CheckCircle2,
-  Send, User, Image as ImageIcon, File as FileIcon, Mic, Paperclip, X, Music, Download,
-  CreditCard, History, Sparkles, Clock, Star, Shield, Zap, Users, UserPlus, Mail, ShieldAlert, Trash2, Lock, AlertTriangle, Info,
+  Send, User, Image as ImageIcon, File as FileIcon, Mic, Paperclip, X, Music, Download, Megaphone,
+  CreditCard, History, Sparkles, Clock, Star, Shield, Zap, Users, UserPlus, Mail, ShieldAlert, Trash2, Lock, AlertTriangle, Info, ArrowLeft, ArrowRight, Radio,
   Search, Filter, CheckSquare, Layers, ToggleLeft as Toggle, Globe, Power, ChevronRight, MessageCircle, CircleDollarSign, Menu
 } from 'lucide-react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { 
+  ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell 
+} from 'recharts';
+import { BroadcastChoice } from './BroadcastChoice';
+import { BroadcastSingle } from './BroadcastSingle';
+import { BroadcastBulk } from './BroadcastBulk';
+import { AudiencePage } from './AudiencePage';
+import { AnalyticsPage } from './AnalyticsPage';
+
+const getAvatarColors = (name: string) => {
+  const themes = [
+    { bg: 'bg-indigo-50 text-indigo-700 border-indigo-200', text: 'from-indigo-500 to-purple-600' },
+    { bg: 'bg-emerald-50 text-emerald-700 border-emerald-200', text: 'from-emerald-500 to-teal-600' },
+    { bg: 'bg-rose-50 text-rose-700 border-rose-200', text: 'from-rose-500 to-pink-600' },
+    { bg: 'bg-amber-50 text-amber-700 border-amber-200', text: 'from-amber-500 to-orange-600' },
+    { bg: 'bg-sky-50 text-sky-700 border-sky-200', text: 'from-sky-500 to-blue-600' },
+    { bg: 'bg-violet-50 text-violet-700 border-violet-200', text: 'from-violet-500 to-fuchsia-600' },
+  ];
+  if (!name) return themes[0];
+  let sum = 0;
+  for (let i = 0; i < name.length; i++) {
+    sum += name.charCodeAt(i);
+  }
+  return themes[sum % themes.length];
+};
+
+const SafeAvatar = ({ src, name, className = "w-12 h-12 rounded-xl" }: { src?: string, name?: string, className?: string }) => {
+  const [error, setError] = useState(false);
+  const initials = name ? name.trim().split(/\s+/).map(n => n[0]).join('').substring(0, 2).toUpperCase() : '?';
+  const theme = getAvatarColors(name || '');
+
+  useEffect(() => {
+    setError(false);
+  }, [src]);
+
+  if (src && !error) {
+    const isExternalUrl = src.startsWith('http://') || src.startsWith('https://');
+    const displaySrc = isExternalUrl ? `/api/proxy-image?url=${encodeURIComponent(src)}` : src;
+
+    return (
+      <img 
+        src={displaySrc} 
+        alt={name || "Avatar"} 
+        className={`${className} object-cover`}
+        referrerPolicy="no-referrer"
+        onError={() => setError(true)}
+      />
+    );
+  }
+
+  return (
+    <div className={`${className} flex items-center justify-center font-black border ${theme.bg} shrink-0 select-none`}>
+      {initials}
+    </div>
+  );
+};
 
 const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) => (
   <button 
@@ -24,12 +80,8 @@ const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, 
 const PageSyncCard = ({ name, id, pictureUrl, isSynced, onSync, onChat }: { name: string, id: string, pictureUrl?: string, isSynced: boolean, onSync?: () => void | Promise<void>, onChat?: () => void, key?: React.Key }) => (
   <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm hover:border-indigo-200 transition-all group">
     <div className="flex items-center gap-4">
-      <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center border border-indigo-100 group-hover:border-indigo-600 transition-all overflow-hidden">
-        {pictureUrl ? (
-          <img src={pictureUrl} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-        ) : (
-          <Facebook className="w-6 h-6 text-indigo-600" />
-        )}
+      <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center border border-indigo-100 group-hover:border-indigo-600 transition-all overflow-hidden shrink-0">
+        <SafeAvatar src={pictureUrl} name={name} className="w-full h-full" />
       </div>
       <div>
         <p className="text-sm font-black text-slate-900 leading-tight">{name}</p>
@@ -178,9 +230,218 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     localStorage.setItem('current_plan_v1', currentPlan);
   }, [currentPlan]);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const [creditBalance, setCreditBalance] = useState(0.00);
+  const [creditBalance, setCreditBalance] = useState(5000.00);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<'admin' | 'agent' | 'support'>('admin');
+
+  // --- BROADCAST STATES & HELPERS ---
+  const [broadcastSubTab, setBroadcastSubTab] = useState<'list' | 'analytics'>('list');
+  const [broadcastView, setBroadcastView] = useState<'dashboard' | 'choice' | 'single' | 'bulk'>('dashboard');
+  const [broadcastSendTo, setBroadcastSendTo] = useState<'all' | 'group'>('all');
+  const [broadcastGroupId, setBroadcastGroupId] = useState<string>("");
+  const [selectedBulkPageIds, setSelectedBulkPageIds] = useState<string[]>([]);
+  const [broadcastScheduleDate, setBroadcastScheduleDate] = useState("");
+  const [broadcastScheduleTime, setBroadcastScheduleTime] = useState("");
+  const [broadcastMessageTag, setBroadcastMessageTag] = useState("UTILITY");
+  const [activeMessageInputType, setActiveMessageInputType] = useState<'text' | 'image' | 'both'>('text');
+  const [isRecipientSlugDropdownOpen, setIsRecipientSlugDropdownOpen] = useState(false);
+  const [broadcastSearchQuery, setBroadcastSearchQuery] = useState("");
+  const [broadcastsHistory, setBroadcastsHistory] = useState<any[]>([]);
+  const [selectedBroadcastId, setSelectedBroadcastId] = useState<string | null>(null);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [broadcastProgress, setBroadcastProgress] = useState<any>(null);
+  const [broadcastLiveLogs, setBroadcastLiveLogs] = useState<string[]>([]);
+  const [broadcastPageId, setBroadcastPageId] = useState("");
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [broadcastFile, setBroadcastFile] = useState<File | null>(null);
+  const [broadcastAttachmentType, setBroadcastAttachmentType] = useState<string>("image");
+  const [isSubmittingBroadcast, setIsSubmittingBroadcast] = useState(false);
+
+  // --- Campaign Broadcasts Filter States ---
+  const [isFilterDropdownOpen, setIsFilterDropdownOpen] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterPageId, setFilterPageId] = useState<string>("all");
+  const [filterType, setFilterType] = useState<string>("all");
+  const [filterTag, setFilterTag] = useState<string>("all");
+  const [filterStartDate, setFilterStartDate] = useState<string>("");
+  const [filterEndDate, setFilterEndDate] = useState<string>("");
+  const [filterOnlyFailures, setFilterOnlyFailures] = useState<boolean>(false);
+
+  const [appliedFilters, setAppliedFilters] = useState({
+    status: "all",
+    pageId: "all",
+    type: "all",
+    tag: "all",
+    startDate: "",
+    endDate: "",
+    onlyFailures: false
+  });
+
+  const getBroadcastHistory = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/facebook/broadcasts');
+      setBroadcastsHistory(res.data.broadcasts || []);
+    } catch (err) {
+      console.error("Failed to get broadcast history", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'broadcast') {
+      getBroadcastHistory();
+    }
+  }, [activeTab, getBroadcastHistory]);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleProgress = (data: any) => {
+      setBroadcastProgress(data);
+      setIsBroadcasting(true);
+      const logLine = `[${new Date().toLocaleTimeString()}] Delivered to ${data.latestRecipient}... ${data.latestStatus === 'delivered' ? '✅ SUCCESS' : '❌ FAILED'}`;
+      setBroadcastLiveLogs(prev => [logLine, ...prev]);
+    };
+
+    const handleCompleted = (data: any) => {
+      setIsBroadcasting(false);
+      setBroadcastProgress(null);
+      addToast(`Broadcast completed! Sent to ${data.total} users successfully.`, "success");
+      getBroadcastHistory();
+    };
+
+    socket.on("broadcast_progress", handleProgress);
+    socket.on("broadcast_completed", handleCompleted);
+
+    return () => {
+      socket.off("broadcast_progress", handleProgress);
+      socket.off("broadcast_completed", handleCompleted);
+    };
+  }, [socket, getBroadcastHistory]);
+
+  const handleStartBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!broadcastPageId) {
+      addToast("Please select a Facebook Page to broadcast from.", "error");
+      return;
+    }
+    if (!broadcastMessage && !broadcastFile) {
+      addToast("Please enter a message or upload an attachment to broadcast.", "error");
+      return;
+    }
+
+    setIsSubmittingBroadcast(true);
+    setBroadcastLiveLogs([`[${new Date().toLocaleTimeString()}] Initializing broadcast connection...`]);
+
+    const formData = new FormData();
+    formData.append("pageId", broadcastPageId);
+    if (broadcastMessage) formData.append("message", broadcastMessage);
+    if (broadcastFile) {
+      formData.append("file", broadcastFile);
+      formData.append("attachmentType", broadcastAttachmentType);
+    }
+
+    try {
+      const res = await axios.post("/api/facebook/broadcast", formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+
+      if (res.data.success) {
+        addToast(res.data.message || "Broadcast initialized!", "success");
+        setIsBroadcasting(true);
+        setBroadcastMessage("");
+        setBroadcastFile(null);
+        getBroadcastHistory();
+      }
+    } catch (err: any) {
+      const friendlyErr = err.response?.data?.error || "Failed to start broadcast. Make sure your Page has conversation threads.";
+      addToast(friendlyErr, "error");
+      setBroadcastLiveLogs(prev => [`[${new Date().toLocaleTimeString()}] Broadcast aborted: ${friendlyErr}`, ...prev]);
+    } finally {
+      setIsSubmittingBroadcast(false);
+    }
+  };
+
+  const handleSingleSubmit = async (data: any) => {
+    setBroadcastPageId(data.pageId);
+    setBroadcastMessage(data.message);
+    setBroadcastFile(data.file);
+    setBroadcastAttachmentType(data.attachmentType);
+    setBroadcastView('dashboard');
+    setBroadcastSubTab('list');
+
+    setIsSubmittingBroadcast(true);
+    setBroadcastLiveLogs([`[${new Date().toLocaleTimeString()}] Initializing single broadcast connection...`]);
+
+    const formData = new FormData();
+    formData.append("pageId", data.pageId);
+    if (data.message) formData.append("message", data.message);
+    if (data.file) {
+      formData.append("file", data.file);
+      formData.append("attachmentType", data.attachmentType);
+    }
+
+    try {
+      const res = await axios.post("/api/facebook/broadcast", formData, {
+        headers: { "Content-Type": "multipart/form-data" }
+      });
+
+      if (res.data.success) {
+        addToast(res.data.message || "Broadcast initialized!", "success");
+        setIsBroadcasting(true);
+        setBroadcastMessage("");
+        setBroadcastFile(null);
+        getBroadcastHistory();
+      }
+    } catch (err: any) {
+      const friendlyErr = err.response?.data?.error || "Failed to start broadcast. Make sure your Page has conversation threads.";
+      addToast(friendlyErr, "error");
+      setBroadcastLiveLogs(prev => [`[${new Date().toLocaleTimeString()}] Broadcast aborted: ${friendlyErr}`, ...prev]);
+    } finally {
+      setIsSubmittingBroadcast(false);
+    }
+  };
+
+  const handleBulkSubmit = async (data: any) => {
+    setIsSubmittingBroadcast(true);
+    setIsBroadcasting(true);
+    setBroadcastLiveLogs([`[${new Date().toLocaleTimeString()}] Initializing bulk broadcast queue for ${data.pageIds.length} pages...`]);
+    setBroadcastView('dashboard');
+    setBroadcastSubTab('list');
+
+    try {
+      for (const pageId of data.pageIds) {
+        const pageName = pages.find(p => p.id === pageId)?.name || 'Connected Page';
+        setBroadcastLiveLogs(prev => [`[${new Date().toLocaleTimeString()}] Dispatching message for page: ${pageName}...`, ...prev]);
+        
+        const formData = new FormData();
+        formData.append("pageId", pageId);
+        if (data.message) formData.append("message", data.message);
+        if (data.file) {
+          formData.append("file", data.file);
+          formData.append("attachmentType", data.attachmentType);
+        }
+        
+        try {
+          await axios.post("/api/facebook/broadcast", formData, {
+            headers: { "Content-Type": "multipart/form-data" }
+          });
+          setBroadcastLiveLogs(prev => [`[${new Date().toLocaleTimeString()}] Broadcast queued successfully for: ${pageName}`, ...prev]);
+        } catch (err: any) {
+          const friendlyErr = err.response?.data?.error || "Failed. page might have no conversations.";
+          setBroadcastLiveLogs(prev => [`[${new Date().toLocaleTimeString()}] ❌ Failed for ${pageName}: ${friendlyErr}`, ...prev]);
+        }
+      }
+      
+      addToast("All selected bulk page broadcasts dispatched!", "success");
+      setBroadcastMessage("");
+      setBroadcastFile(null);
+      getBroadcastHistory();
+    } catch (err) {
+      console.error("Bulk broadcast failure", err);
+    } finally {
+      setIsSubmittingBroadcast(false);
+    }
+  };
 
   // --- SETTINGS STATES & SUB-VIEWS ---
   const [settingsSubTab, setSettingsSubTab] = useState<'workspace' | 'profile'>('workspace');
@@ -487,6 +748,62 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     }
   };
 
+  const handleOpenChatFromAudience = async (userId: string, pageId: string) => {
+    let page = pages.find((p: any) => p.id === pageId);
+    if (!page) {
+      try {
+        const res = await axios.get('/api/facebook/pages');
+        const fetchedPages = res.data.pages || [];
+        setPages(fetchedPages);
+        setSelectedPageIds(res.data.selectedPageIds || []);
+        setTrialLocked(!!res.data.trialLocked);
+        page = fetchedPages.find((p: any) => p.id === pageId);
+      } catch (err) {
+        console.error("Failed to fetch pages dynamically on audience chat click", err);
+      }
+    }
+
+    if (page) {
+      setSelectedPage(page);
+      setActiveTab('chat');
+      setIsLoading(true);
+      try {
+        const res = await axios.get(`/api/facebook/conversations/${pageId}`);
+        const convs = res.data.conversations || [];
+        setConversations(convs);
+        
+        const targetConv = convs.find((c: any) => 
+          c.participants?.data?.some((p: any) => p.id === userId)
+        );
+        
+        if (targetConv) {
+          setSelectedConversation(targetConv);
+          setShowChatDetail(true);
+        } else {
+          const mockConv = {
+            id: `conv_sim_${userId}`,
+            participants: {
+              data: [
+                { name: "Customer", id: userId },
+                { name: page.name, id: pageId }
+              ]
+            },
+            messages: { data: [] },
+            updated_time: new Date().toISOString()
+          };
+          setSelectedConversation(mockConv);
+          setShowChatDetail(true);
+        }
+      } catch (err) {
+        console.error("Error setting custom conversation thread", err);
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      setActiveTab('chat');
+    }
+  };
+
   const handleReply = async () => {
     if (!selectedPage || !selectedConversation || !replyMessage.trim()) return;
     
@@ -743,6 +1060,9 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
     overview: ['owner', 'admin', 'agent', 'support'],
     pages: ['owner', 'admin', 'agent'],
     chat: ['owner', 'admin', 'agent', 'support'],
+    audience: ['owner', 'admin', 'agent', 'support'],
+    broadcast: ['owner', 'admin'],
+    analytics: ['owner', 'admin', 'agent', 'support'],
     team: ['owner', 'admin'],
     billing: ['owner', 'admin'],
     settings: ['owner'],
@@ -839,6 +1159,14 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           
           <SidebarItem icon={<MessageSquare className="w-5 h-5" />} label="Conversations" active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setIsMobileMenuOpen(false); }} />
           
+          <SidebarItem icon={<Users className="w-5 h-5" />} label="Audience" active={activeTab === 'audience'} onClick={() => { setActiveTab('audience'); setIsMobileMenuOpen(false); }} />
+          
+          {(currentActiveRole === 'owner' || currentActiveRole === 'admin') && (
+            <SidebarItem icon={<Megaphone className="w-5 h-5" />} label="Broadcast" active={activeTab === 'broadcast'} onClick={() => { setActiveTab('broadcast'); setIsMobileMenuOpen(false); }} />
+          )}
+
+          <SidebarItem icon={<BarChart2 className="w-5 h-5" />} label="Analytics" active={activeTab === 'analytics'} onClick={() => { setActiveTab('analytics'); setIsMobileMenuOpen(false); }} />
+          
           {(currentActiveRole === 'owner' || currentActiveRole === 'admin') && (
             <SidebarItem icon={<Users className="w-5 h-5" />} label="Team" active={activeTab === 'team'} onClick={() => { setTeamSubMode('list'); setActiveTab('team'); setIsMobileMenuOpen(false); }} />
           )}
@@ -855,12 +1183,11 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
         <div className="mt-auto pt-6 border-t border-slate-100">
           <div className="bg-slate-50 p-4 rounded-2xl flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center overflow-hidden border-2 border-white shadow-sm font-black text-xs text-indigo-700">
-              {currentActiveRole === 'owner' && userProfile?.picture?.data?.url ? (
-                <img src={userProfile.picture.data.url} alt="User" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+              {currentActiveRole === 'owner' ? (
+                <SafeAvatar src={userProfile?.picture?.data?.url} name={userProfile?.name || appUser?.fullName || "Owner"} className="w-full h-full" />
               ) : (
                 <span>
-                  {currentActiveRole === 'owner' ? 'OW' :
-                   currentActiveRole === 'admin' ? 'AD' :
+                  {currentActiveRole === 'admin' ? 'AD' :
                    currentActiveRole === 'agent' ? 'AG' : 'SP'}
                 </span>
               )}
@@ -1123,11 +1450,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                       <div className="flex flex-col xs:flex-row items-center xs:items-start text-center xs:text-left gap-4 mb-6">
                         <div className="relative">
                           <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full overflow-hidden border-2 border-slate-50 shadow-sm bg-slate-50">
-                            {userProfile?.picture?.data?.url ? (
-                              <img src={userProfile.picture.data.url} alt="User" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center"><User className="w-8 h-8 text-slate-200" /></div>
-                            )}
+                            <SafeAvatar src={userProfile?.picture?.data?.url} name={userProfile?.name || appUser?.fullName || "User"} className="w-full h-full" />
                           </div>
                           <div className="absolute -bottom-1 -right-1 w-6 h-6 sm:w-7 sm:h-7 bg-[#EBF5FF] border-2 border-white rounded-full flex items-center justify-center">
                             <Facebook className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-[#1877F2]" />
@@ -1265,11 +1588,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                  <td className="px-4 sm:px-10 py-4 sm:py-8">
                                     <div className="flex items-center gap-4 sm:gap-5">
                                        <div className="w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 rounded-xl sm:rounded-[1.5rem] border-2 sm:border-4 border-white shadow-xl overflow-hidden ring-1 ring-slate-100 group-hover:scale-105 transition-transform shrink-0">
-                                          {p.picture?.data?.url ? (
-                                             <img src={p.picture.data.url} alt={p.name} className="w-full h-full object-cover" />
-                                          ) : (
-                                             <div className="w-full h-full flex items-center justify-center"><Facebook className="w-5 h-5 sm:w-6 sm:h-6 text-slate-300" /></div>
-                                          )}
+                                          <SafeAvatar src={p.picture?.data?.url} name={p.name} className="w-full h-full" />
                                        </div>
                                        <div>
                                           <p className="text-xs sm:text-sm font-black text-slate-900 group-hover:text-indigo-600 transition-colors leading-tight">{p.name}</p>
@@ -1455,11 +1774,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                              {isActive && <div className="absolute left-0 top-4 bottom-4 w-0.5 sm:w-1 bg-indigo-600 rounded-r-full shadow-[0_0_10px_rgba(79,70,229,0.5)]"></div>}
                              <div className="relative shrink-0">
                                 <div className={`w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl overflow-hidden border-2 transition-all shadow-sm ${isActive ? 'border-indigo-600 scale-105 shadow-xl' : 'border-white bg-slate-100'}`}>
-                                   {other?.picture?.data?.url ? (
-                                      <img src={other.picture.data.url} alt={other.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                   ) : (
-                                      <div className="w-full h-full flex items-center justify-center"><User className="w-5 h-5 sm:w-6 sm:h-6 text-slate-300" /></div>
-                                   )}
+                                   <SafeAvatar src={other?.picture?.data?.url} name={other?.name} className="w-full h-full" />
                                 </div>
                                 <div className="absolute -bottom-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-emerald-500 border-2 border-white rounded-full"></div>
                              </div>
@@ -1495,7 +1810,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                              <div className="w-10 h-10 lg:w-16 lg:h-16 rounded-xl lg:rounded-[1.5rem] overflow-hidden border-2 lg:border-4 border-slate-100 shadow-lg lg:shadow-xl">
                                 {(() => {
                                    const other = selectedConversation.participants.data.find((p: any) => p.id !== selectedPage?.id);
-                                   return other?.picture?.data?.url ? <img src={other.picture.data.url} alt={other.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <div className="w-full h-full bg-slate-100 flex items-center justify-center"><User className="w-6 h-6 lg:w-8 lg:h-8 text-indigo-600" /></div>;
+                                   return <SafeAvatar src={other?.picture?.data?.url} name={other?.name} className="w-full h-full" />;
                                 })()}
                              </div>
                              <div className="min-w-0">
@@ -1521,11 +1836,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                 <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-5'} group`}>
                                    {!isMe && (
                                       <div className="w-10 h-10 rounded-xl overflow-hidden border-2 border-white shadow-xl shadow-slate-200/50 mb-1 shrink-0">
-                                         {sender?.picture?.data?.url ? (
-                                            <img src={sender.picture.data.url} alt={sender.name} className="w-full h-full object-cover" />
-                                         ) : (
-                                            <div className="w-full h-full bg-slate-100 flex items-center justify-center"><User className="w-4 h-4 text-slate-300" /></div>
-                                         )}
+                                         <SafeAvatar src={sender?.picture?.data?.url} name={sender?.name} className="w-full h-full" />
                                       </div>
                                    )}
                                    <div className="max-w-[70%]">
@@ -1538,7 +1849,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                          {m.message}
                                          {m.attachments?.data?.map((att: any, attIdx: number) => (
                                             <div key={attIdx} className="mt-5 rounded-2xl overflow-hidden shadow-2xl">
-                                               {att.type === 'image' && <img src={att.payload?.url} alt="Attachment" className="max-w-full hover:scale-105 transition-transform duration-700" referrerPolicy="no-referrer" />}
+                                               {att.type === 'image' && <img src={att.payload?.url?.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(att.payload.url)}` : (att.payload?.url || '')} alt="Attachment" className="max-w-full hover:scale-105 transition-transform duration-700" referrerPolicy="no-referrer" />}
                                                {att.type === 'audio' && <div className="bg-black/5 p-4"><audio controls className="w-full h-8 opacity-80"><source src={att.payload?.url} /></audio></div>}
                                                {att.type === 'file' && (
                                                  <a href={att.payload?.url} target="_blank" rel="noreferrer" className={`flex items-center gap-3 p-4 rounded-xl text-xs font-black transition-all ${isMe ? 'bg-indigo-700 hover:bg-indigo-800' : 'bg-slate-50 hover:bg-slate-100'}`}>
@@ -1633,6 +1944,14 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
             </div>
           )}
 
+          {activeTab === 'audience' && (
+            <AudiencePage onOpenChat={handleOpenChatFromAudience} addToast={addToast} />
+          )}
+
+          {activeTab === 'analytics' && (
+            <AnalyticsPage pages={pages} creditBalance={creditBalance} broadcastsHistory={broadcastsHistory} addToast={addToast} />
+          )}
+
           {activeTab === 'settings' && (
             <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20">
               {/* Header */}
@@ -1717,11 +2036,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
                         <div className="flex items-center gap-4">
                           <div className="w-12 h-12 sm:w-14 sm:h-14 bg-indigo-750/10 rounded-full flex items-center justify-center overflow-hidden border border-slate-100 shadow-sm shrink-0">
-                            {userProfile?.picture?.data?.url ? (
-                              <img src={userProfile.picture.data.url} alt="Connected Profile" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            ) : (
-                              <Facebook className="w-6 h-6 sm:w-7 sm:h-7 text-indigo-600 fill-indigo-650" />
-                            )}
+                            <SafeAvatar src={userProfile?.picture?.data?.url} name={userProfile?.name || "Connected Profile"} className="w-full h-full" />
                           </div>
                           <div>
                             <p className="text-sm sm:text-base font-extrabold text-slate-900 leading-snug">
@@ -2201,6 +2516,630 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
             </div>
           )}
 
+          {activeTab === 'broadcast' && (() => {
+            const hasHistory = broadcastsHistory.length > 0;
+            
+            // Map real history or use premium default mock points
+            const realChartData = broadcastsHistory.map((b, idx) => {
+              const success = b.successCount || 0;
+              const fail = b.failCount || 0;
+              const total = b.totalRecipients || (success + fail) || 1;
+              const rate = Math.round((success / total) * 100);
+              return {
+                id: b.id,
+                name: b.createdAt ? new Date(b.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : `Campaign ${idx + 1}`,
+                dateLabel: b.createdAt ? new Date(b.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A',
+                messageShort: b.message ? (b.message.length > 30 ? b.message.substring(0, 30) + '...' : b.message) : (b.attachmentType ? `${b.attachmentType.toUpperCase()} Campaign` : 'No Text'),
+                messageFull: b.message || (b.attachmentType ? `Attachment type: ${b.attachmentType}` : 'No text body content'),
+                Delivered: success,
+                Failed: fail,
+                Total: total,
+                successRate: rate,
+                pageName: b.pageName || 'Connected Page',
+                status: b.status || 'completed'
+              };
+            }).reverse();
+
+            const mockChartData = [
+              { id: 'm1', name: 'May 15', dateLabel: '15 May 2026, 02:30 PM', messageShort: 'Assalam-o-Alaikum! New Deals Inside', messageFull: 'Assalam-o-Alaikum! Get flat 30% discount on all custom orders this week on our digital menu.', Delivered: 1450, Failed: 50, Total: 1500, successRate: 97, pageName: 'My Restaurant Page', status: 'completed' },
+              { id: 'm2', name: 'May 18', dateLabel: '18 May 2026, 11:15 AM', messageShort: 'Urdu Menu Card layout', messageFull: 'Updated digital high quality food menu card attached for family events.', Delivered: 2100, Failed: 120, Total: 2220, successRate: 95, pageName: 'My Restaurant Page', status: 'completed' },
+              { id: 'm3', name: 'May 22', dateLabel: '22 May 2026, 04:00 PM', messageShort: 'Flat 20% discount coupon code', messageFull: 'We are live with free takeaway delivery. Enter code FREE20 inside messenger.', Delivered: 2950, Failed: 50, Total: 3000, successRate: 98, pageName: 'My Pizza Joint', status: 'completed' },
+              { id: 'm4', name: 'May 26', dateLabel: '26 May 2026, 09:00 AM', messageShort: 'Video guide', messageFull: 'Watch how to easily register and book a table dynamically right inside our page inbox.', Delivered: 1200, Failed: 180, Total: 1380, successRate: 87, pageName: 'My Pizza Joint', status: 'completed' },
+              { id: 'm5', name: 'May 29', dateLabel: '29 May 2026, 05:40 PM', messageShort: 'Eid Mubarak Greetings pack', messageFull: 'Assalam-o-Alaikum! Eid Mubarak to you and your family members from our staff!', Delivered: 3480, Failed: 20, Total: 3500, successRate: 99, pageName: 'My Restaurant Page', status: 'completed' },
+              { id: 'm6', name: 'Jun 01', dateLabel: '01 Jun 2026, 10:30 AM', messageShort: 'Weekend Special Pizza Deal', messageFull: 'Our authentic hand tossed charcoal pizza specials are live today, order in seconds.', Delivered: 2800, Failed: 150, Total: 2950, successRate: 95, pageName: 'My Pizza Joint', status: 'completed' },
+            ];
+
+            const chartData = hasHistory ? realChartData : mockChartData;
+
+            const totalDelivered = hasHistory 
+              ? broadcastsHistory.reduce((acc, curr) => acc + (curr.successCount || 0), 0)
+              : mockChartData.reduce((acc, curr) => acc + curr.Delivered, 0);
+
+            const totalFailed = hasHistory 
+              ? broadcastsHistory.reduce((acc, curr) => acc + (curr.failCount || 0), 0)
+              : mockChartData.reduce((acc, curr) => acc + curr.Failed, 0);
+
+            const outstandingRatio = totalDelivered + totalFailed;
+            const finalSuccessPercentage = outstandingRatio > 0 ? Math.round((totalDelivered / outstandingRatio) * 100) : 0;
+
+            const pieData = [
+              { name: 'Delivered', value: totalDelivered, color: '#10b981' },
+              { name: 'Failed', value: totalFailed, color: '#f43f5e' }
+            ];
+
+            const CustomTooltip = ({ active, payload, label }: any) => {
+              if (active && payload && payload.length) {
+                return (
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl font-sans text-xs text-white">
+                    <p className="text-slate-400 font-bold mb-2">{label}</p>
+                    {payload.map((entry: any, index: number) => (
+                      <p key={index} className="font-extrabold flex items-center gap-2" style={{ color: entry.color }}>
+                        <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }}></span>
+                        {entry.name}: {entry.value.toLocaleString()} messages
+                      </p>
+                    ))}
+                  </div>
+                );
+              }
+              return null;
+            };
+
+            // Render modular sub-views depending on broadcastView
+            if (broadcastView === 'choice') {
+              return (
+                <BroadcastChoice 
+                  onSelect={(mode) => setBroadcastView(mode)}
+                  onBack={() => setBroadcastView('dashboard')}
+                />
+              );
+            }
+
+            if (broadcastView === 'single') {
+              return (
+                <BroadcastSingle
+                  pages={pages}
+                  creditBalance={creditBalance}
+                  onCancel={() => setBroadcastView('dashboard')}
+                  onSubmit={handleSingleSubmit}
+                  isSubmitting={isSubmittingBroadcast}
+                />
+              );
+            }
+
+            if (broadcastView === 'bulk') {
+              return (
+                <BroadcastBulk
+                  pages={pages}
+                  creditBalance={creditBalance}
+                  onCancel={() => setBroadcastView('dashboard')}
+                  onSubmit={handleBulkSubmit}
+                  isSubmitting={isSubmittingBroadcast}
+                />
+              );
+            }
+
+            const hasActiveFilters = 
+              appliedFilters.status !== "all" ||
+              appliedFilters.pageId !== "all" ||
+              appliedFilters.type !== "all" ||
+              appliedFilters.tag !== "all" ||
+              appliedFilters.startDate !== "" ||
+              appliedFilters.endDate !== "" ||
+              appliedFilters.onlyFailures;
+
+            const filteredHistory = broadcastsHistory.filter(b => {
+              // 1. Search Query filter (checks pageName, message, status)
+              if (broadcastSearchQuery) {
+                const query = broadcastSearchQuery.toLowerCase();
+                const matchesSearch = 
+                  (b.pageName && b.pageName.toLowerCase().includes(query)) ||
+                  (b.message && b.message.toLowerCase().includes(query)) ||
+                  (b.status && b.status.toLowerCase().includes(query));
+                if (!matchesSearch) return false;
+              }
+
+              // 2. Applied Status Filter
+              if (appliedFilters.status !== "all") {
+                const bStatus = (b.status || "completed").toLowerCase();
+                if (bStatus !== appliedFilters.status.toLowerCase()) {
+                  return false;
+                }
+              }
+
+              // 3. Applied Page Filter
+              if (appliedFilters.pageId !== "all") {
+                if (b.pageId !== appliedFilters.pageId) {
+                  return false;
+                }
+              }
+
+              // 4. Applied Type Filter
+              if (appliedFilters.type !== "all") {
+                if (appliedFilters.type === "text") {
+                  if (b.hasAttachment) return false;
+                } else if (appliedFilters.type === "attachment") {
+                  if (!b.hasAttachment) return false;
+                } else if (appliedFilters.type === "image") {
+                  if (!b.hasAttachment || b.attachmentType !== "image") return false;
+                } else if (appliedFilters.type === "file") {
+                  if (!b.hasAttachment || b.attachmentType !== "file") return false;
+                }
+              }
+
+              // 5. Applied Tag Filter (Messenger Tag)
+              if (appliedFilters.tag !== "all") {
+                const bTag = b.messageTag || b.tag || "UTILITY";
+                if (bTag !== appliedFilters.tag) {
+                  return false;
+                }
+              }
+
+              // 6. Applied Date Range Filter
+              if (appliedFilters.startDate) {
+                const bDateStr = b.createdAt ? b.createdAt.substring(0, 10) : ""; // yyyy-mm-dd
+                if (bDateStr && bDateStr < appliedFilters.startDate) {
+                  return false;
+                }
+              }
+              if (appliedFilters.endDate) {
+                const bDateStr = b.createdAt ? b.createdAt.substring(0, 10) : ""; // yyyy-mm-dd
+                if (bDateStr && bDateStr > appliedFilters.endDate) {
+                  return false;
+                }
+              }
+
+              // 7. Applied Failures Only Filter
+              if (appliedFilters.onlyFailures) {
+                if ((b.failCount || 0) <= 0) {
+                  return false;
+                }
+              }
+
+              return true;
+            });
+
+            return (
+              <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 text-left">
+                
+                {/* 1. Free Trial Active Top Banner */}
+                <div id="trial-active-banner" className="bg-[#E6F7F0]/80 border border-[#D1F2E0] text-[#027A48] px-4 py-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs sm:text-sm font-medium gap-3">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-[#10B981] fill-[#10B981]" />
+                    <span>Free Trial active — <span className="font-bold">3 days</span> remaining</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <span className="flex items-center gap-1.5 text-slate-600 bg-[#D1F2E0]/40 px-2.5 py-1 rounded-md text-xs border border-emerald-150/40 border-solid font-semibold">
+                      <CreditCard className="w-3.5 h-3.5 text-emerald-600 animate-pulse" />
+                      <span className="font-extrabold text-[#027A48]">5,000</span> trial credits
+                    </span>
+                    <button className="text-[#027A48] hover:text-[#025A38] font-black flex items-center gap-1 underline decoration-2 cursor-pointer bg-transparent border-none">
+                      Upgrade <ArrowRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Main Header Section */}
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Broadcasts</h2>
+                    <p className="text-sm text-slate-500 mt-1">Manage and monitor your message campaigns</p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    {/* Live Badge */}
+                    <span id="badge-live" className="px-3 py-1.5 bg-white border border-slate-205 text-slate-700 font-bold text-xs rounded-full flex items-center gap-2 shadow-sm border-solid">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Live
+                    </span>
+                    
+                    {/* Total Badge */}
+                    <span id="badge-total" className="px-3 py-1.5 bg-white border border-slate-205 text-slate-700 font-bold text-xs rounded-full flex items-center gap-1.5 shadow-sm border-solid">
+                      <Radio className="w-3.5 h-3.5 text-slate-400" />
+                      {broadcastsHistory.length} total
+                    </span>
+
+                    {/* New Broadcast Button */}
+                    <button
+                      onClick={() => setBroadcastView('choice')}
+                      className="bg-[#155EEF] hover:bg-[#124EC3] text-white px-4 py-2.5 rounded-lg font-bold text-xs sm:text-sm shadow-sm flex items-center gap-1.5 border-none cursor-pointer hover:shadow-md transition-all active:scale-95"
+                    >
+                      <Plus className="w-4 h-4 shrink-0" /> New Broadcast
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Search & Control Panel Row */}
+                <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-sm">
+                  {/* Search bar inputs */}
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Search broadcasts..."
+                      value={broadcastSearchQuery}
+                      onChange={(e) => setBroadcastSearchQuery(e.target.value)}
+                      className="pl-9 pr-4 py-2 w-full border border-slate-200 focus:border-[#155EEF] focus:outline-none rounded-lg text-sm text-slate-800 placeholder-slate-400 bg-white"
+                    />
+                  </div>
+
+                  {/* Actions buttons */}
+                  <div className="flex items-center justify-end gap-2.5">
+                    {/* Filter Button & Popover Container */}
+                    <div className="relative">
+                      <button 
+                        onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
+                        className={`flex items-center gap-2 border px-3.5 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all ${
+                          isFilterDropdownOpen || hasActiveFilters 
+                            ? 'border-[#155EEF] bg-[#F4F8FF] text-[#155EEF] ring-2 ring-[#EFF5FF]' 
+                            : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <Filter className={`w-4 h-4 ${isFilterDropdownOpen || hasActiveFilters ? 'text-[#155EEF]' : 'text-slate-500'}`} />
+                        <span>Filters</span>
+                        {hasActiveFilters && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#155EEF]" />
+                        )}
+                      </button>
+
+                      {/* POPUP OVERLAY */}
+                      {isFilterDropdownOpen && (
+                        <div id="filter-dropdown-menu" className="absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-slate-200 rounded-xl shadow-xl p-5 z-50 text-left animate-in fade-in slide-in-from-top-2 duration-150">
+                          {/* Grid Columns */}
+                          <div className="grid grid-cols-2 gap-4">
+                            {/* Status */}
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Status</label>
+                              <select 
+                                value={filterStatus}
+                                onChange={(e) => setFilterStatus(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                              >
+                                <option value="all">All</option>
+                                <option value="completed">Completed</option>
+                                <option value="running">Running</option>
+                                <option value="failed">Failed</option>
+                              </select>
+                            </div>
+
+                            {/* Page */}
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Page</label>
+                              <select 
+                                value={filterPageId}
+                                onChange={(e) => setFilterPageId(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer max-w-full truncate"
+                              >
+                                <option value="all">All</option>
+                                {pages.map(p => (
+                                  <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4 mt-4">
+                            {/* Type */}
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Type</label>
+                              <select 
+                                value={filterType}
+                                onChange={(e) => setFilterType(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                              >
+                                <option value="all">All Types</option>
+                                <option value="text">Text Only</option>
+                                <option value="attachment">Attachment</option>
+                                <option value="image">Image Attachment</option>
+                                <option value="file">File Attachment</option>
+                              </select>
+                            </div>
+
+                            {/* Tag */}
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Tag</label>
+                              <select 
+                                value={filterTag}
+                                onChange={(e) => setFilterTag(e.target.value)}
+                                className="w-full px-3 py-2 bg-white border border-slate-200 text-xs sm:text-sm font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                              >
+                                <option value="all">All</option>
+                                <option value="UTILITY">UTILITY</option>
+                                <option value="CONFIRMED_EVENT_UPDATE">CONFIRMED_EVENT_UPDATE</option>
+                                <option value="ACCOUNT_UPDATE">ACCOUNT_UPDATE</option>
+                                <option value="POST_PURCHASE_UPDATE">POST_PURCHASE_UPDATE</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Date Range Option */}
+                          <div className="mt-4">
+                            <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wider">Date Range</label>
+                            <div className="flex items-center gap-2">
+                              <input 
+                                type="date"
+                                value={filterStartDate}
+                                onChange={(e) => setFilterStartDate(e.target.value)}
+                                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 text-xs font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                              />
+                              <span className="text-slate-400 text-xs font-semibold">to</span>
+                              <input 
+                                type="date"
+                                value={filterEndDate}
+                                onChange={(e) => setFilterEndDate(e.target.value)}
+                                className="flex-1 px-3 py-1.5 bg-white border border-slate-200 text-xs font-medium rounded-lg text-slate-700 focus:outline-none focus:border-[#155EEF]/80 focus:ring-1 focus:ring-[#155EEF]/40 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Show only with failures */}
+                          <div className="mt-5 flex items-center gap-2">
+                            <input 
+                              type="checkbox"
+                              id="failures-only"
+                              checked={filterOnlyFailures}
+                              onChange={(e) => setFilterOnlyFailures(e.target.checked)}
+                              className="w-4 h-4 text-[#155EEF] border-[#155EEF] rounded focus:ring-[#155EEF] cursor-pointer"
+                            />
+                            <label htmlFor="failures-only" className="text-xs font-semibold text-slate-700 cursor-pointer select-none">
+                              Show only with failures
+                            </label>
+                          </div>
+
+                          {/* Divider line */}
+                          <div className="border-t border-slate-100 my-4"></div>
+
+                          {/* Footer Actions */}
+                          <div className="flex items-center justify-between">
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setFilterStatus("all");
+                                setFilterPageId("all");
+                                setFilterType("all");
+                                setFilterTag("all");
+                                setFilterStartDate("");
+                                setFilterEndDate("");
+                                setFilterOnlyFailures(false);
+                                setAppliedFilters({
+                                  status: "all",
+                                  pageId: "all",
+                                  type: "all",
+                                  tag: "all",
+                                  startDate: "",
+                                  endDate: "",
+                                  onlyFailures: false
+                                });
+                                setIsFilterDropdownOpen(false);
+                              }}
+                              className="text-xs sm:text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors bg-transparent border-none cursor-pointer p-1"
+                            >
+                              Clear all
+                            </button>
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                setAppliedFilters({
+                                  status: filterStatus,
+                                  pageId: filterPageId,
+                                  type: filterType,
+                                  tag: filterTag,
+                                  startDate: filterStartDate,
+                                  endDate: filterEndDate,
+                                  onlyFailures: filterOnlyFailures
+                                });
+                                setIsFilterDropdownOpen(false);
+                              }}
+                              className="bg-[#155EEF] hover:bg-[#124EC3] text-white px-5 py-2 rounded-lg text-xs sm:text-sm font-bold transition-all shadow-sm border-none cursor-pointer"
+                            >
+                              Apply
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-3.5 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors"
+                    >
+                      <CheckSquare className="w-4 h-4 text-slate-400" />
+                      <span>Select</span>
+                    </button>
+                    <button 
+                      onClick={getBroadcastHistory}
+                      title="Refresh"
+                      className="flex items-center justify-center p-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-lg cursor-pointer transition-colors"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Progress Bar Section if broadcast is currently running */}
+                {isBroadcasting && broadcastProgress && (
+                  <div className="bg-white border border-indigo-100 rounded-[2rem] p-8 shadow-md relative overflow-hidden animate-pulse">
+                    <div className="absolute inset-y-0 left-0 bg-indigo-50/20 w-1/3"></div>
+                    <div className="relative z-10">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
+                            <span className="text-[10px] font-black uppercase tracking-widest text-[#155EEF]">Active Broadcast Delivery Queue</span>
+                          </div>
+                          <h3 className="text-xl font-black text-slate-900 tracking-tight mt-1">
+                            Sending message to active inbox contacts...
+                          </h3>
+                        </div>
+                        <div className="px-4 py-2 bg-indigo-50 rounded-2xl text-xs font-black text-[#155EEF] uppercase tracking-wider shrink-0 text-center">
+                          {broadcastProgress.sentCount} / {broadcastProgress.total} contacts processed
+                        </div>
+                      </div>
+
+                      {/* Progress Bar Progress */}
+                      {(() => {
+                        const percentage = Math.round((broadcastProgress.sentCount / broadcastProgress.total) * 100) || 0;
+                        return (
+                          <div className="space-y-3">
+                            <div className="flex justify-between text-xs font-bold text-slate-500">
+                              <span>Progress ({percentage}%)</span>
+                              <span>{broadcastProgress.sentCount} of {broadcastProgress.total} reached</span>
+                            </div>
+                            <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
+                              <div 
+                                className="h-full bg-gradient-to-r from-blue-500 to-indigo-650 rounded-full transition-all duration-300 shadow-md"
+                                style={{ width: `${percentage}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Quick Stats Grid */}
+                      <div className="grid grid-cols-3 gap-4 mt-6">
+                        <div className="bg-emerald-50/65 rounded-2xl p-4 border border-emerald-100 text-center">
+                          <p className="text-[10px] font-black tracking-widest uppercase text-emerald-600">Delivered</p>
+                          <p className="text-2xl font-black text-emerald-700 mt-1">{broadcastProgress.successCount}</p>
+                        </div>
+                        <div className="bg-rose-50/65 rounded-2xl p-4 border border-rose-100 text-center">
+                          <p className="text-[10px] font-black tracking-widest uppercase text-rose-600">Failed</p>
+                          <p className="text-2xl font-black text-rose-700 mt-1">{broadcastProgress.failCount}</p>
+                        </div>
+                        <div className="bg-indigo-50/65 rounded-2xl p-4 border border-indigo-100 text-center">
+                          <p className="text-[10px] font-black tracking-widest uppercase text-indigo-600">Remaining</p>
+                          <p className="text-2xl font-black text-[#155EEF] mt-1">
+                            {broadcastProgress.total - broadcastProgress.sentCount}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Main workspace block: Empty State OR Campaign List items */}
+                {filteredHistory.length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-xl p-16 flex flex-col items-center justify-center shadow-sm min-h-[440px] text-center">
+                    {/* Blue central block radio badge */}
+                    <div className="w-14 h-14 bg-[#E0EAFF] text-[#444CE7] rounded-xl flex items-center justify-center mb-6">
+                      <Radio className="w-6 h-6 text-[#155EEF]" />
+                    </div>
+                    
+                    <h3 className="text-lg font-bold text-slate-900 mb-1">
+                      {broadcastSearchQuery ? "No broadcasts matched your search" : "No broadcasts yet"}
+                    </h3>
+                    <p className="text-sm text-slate-500 mb-6 max-w-sm">
+                      {broadcastSearchQuery ? "Try searching for a different keyword or check your spelling." : "Create your first broadcast to reach your subscribers"}
+                    </p>
+
+                    {!broadcastSearchQuery && (
+                      <button
+                        onClick={() => setBroadcastView('choice')}
+                        className="bg-[#155EEF] hover:bg-[#124EC3] text-white px-5 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-sm flex items-center justify-center gap-1.5 border-none cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4" /> Create Broadcast
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  /* Beautiful layout when real history is populated */
+                  <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                    <div className="border-b border-slate-100 px-6 py-4 bg-slate-50 flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Campaign Activities and Outcomes</span>
+                      <span className="text-xs text-slate-500 font-semibold">{filteredHistory.length} campaigns found</span>
+                    </div>
+
+                    <div className="divide-y divide-slate-100 bg-white">
+                      {filteredHistory.map((b) => {
+                        const isCurrentlySelected = selectedBroadcastId === b.id;
+                        const success = b.successCount || 0;
+                        const fail = b.failCount || 0;
+                        const total = b.totalRecipients || (success + fail) || 1;
+                        const successRate = Math.round((success / total) * 100);
+
+                        return (
+                          <div 
+                            key={b.id || Math.random().toString()}
+                            className="hover:bg-slate-50/50 transition-colors cursor-pointer"
+                            onClick={() => setSelectedBroadcastId(selectedBroadcastId === b.id ? null : b.id)}
+                          >
+                            <div className="p-6 flex flex-col md:flex-row gap-6 justify-between md:items-center">
+                              {/* Left details */}
+                              <div className="space-y-2 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="text-[10px] font-black uppercase text-[#155EEF] tracking-wider bg-blue-50 border border-blue-100 px-2.5 py-0.5 rounded-md">
+                                    {b.pageName || 'Connected Page'}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    {b.createdAt ? new Date(b.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'N/A'}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider border ${b.status === 'completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-amber-50 text-amber-700 border-amber-100 animate-pulse'}`}>
+                                    {b.status || 'completed'}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-semibold text-slate-800 leading-relaxed rtl:text-right">
+                                  {b.message || "Sent an Attachment file."}
+                                </p>
+                                {b.hasAttachment && (
+                                  <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-50 border border-slate-150 rounded text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                                    <Paperclip className="w-3 h-3" />
+                                    {b.attachmentType} Attached
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Right indicators & counts */}
+                              <div className="flex flex-row md:flex-col gap-4 md:items-end shrink-0 justify-between md:justify-center pt-4 md:pt-0 border-t border-slate-100 md:border-t-0">
+                                <div className="text-left md:text-right">
+                                  <p className="text-[8px] font-bold uppercase tracking-wider text-slate-400">Success Factor</p>
+                                  <p className={`text-lg font-black mt-0.5 ${successRate >= 95 ? 'text-emerald-600' : successRate >= 85 ? 'text-amber-500' : 'text-rose-500'}`}>
+                                    {successRate}% Success
+                                  </p>
+                                </div>
+
+                                <div className="flex gap-4 text-[11px] font-bold text-slate-600">
+                                  <div className="text-center md:text-right">
+                                    <span className="block text-[8px] font-bold uppercase tracking-widest text-slate-400">Delivered</span>
+                                    <span className="font-extrabold text-slate-800 mt-0.5 block">{success.toLocaleString()}</span>
+                                  </div>
+                                  <div className="w-px h-6 bg-slate-200 self-center"></div>
+                                  <div className="text-center md:text-right">
+                                    <span className="block text-[8px] font-bold uppercase tracking-widest text-slate-400">Failed</span>
+                                    <span className="font-extrabold text-rose-600 mt-0.5 block">{fail.toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Recipients log expandable list */}
+                            {isCurrentlySelected && b.recipientsStatus && (
+                              <div className="px-6 pb-6 pt-2 border-t border-slate-100/60 bg-slate-50/40 animate-in fade-in duration-200 max-h-56 overflow-y-auto">
+                                <p className="text-[9px] font-bold uppercase text-slate-400 tracking-wider mb-2">Delivery Log Details ({b.recipientsStatus.length})</p>
+                                <div className="space-y-1.5">
+                                  {b.recipientsStatus.map((r: any, idx: number) => (
+                                    <div key={idx} className="flex items-center justify-between gap-3 p-2 bg-white rounded-lg border border-slate-150 text-[11px] font-semibold text-slate-700">
+                                      <span className="truncate">{r.name}</span>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded ${r.status === 'delivered' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                                          {r.status}
+                                        </span>
+                                        {r.error && (
+                                          <span className="text-[9px] text-rose-500 max-w-[150px] truncate" title={r.error}>
+                                            ({r.error})
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                
+              </div>
+            );
+          })()}
+
           {activeTab === 'team' && (
             <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
               {teamSubMode === 'list' ? (
@@ -2470,11 +3409,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                   />
                                   <div className="flex items-center gap-2">
                                     <div className="w-6 h-6 bg-indigo-50 border border-indigo-100 rounded flex items-center justify-center shrink-0 overflow-hidden">
-                                      {p.picture?.data?.url ? (
-                                        <img src={p.picture.data.url} alt={p.name} className="w-full h-full object-cover" />
-                                      ) : (
-                                        <Facebook className="w-3.5 h-3.5 text-indigo-600" />
-                                      )}
+                                      <SafeAvatar src={p.picture?.data?.url} name={p.name} className="w-full h-full" />
                                     </div>
                                     <span className="text-xs font-bold text-slate-800">{p.name}</span>
                                   </div>
@@ -2692,11 +3627,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                             <div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-slate-50 hover:bg-indigo-50/20 rounded-2xl border border-slate-100 text-left transition-colors">
                               <div className="flex items-center gap-3">
                                 <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden border border-slate-200 shrink-0">
-                                  {p.picture?.data?.url ? (
-                                    <img src={p.picture.data.url} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <Facebook className="w-4 h-4 m-auto mt-2.5 text-slate-400" />
-                                  )}
+                                  <SafeAvatar src={p.picture?.data?.url} name={p.name} className="w-full h-full" />
                                 </div>
                                 <div className="min-w-0">
                                   <p className="text-xs font-black text-slate-950 truncate leading-tight">{p.name}</p>
@@ -2833,11 +3764,7 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
                                 />
                               </div>
                               <div className="w-11 h-11 bg-white rounded-xl overflow-hidden border border-slate-200">
-                                {p.picture?.data?.url ? (
-                                  <img src={p.picture.data.url} alt={p.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                ) : (
-                                  <Facebook className="w-4 h-4 m-auto mt-3.5 text-slate-300" />
-                                )}
+                                <SafeAvatar src={p.picture?.data?.url} name={p.name} className="w-full h-full" />
                               </div>
                               <div>
                                 <h4 className="text-sm font-black text-slate-900">{p.name}</h4>
@@ -3414,6 +4341,11 @@ export default function Dashboard({ onLogout, appUser }: { onLogout: () => void,
           { id: 'overview', icon: <LayoutDashboard className="w-5 h-5" />, label: 'Home' },
           { id: 'pages', icon: <Globe className="w-5 h-5" />, label: 'Pages' },
           { id: 'chat', icon: <MessageSquare className="w-5 h-5" />, label: 'Inbox' },
+          { id: 'audience', icon: <Users className="w-5 h-5" />, label: 'Audience' },
+          ...(currentActiveRole === 'owner' || currentActiveRole === 'admin' ? [
+            { id: 'broadcast', icon: <Megaphone className="w-5 h-5" />, label: 'Broadcast' }
+          ] : []),
+          { id: 'analytics', icon: <BarChart2 className="w-5 h-5" />, label: 'Analytics' },
           { id: 'settings', icon: <Settings className="w-5 h-5" />, label: 'Settings' }
         ].map(item => (
           <button 

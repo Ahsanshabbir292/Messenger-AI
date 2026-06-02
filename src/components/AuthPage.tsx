@@ -10,6 +10,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup 
 } from 'firebase/auth';
+import CloudflareTurnstile from './CloudflareTurnstile';
 
 const withTimeout = <T,>(promise: Promise<T>, ms: number = 7000, errorMsg: string): Promise<T> => {
   return Promise.race([
@@ -51,6 +52,13 @@ export default function AuthPage({
   const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // Signup verification states
+  const [signupStep, setSignupStep] = useState<'form' | 'verify'>('form');
+  const [signupCode, setSignupCode] = useState('');
+  const [signupSessionCode, setSignupSessionCode] = useState<string | null>(null);
+  const [isSimulatedSignup, setIsSimulatedSignup] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+
   // Form State
   const [formData, setFormData] = useState({
     fullName: inviteData?.name || '',
@@ -80,42 +88,94 @@ export default function AuthPage({
   const handleSignupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (formData.email !== formData.confirmEmail) {
-      setError("Emails do not match");
-      return;
-    }
-    if (formData.password !== formData.confirmPassword) {
-      setError("Passwords do not match");
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await axios.post('/api/auth/signup', {
-        email: formData.email,
-        password: formData.password,
-        fullName: formData.fullName,
-        workspaceName: formData.workspaceName || `${formData.fullName}'s Workspace`
-      });
+    setSuccessMessage(null);
 
-      const registeredUser = res.data.user;
-      const appUserObj = {
-        email: registeredUser.email,
-        fullName: registeredUser.fullName || registeredUser.email.split('@')[0],
-        workspaceId: registeredUser.workspaceId,
-        role: registeredUser.role || "admin"
-      };
+    if (signupStep === 'form') {
+      if (formData.email !== formData.confirmEmail) {
+        setError("Emails do not match");
+        return;
+      }
+      if (formData.password !== formData.confirmPassword) {
+        setError("Passwords do not match");
+        return;
+      }
+      setLoading(true);
+      try {
+        const res = await axios.post('/api/auth/signup/request-code', {
+          email: formData.email,
+          turnstileToken: turnstileToken || undefined
+        });
 
-      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = registeredUser.email;
-      
-      onLoginSuccess();
-    } catch (err: any) {
-      const errMsg = err.response?.data?.error || err.message || String(err);
-      console.error("[Backend] Signup registration failed:", errMsg);
-      setError(errMsg);
-    } finally {
-      setLoading(false);
+        const data = res.data;
+        if (data.simulated && data.code) {
+          setSignupSessionCode(data.code);
+          setIsSimulatedSignup(true);
+        } else {
+          setSignupSessionCode(null);
+          setIsSimulatedSignup(false);
+        }
+
+        setSuccessMessage(data.message || "A secure email verification code has been generated.");
+        setSignupStep('verify');
+      } catch (err: any) {
+        const errMsg = err.response?.data?.error || err.message || String(err);
+        console.error("[Backend] Signup request code failed:", errMsg);
+        setError(errMsg);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Step 2: verify and complete signup
+      if (!signupCode) {
+        setError("Please enter the verification code sent to your email.");
+        return;
+      }
+      setLoading(true);
+      try {
+        const res = await axios.post('/api/auth/signup', {
+          email: formData.email,
+          password: formData.password,
+          fullName: formData.fullName,
+          workspaceName: formData.workspaceName || `${formData.fullName}'s Workspace`,
+          code: signupCode,
+          turnstileToken: turnstileToken || undefined
+        });
+
+        const registeredUser = res.data.user;
+        const appUserObj = {
+          email: registeredUser.email,
+          fullName: registeredUser.fullName || registeredUser.email.split('@')[0],
+          workspaceId: registeredUser.workspaceId,
+          role: registeredUser.role || "admin"
+        };
+
+        localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
+        axios.defaults.headers.common['x-user-email'] = registeredUser.email;
+        
+        onLoginSuccess();
+      } catch (err: any) {
+        const errMsg = err.response?.data?.error || err.message || String(err);
+        console.error("[Backend] Signup OTP registration failed:", errMsg);
+        setError(errMsg);
+      } finally {
+        setLoading(false);
+      }
     }
+  };
+
+  const handleSwitchMode = (newMode: 'signin' | 'signup' | 'forgot') => {
+    setMode(newMode);
+    setError(null);
+    setSuccessMessage(null);
+    setSignupStep('form');
+    setSignupCode('');
+    setSignupSessionCode(null);
+    setIsSimulatedSignup(false);
+    setForgotStep('request');
+    setForgotCode('');
+    setSessionCode(null);
+    setIsSimulatedReset(false);
+    setTurnstileToken(null);
   };
 
   const handleInviteSubmit = async (e: React.FormEvent) => {
@@ -374,8 +434,8 @@ export default function AuthPage({
       </div>
 
       {/* Right Side: Auth Forms */}
-      <div className="flex-1 flex flex-col justify-center items-center px-8 lg:px-20 py-20 relative z-10 overflow-y-auto max-h-screen custom-scrollbar">
-        <div className="w-full max-w-md">
+      <div className="flex-1 flex flex-col justify-center items-center px-6 lg:px-16 py-6 md:py-10 relative z-10 overflow-y-auto max-h-screen custom-scrollbar">
+        <div className={`w-full ${mode === 'signup' && signupStep === 'form' ? 'max-w-xl' : 'max-w-md'} transition-all duration-300`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={mode}
@@ -383,7 +443,7 @@ export default function AuthPage({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
             >
-              <div className="mb-12">
+              <div className="mb-8">
                 {inviteData ? (
                   <div className="bg-indigo-50 border border-indigo-150 rounded-2xl p-5 mb-6 text-indigo-950 animate-in fade-in slide-in-from-top-4 duration-350">
                     <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-widest mb-1.5">
@@ -411,18 +471,18 @@ export default function AuthPage({
 
               {/* Google OAuth Login Button */}
               {mode !== 'forgot' && (
-                <div className="mt-2 text-center">
+                <div className="mt-2 text-center animate-in fade-in duration-300">
                   <button 
                     type="button"
                     onClick={handleGoogleAuth}
                     disabled={loading}
-                    className="w-full h-12 bg-white hover:bg-slate-50 text-slate-800 hover:text-slate-950 border border-slate-200 rounded-lg font-bold text-sm tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 animate-in fade-in duration-300"
+                    className="w-full h-11 bg-white hover:bg-slate-50 text-slate-800 hover:text-slate-950 border border-slate-200 rounded-lg font-bold text-sm tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
                   >
                     <Globe className="w-4 h-4 text-indigo-600 animate-pulse" />
                     Continue with Google
                   </button>
 
-                  <div className="flex items-center my-6">
+                  <div className="flex items-center my-5">
                     <div className="flex-1 border-t border-slate-100" />
                     <span className="px-3 text-[10px] font-black uppercase text-slate-400 tracking-widest">
                       {mode === 'signin' ? 'or login with credentials' : 'or sign up with credentials'}
@@ -432,110 +492,189 @@ export default function AuthPage({
                 </div>
               )}
 
-              <form className="space-y-6" onSubmit={mode === 'signin' ? handleSigninSubmit : mode === 'forgot' ? handleForgotSubmit : (inviteData ? handleInviteSubmit : handleSignupSubmit)}>
+              <form className="space-y-4" onSubmit={mode === 'signin' ? handleSigninSubmit : mode === 'forgot' ? handleForgotSubmit : (inviteData ? handleInviteSubmit : handleSignupSubmit)}>
                 {mode === 'signup' && (
-                  <div className="space-y-6">
-                    <div>
-                      <label className="text-[13px] font-bold text-slate-900 mb-2 block">Full name</label>
-                      <input 
-                        type="text" 
-                        required
-                        value={formData.fullName}
-                        onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                        className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm" 
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="text-[13px] font-bold text-slate-900 mb-2 block">Email address</label>
-                      <input 
-                        type="email" 
-                        required
-                        disabled={!!inviteData}
-                        value={formData.email}
-                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                        className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" 
-                      />
-                    </div>
+                  <div className="space-y-4 animate-in fade-in duration-300">
+                    {signupStep === 'form' ? (
+                      <div className="space-y-4">
+                        {/* Two column grid for Full Name and Optional Workspace name */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[13px] font-bold text-slate-900 mb-2 block">Full name</label>
+                            <input 
+                              type="text" 
+                              required
+                              value={formData.fullName}
+                              onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
+                              className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm" 
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[13px] font-bold text-slate-900 mb-2 block">Workspace name</label>
+                            <input 
+                              type="text" 
+                              placeholder="Optional workspace"
+                              value={formData.workspaceName}
+                              onChange={(e) => setFormData({ ...formData, workspaceName: e.target.value })}
+                              className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm" 
+                            />
+                          </div>
+                        </div>
+                        
+                        {/* Two column grid for email and confirmation */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[13px] font-bold text-slate-900 mb-2 block">Email address</label>
+                            <input 
+                              type="email" 
+                              required
+                              disabled={!!inviteData}
+                              value={formData.email}
+                              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                              className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" 
+                            />
+                          </div>
 
-                    <div>
-                      <label className="text-[13px] font-bold text-slate-900 mb-2 block">Confirm email address</label>
-                      <input 
-                        type="email" 
-                        required
-                        disabled={!!inviteData}
-                        value={formData.confirmEmail}
-                        onChange={(e) => setFormData({ ...formData, confirmEmail: e.target.value })}
-                        className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" 
-                      />
-                    </div>
+                          <div>
+                            <label className="text-[13px] font-bold text-slate-900 mb-2 block">Confirm email address</label>
+                            <input 
+                              type="email" 
+                              required
+                              disabled={!!inviteData}
+                              value={formData.confirmEmail}
+                              onChange={(e) => setFormData({ ...formData, confirmEmail: e.target.value })}
+                              className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed" 
+                            />
+                          </div>
+                        </div>
 
-                    <div>
-                      <label className="text-[13px] font-bold text-slate-900 mb-2 block">Password</label>
-                      <div className="relative">
-                        <input 
-                          type={showPassword ? "text" : "password"}
-                          required
-                          minLength={8}
-                          value={formData.password}
-                          onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                          className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm pr-12" 
-                        />
+                        {/* Two column grid for passwords */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[13px] font-bold text-slate-900 mb-2 block">Password</label>
+                            <div className="relative">
+                              <input 
+                                type={showPassword ? "text" : "password"}
+                                required
+                                minLength={8}
+                                value={formData.password}
+                                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                                className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm pr-12" 
+                              />
+                              <button 
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                              >
+                                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-slate-400 mt-1 font-medium">Minimum 8 characters</p>
+                          </div>
+
+                          <div>
+                            <label className="text-[13px] font-bold text-slate-900 mb-2 block">Confirm password</label>
+                            <div className="relative">
+                              <input 
+                                type={showConfirmPassword ? "text" : "password"}
+                                required
+                                value={formData.confirmPassword}
+                                onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                                className="w-full h-11 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm pr-12" 
+                              />
+                              <button 
+                                type="button"
+                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                              >
+                                {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Live Cloudflare Turnstile */}
+                        <div className="my-1">
+                          <CloudflareTurnstile 
+                            onVerify={setTurnstileToken} 
+                            resetTrigger={mode} 
+                          />
+                        </div>
+
+                        {/* Secured Sign Up Banner */}
+                        <div className="bg-[#f0fdf4] border border-emerald-200 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-black text-emerald-800 uppercase tracking-widest flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                              Direct Security Shield
+                            </span>
+                            <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider font-mono">Firebase JWT Verified</span>
+                          </div>
+                          <p className="text-[11px] text-emerald-700 font-semibold leading-relaxed">
+                            Your self-service registration and connection credentials are fully secured and encrypted.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-6">
+                        {/* Status / Instructions banner */}
+                        <div className="bg-indigo-50 border border-indigo-150 rounded-xl p-4 text-indigo-950 animate-in fade-in duration-300">
+                          <div className="flex items-center gap-2 text-indigo-700 font-bold text-xs uppercase tracking-widest mb-1">
+                            <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
+                            Email Verification Code Sent
+                          </div>
+                          <p className="text-[12px] font-medium leading-relaxed">
+                            Bhai, we've sent a 6-digit confirmation code to <span className="font-bold text-indigo-950">{formData.email}</span>. Enter it below to complete your registration.
+                          </p>
+                        </div>
+
+                        {/* Simulation / Override Codebox if SMTP user is empty or mail is locally simulated */}
+                        {isSimulatedSignup && signupSessionCode && (
+                          <div className="bg-amber-50 border border-amber-200/65 rounded-xl p-4 text-slate-800 animate-in fade-in duration-350">
+                            <div className="flex items-center gap-2 text-amber-700 font-black text-[9px] uppercase tracking-widest mb-2">
+                              <ShieldCheck className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                              Mail simulation mode active
+                            </div>
+                            <p className="text-[11px] font-bold leading-normal mb-1 text-slate-700">
+                              Since you are testing in our preview environment, your signup verification code is visible below:
+                            </p>
+                            <div className="bg-amber-100/50 border border-amber-250/50 rounded-lg py-2.5 px-4 text-center font-black text-2xl tracking-[0.25em] text-amber-950 select-all cursor-pointer hover:bg-amber-100/70 transition-all font-mono" title="Click to copy" onClick={() => {
+                              navigator.clipboard.writeText(signupSessionCode);
+                            }}>
+                              {signupSessionCode}
+                            </div>
+                            <p className="text-[9px] text-amber-600 font-medium text-center mt-1.5 font-sans">
+                              💡 Click the code to copy instantly
+                            </p>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="text-[13px] font-bold text-slate-900 mb-2 block">Verification Code</label>
+                          <input 
+                            type="text" 
+                            required
+                            maxLength={6}
+                            placeholder="000000"
+                            value={signupCode}
+                            onChange={(e) => setSignupCode(e.target.value)}
+                            className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 text-center tracking-[0.5em] font-bold text-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all placeholder:tracking-normal font-mono" 
+                          />
+                        </div>
+
                         <button 
                           type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                          onClick={() => {
+                            setSignupStep('form');
+                            setSignupCode('');
+                            setSignupSessionCode(null);
+                          }}
+                          className="text-[11px] font-bold text-blue-600 hover:underline block"
                         >
-                          {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                          ← Change details / Request code again
                         </button>
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1 font-medium">Minimum 8 characters</p>
-                    </div>
-
-                    <div>
-                      <label className="text-[13px] font-bold text-slate-900 mb-2 block">Confirm password</label>
-                      <div className="relative">
-                        <input 
-                          type={showConfirmPassword ? "text" : "password"}
-                          required
-                          value={formData.confirmPassword}
-                          onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                          className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm pr-12" 
-                        />
-                        <button 
-                          type="button"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                        >
-                          {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="text-[13px] font-bold text-slate-900 mb-2 block">Workspace name</label>
-                      <input 
-                        type="text" 
-                        placeholder="Optional - defaults to 'Your Name's Workspace'"
-                        value={formData.workspaceName}
-                        onChange={(e) => setFormData({ ...formData, workspaceName: e.target.value })}
-                        className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm" 
-                      />
-                    </div>
-
-                    {/* Secured Sign Up Banner */}
-                    <div className="bg-[#f0fdf4] border border-emerald-200 rounded-xl p-3 flex flex-col gap-1.5 animate-in fade-in duration-300">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black text-emerald-800 uppercase tracking-widest flex items-center gap-1.5">
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                          Direct Security Shield
-                        </span>
-                        <span className="text-[9px] font-black text-emerald-600 uppercase tracking-wider font-mono">Firebase JWT Verified</span>
-                      </div>
-                      <p className="text-[11px] text-emerald-700 font-semibold leading-relaxed">
-                        Your self-service registration and connection credentials are fully secured and encrypted.
-                      </p>
-                    </div>
+                    )}
                   </div>
                 )}
 
@@ -554,7 +693,7 @@ export default function AuthPage({
                     <div>
                       <div className="flex justify-between items-center mb-2">
                         <label className="text-[13px] font-bold text-slate-900 block">Password</label>
-                        <button type="button" onClick={() => setMode('forgot')} className="text-blue-600 text-[11px] font-bold hover:underline">Forgot password?</button>
+                        <button type="button" onClick={() => handleSwitchMode('forgot')} className="text-blue-600 text-[11px] font-bold hover:underline">Forgot password?</button>
                       </div>
                       <div className="relative">
                         <input 
@@ -618,12 +757,12 @@ export default function AuthPage({
                             <p className="text-[11px] font-bold leading-normal mb-1 text-slate-700">
                               Since you are testing in our preview environment, your verification reset code is visible below:
                             </p>
-                            <div className="bg-amber-100/50 border border-amber-250/50 rounded-lg py-2.5 px-4 text-center font-black text-2xl tracking-[0.25em] text-amber-950 select-all cursor-pointer hover:bg-amber-100/70 transition-all" title="Click to copy" onClick={() => {
+                            <div className="bg-amber-100/50 border border-amber-250/50 rounded-lg py-2.5 px-4 text-center font-black text-2xl tracking-[0.25em] text-amber-950 select-all cursor-pointer hover:bg-amber-100/70 transition-all font-mono" title="Click to copy" onClick={() => {
                               navigator.clipboard.writeText(sessionCode);
                             }}>
                               {sessionCode}
                             </div>
-                            <p className="text-[9px] text-amber-600 font-medium text-center mt-1.5">
+                            <p className="text-[9px] text-amber-600 font-medium text-center mt-1.5 font-sans">
                               💡 Click the code to copy instantly
                             </p>
                           </div>
@@ -638,7 +777,7 @@ export default function AuthPage({
                             placeholder="000000"
                             value={forgotCode}
                             onChange={(e) => setForgotCode(e.target.value)}
-                            className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 text-center tracking-[0.5em] font-bold text-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all placeholder:tracking-normal" 
+                            className="w-full h-12 bg-white border border-slate-200 rounded-lg px-4 text-center tracking-[0.5em] font-bold text-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all placeholder:tracking-normal font-mono" 
                           />
                         </div>
 
@@ -702,13 +841,24 @@ export default function AuthPage({
 
                 <button 
                   type="submit"
-                  disabled={loading}
-                  className="w-full h-12 bg-[#1d63ff] hover:bg-blue-700 text-white rounded-lg font-bold text-sm tracking-wide transition-all shadow-lg shadow-blue-100 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 mt-4"
+                  disabled={loading || (mode === 'signup' && signupStep === 'form' && !turnstileToken)}
+                  className={`w-full h-12 rounded-lg font-bold text-sm tracking-wide transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3 mt-4 ${
+                    (mode === 'signup' && signupStep === 'form' && !turnstileToken)
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                      : 'bg-[#1d63ff] hover:bg-blue-700 text-white shadow-lg shadow-blue-100'
+                  }`}
                 >
                   {loading ? (
                     <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                   ) : (
-                    <>{mode === 'signin' ? 'Sign in' : mode === 'forgot' ? (forgotStep === 'request' ? 'Request Code' : 'Verify & Reset Password') : 'Sign up'}</>
+                    <>
+                      {mode === 'signin' 
+                        ? 'Sign in' 
+                        : mode === 'forgot' 
+                          ? (forgotStep === 'request' ? 'Request Code' : 'Verify & Reset Password') 
+                          : (signupStep === 'form' ? 'Request Verification Code' : 'Verify & Complete Signup')
+                      }
+                    </>
                   )}
                 </button>
               </form>
@@ -718,17 +868,17 @@ export default function AuthPage({
                   {mode === 'signin' ? (
                     <>
                       Don't have an account? {' '}
-                      <button onClick={() => setMode('signup')} className="text-blue-600 font-bold hover:underline ml-1">Sign up</button>
+                      <button onClick={() => handleSwitchMode('signup')} className="text-blue-600 font-bold hover:underline ml-1">Sign up</button>
                     </>
                   ) : mode === 'forgot' ? (
                     <>
                       Remember your password? {' '}
-                      <button onClick={() => setMode('signin')} className="text-blue-600 font-bold hover:underline ml-1">Sign in</button>
+                      <button onClick={() => handleSwitchMode('signin')} className="text-blue-600 font-bold hover:underline ml-1">Sign in</button>
                     </>
                   ) : (
                     <>
                       Already have an account? {' '}
-                      <button onClick={() => setMode('signin')} className="text-blue-600 font-bold hover:underline ml-1">Sign in</button>
+                      <button onClick={() => handleSwitchMode('signin')} className="text-blue-600 font-bold hover:underline ml-1">Sign in</button>
                     </>
                   )}
                 </p>

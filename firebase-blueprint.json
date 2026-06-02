@@ -45,6 +45,60 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["used"]
+    },
+    "SupportTicket": {
+      "title": "SupportTicket",
+      "description": "User submitted support ticket",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "subject": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "message", "status", "createdAt"]
+    },
+    "DeletionRequest": {
+      "title": "DeletionRequest",
+      "description": "User requested account and data deletion",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "status": { "type": "string" },
+        "requestedAt": { "type": "string", "format": "date-time" },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "email", "status", "requestedAt"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "Pending team workspace invites",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "assignedPages": { "type": "array" },
+        "inviterEmail": { "type": "string" },
+        "inviterName": { "type": "string" },
+        "token": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "token", "status", "createdAt"]
+    },
+    "SimulatedConversation": {
+      "title": "SimulatedConversation",
+      "description": "Simulated chat history for playground mode",
+      "type": "object",
+      "properties": {
+        "conversations": { "type": "array" }
+      },
+      "required": ["conversations"]
     }
   },
   "firestore": {
@@ -60,6 +114,10 @@
       "schema": "VerificationCode",
       "description": "Collection of pending verification codes"
     },
+    "/signupVerificationCodes/{email}": {
+      "schema": "VerificationCode",
+      "description": "Collection of pending signup verification codes"
+    },
     "/passwordResetCodes/{email}": {
       "schema": "VerificationCode",
       "description": "Collection of verification codes for password resetting"
@@ -67,6 +125,22 @@
     "/trialIPs/{ip}": {
       "schema": "TrialIP",
       "description": "Anti-abuse registry for trial accounts"
+    },
+    "/supportTickets/{ticketId}": {
+      "schema": "SupportTicket",
+      "description": "Collection of legal and general customer support tickets"
+    },
+    "/deletionRequests/{deletionConfirmationId}": {
+      "schema": "DeletionRequest",
+      "description": "Recorded GDPR and Facebook data deletion audit logs"
+    },
+    "/invitations/{email}": {
+      "schema": "Invitation",
+      "description": "Collection of workspace team invitation tokens"
+    },
+    "/users/{userEmail}/simulated_conversations/{pageId}": {
+      "schema": "SimulatedConversation",
+      "description": "Under-the-hood conversational state for sandbox Facebook Page simulation"
     }
   }
 }

@@ -60,11 +60,31 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /signupVerificationCodes/{email} {
+      allow read, write: if true;
+    }
+
     match /passwordResetCodes/{email} {
       allow read, write: if true;
     }
     
     match /trialIPs/{ip} {
+      allow read, write: if true;
+    }
+
+    match /supportTickets/{ticketId} {
+      allow read, write: if true;
+    }
+
+    match /deletionRequests/{deletionConfirmationId} {
+      allow read, write: if true;
+    }
+
+    match /invitations/{email} {
+      allow read, write: if true;
+    }
+
+    match /users/{userEmail}/simulated_conversations/{pageId} {
       allow read, write: if true;
     }
 
