@@ -109,7 +109,7 @@ export default function App() {
         }
 
         // If trying to access protected dashboard, redirect to signin
-        if (currentPath === '/dashboard') {
+        if (currentPath === '/dashboard' || currentPath.startsWith('/dashboard/')) {
           navigateTo('/signin');
         }
       } finally {
@@ -163,7 +163,7 @@ export default function App() {
     view = 'signin';
   } else if (currentPath === '/signup') {
     view = 'signup';
-  } else if (currentPath === '/dashboard') {
+  } else if (currentPath === '/dashboard' || currentPath.startsWith('/dashboard/')) {
     view = 'dashboard';
   } else if (currentPath === '/privacy') {
     view = 'privacy';
@@ -208,7 +208,7 @@ export default function App() {
       )}
 
       {view === 'dashboard' && (
-        <Dashboard onLogout={handleLogout} appUser={appUser} />
+        <Dashboard onLogout={handleLogout} appUser={appUser} currentPath={currentPath} navigateTo={navigateTo} />
       )}
 
       {view === 'privacy' && (

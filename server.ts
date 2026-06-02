@@ -850,19 +850,42 @@ async function startServer() {
     return null;
   }
 
+  // Memory Cache for Facebook Conversations to solve performance slowness in navigation
+  const fbConversationsCache = new Map<string, { data: any[]; timestamp: number }>();
+  const FB_CACHE_TTL = 90 * 1000; // 90 seconds cache lifetime
+
   // Helper to fetch ALL conversation threads of a Facebook Page recursively following pagination links
-  async function fetchAllPageConversations(pageId: string, accessToken: string, fields: string = "id") {
+  async function fetchAllPageConversations(pageId: string, accessToken: string, fields: string = "id", bypassCache: boolean = false) {
+    const cacheKey = `${pageId}_${fields}`;
+    
+    if (!bypassCache) {
+      const cached = fbConversationsCache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp < FB_CACHE_TTL)) {
+        console.log(`[Cache Hit] Serving conversation threads for page ${pageId} from memory cache`);
+        return cached.data;
+      }
+    }
+
     const list: any[] = [];
     try {
       let nextPageUrl = `https://graph.facebook.com/v19.0/${pageId}/conversations?access_token=${accessToken}&fields=${fields}&limit=100`;
       let pagesCount = 0;
-      while (nextPageUrl && pagesCount < 80) { // Support fetching up to 8,000 threads to cover large audiences
+      // Fetch up to 10 pages (1,000 threads) to keep responses blazing-fast and highly responsive.
+      const maxPages = 10;
+      while (nextPageUrl && pagesCount < maxPages) {
         const res: any = await axios.get(nextPageUrl);
         const batch = res.data?.data || [];
         list.push(...batch);
         nextPageUrl = res.data?.paging?.next || null;
         pagesCount++;
       }
+      
+      // Update cache
+      fbConversationsCache.set(cacheKey, {
+        data: list,
+        timestamp: Date.now()
+      });
+      
     } catch (err: any) {
       console.error(`[FB Helper] Error fetching conversations for page ${pageId}:`, err.response?.data || err.message);
     }
@@ -4572,7 +4595,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
           picture_url: p.picture?.data?.url || `https://graph.facebook.com/${p.id}/picture?type=large`
         }));
 
-        for (const p of fbData.pages) {
+        await Promise.all(fbData.pages.map(async (p: any) => {
           if (p.access_token && p.access_token.startsWith("sim_")) {
             const pageUsers = getSimulatedAudienceForPages([p]);
             for (const u of pageUsers) {
@@ -4613,7 +4636,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
               }
             }
           }
-        }
+        }));
       }
 
       // Fallback to simulated subscribers so the Audience page is never blank and can be tested fully
@@ -4693,6 +4716,8 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
   app.post("/api/audience/refresh", async (req, res) => {
     try {
+      // Clear cache on explicit refresh button click so the user gets fresh information
+      fbConversationsCache.clear();
       await new Promise(resolve => setTimeout(resolve, 800));
       return res.json({ success: true });
     } catch (error: any) {

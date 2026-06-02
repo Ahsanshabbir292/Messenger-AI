@@ -149,8 +149,38 @@ const formatAxiosError = (err: any, fallbackMessage: string): string => {
   return err.message || String(err) || fallbackMessage;
 };
 
-export default function Dashboard({ onLogout, appUser }: { onLogout: () => void, appUser?: any }) {
-  const [activeTab, setActiveTab] = useState('overview');
+export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }: { onLogout: () => void, appUser?: any, currentPath?: string, navigateTo?: (path: string) => void }) {
+  const getTabFromPath = (path?: string) => {
+    if (!path) return 'overview';
+    const segments = path.split('/');
+    if (segments[1] === 'dashboard' && segments[2]) {
+      return segments[2];
+    }
+    return 'overview';
+  };
+
+  const [activeTab, setActiveTabInternal] = useState(() => getTabFromPath(currentPath));
+
+  // Sync activeTab state from URL path (e.g. back/forward buttons)
+  useEffect(() => {
+    if (currentPath) {
+      const tab = getTabFromPath(currentPath);
+      if (tab !== activeTab) {
+        setActiveTabInternal(tab);
+      }
+    }
+  }, [currentPath, activeTab]);
+
+  const setActiveTab = (tab: string) => {
+    setActiveTabInternal(tab);
+    if (navigateTo) {
+      if (tab === 'overview') {
+        navigateTo('/dashboard');
+      } else {
+        navigateTo(`/dashboard/${tab}`);
+      }
+    }
+  };
 
   // Switch to billing tab if payment parameter exists in the URL
   useEffect(() => {
