@@ -6,7 +6,8 @@ import {
   Edit, Play, ExternalLink, Facebook, RefreshCw, Link2, CheckCircle2,
   Send, User, Image as ImageIcon, File as FileIcon, Mic, Paperclip, X, Music, Download, Megaphone,
   CreditCard, History, Sparkles, Clock, Star, Shield, Zap, Users, UserPlus, Mail, ShieldAlert, Trash2, Lock, AlertTriangle, Info, ArrowLeft, ArrowRight, Radio,
-  Search, Filter, CheckSquare, Layers, ToggleLeft as Toggle, Globe, Power, ChevronRight, MessageCircle, CircleDollarSign, Menu
+  Search, Filter, CheckSquare, Layers, ToggleLeft as Toggle, Globe, Power, ChevronRight, MessageCircle, CircleDollarSign, Menu,
+  Pause, XCircle, Copy
 } from 'lucide-react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -21,7 +22,7 @@ import { AnalyticsPage } from './AnalyticsPage';
 import { BroadcastDetailsView } from './BroadcastDetailsView';
 import { OverviewPage } from './OverviewPage';
 import { PagesPage } from './PagesPage';
-import { ChatPage } from './ChatPage';
+import { ChatPage, getLastMessage } from './ChatPage';
 import { TeamPage } from './TeamPage';
 import { BillingPage } from './BillingPage';
 import { SettingsPage } from './SettingsPage';
@@ -74,13 +75,20 @@ const SafeAvatar = ({ src, name, className = "w-12 h-12 rounded-xl" }: { src?: s
   );
 };
 
-const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void }) => (
+const SidebarItem = ({ icon, label, active, onClick, badge }: { icon: React.ReactNode, label: string, active?: boolean, onClick: () => void, badge?: number | string }) => (
   <button 
     onClick={onClick}
-    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium mb-1 ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
+    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all font-medium mb-1 ${active ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}
   >
-    {icon}
-    <span className="text-sm">{label}</span>
+    <div className="flex items-center gap-3">
+      {icon}
+      <span className="text-sm">{label}</span>
+    </div>
+    {badge !== undefined && badge !== 0 && (
+      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black shrink-0 ${active ? 'bg-white text-indigo-600' : 'bg-rose-500 text-white animate-pulse shadow-[0_0_8px_rgba(244,63,94,0.4)]'}`}>
+        {badge}
+      </span>
+    )}
   </button>
 );
 
@@ -246,6 +254,8 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const [isCreateWorkspaceModalOpen, setIsCreateWorkspaceModalOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [pages, setPages] = useState<any[]>([]);
+  const [lastSyncedContacts, setLastSyncedContacts] = useState<string | null>(null);
+  const [isSyncingContacts, setIsSyncingContacts] = useState(false);
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [trialLocked, setTrialLocked] = useState<boolean>(false);
   // Simulated workspace-specific pages (initially empty, fetched from API)
@@ -268,6 +278,39 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   useEffect(() => {
     localStorage.setItem('current_plan_v1', currentPlan);
   }, [currentPlan]);
+
+  useEffect(() => {
+    if (conversations && conversations.length > 0) {
+      const pageIdsSet = new Set((pages || []).map((p: any) => p.id));
+      setSeenConversations(prev => {
+        let updated = false;
+        const nextSeen = { ...prev };
+        conversations.forEach((c: any) => {
+          const lastMsg = getLastMessage(c.messages);
+          if (lastMsg) {
+            const activePageId = c._associatedPageId || selectedPage?.id;
+            const lastMsgId = `${lastMsg.id || ''}_${lastMsg.created_time || ''}_${lastMsg.message || ''}`;
+            if (nextSeen[c.id] === undefined) {
+              const isLastSentByUs = 
+                lastMsg.from?.id === activePageId || 
+                lastMsg.from?.id === "bot" ||
+                pageIdsSet.has(lastMsg.from?.id) ||
+                lastMsg.from?.id === c._associatedPageId;
+              if (isLastSentByUs) {
+                nextSeen[c.id] = lastMsgId;
+                updated = true;
+              }
+            }
+          }
+        });
+        if (updated) {
+          localStorage.setItem('seenConversations', JSON.stringify(nextSeen));
+          return nextSeen;
+        }
+        return prev;
+      });
+    }
+  }, [conversations, selectedPage?.id, pages]);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [creditBalance, setCreditBalance] = useState(5000.00);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -287,6 +330,8 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const [broadcastSearchQuery, setBroadcastSearchQuery] = useState("");
   const [broadcastsHistory, setBroadcastsHistory] = useState<any[]>([]);
   const [selectedBroadcastId, setSelectedBroadcastId] = useState<string | null>(null);
+  const [selectedBroadcastIds, setSelectedBroadcastIds] = useState<string[]>([]);
+  const [isSelectMode, setIsSelectMode] = useState(false);
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [broadcastProgress, setBroadcastProgress] = useState<any>(null);
   const [broadcastLiveLogs, setBroadcastLiveLogs] = useState<string[]>([]);
@@ -661,6 +706,32 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const [chatFilter, setChatFilter] = useState<'all' | 'unread'>('all');
   const [chatPageFilter, setChatPageFilter] = useState<string>('all');
 
+  const [seenConversations, setSeenConversations] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('seenConversations');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const markAsRead = useCallback((convId: string, lastMsgId: string) => {
+    setSeenConversations(prev => {
+      const updated = { ...prev, [convId]: lastMsgId };
+      localStorage.setItem('seenConversations', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const markAsUnread = useCallback((convId: string) => {
+    setSeenConversations(prev => {
+      const updated = { ...prev };
+      delete updated[convId];
+      localStorage.setItem('seenConversations', JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   // --- BILLING STATE VARIABLES ---
   const [billingSubView, setBillingSubView] = useState<'dashboard' | 'buy' | 'orders' | 'order-detail' | 'payment'>('dashboard');
   const [billingData, setBillingData] = useState<{ subscriptions: Record<string, any>; orders: any[] } | null>(null);
@@ -800,6 +871,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       setPages(res.data.pages || []);
       setSelectedPageIds(res.data.selectedPageIds || []);
       setTrialLocked(!!res.data.trialLocked);
+      if (res.data.lastSyncedContacts) {
+        setLastSyncedContacts(res.data.lastSyncedContacts);
+      }
       if (typeof res.data.credits === 'number') {
         setCreditBalance(res.data.credits);
       }
@@ -853,13 +927,14 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     }
   }, []);
 
-  const getConversations = async (pageId: string) => {
+  const getConversations = async (pageId: string, forceRefresh: boolean = false) => {
     setIsLoading(true);
     try {
+      const urlSuffix = forceRefresh ? "?refresh=true" : "";
       if (pageId === "all") {
         const activePages = pages.filter(p => selectedPageIds.includes(p.id));
         const promises = activePages.map(page => 
-          axios.get(`/api/facebook/conversations/${page.id}`)
+          axios.get(`/api/facebook/conversations/${page.id}${urlSuffix}`)
             .then(res => (res.data.conversations || []).map((c: any) => ({
               ...c,
               _associatedPageId: page.id
@@ -878,15 +953,28 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
         });
         setConversations(merged);
       } else {
-        const res = await axios.get(`/api/facebook/conversations/${pageId}`);
+        const res = await axios.get(`/api/facebook/conversations/${pageId}${urlSuffix}`);
         setConversations(res.data.conversations || []);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to get conversations", err);
+      const errMsg = err.response?.data?.details?.message || err.response?.data?.error || err.message;
+      addToast(`Retrieval Error: ${errMsg}`, "error");
     } finally {
       setIsLoading(false);
     }
   };
+
+  const handleRefreshInbox = useCallback(async () => {
+    try {
+      await getPages();
+      if (selectedPage) {
+        await getConversations(selectedPage.id, true);
+      }
+    } catch (err) {
+      console.error("Failed to refresh active inbox:", err);
+    }
+  }, [getPages, selectedPage]);
 
   const handleOpenChatFromAudience = async (userId: string, pageId: string, userName?: string) => {
     let page = pages.find((p: any) => p.id === pageId);
@@ -1187,12 +1275,15 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
         } else {
           socket.emit("join_page", selectedPage.id);
         }
-        getConversations(selectedPage.id);
       }
-    } else if (selectedPage) {
-      getConversations(selectedPage.id);
     }
   }, [selectedPage, socket, selectedPageIds, pages]);
+
+  useEffect(() => {
+    if (selectedPage) {
+      getConversations(selectedPage.id);
+    }
+  }, [selectedPage?.id]);
 
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showChatDetail, setShowChatDetail] = useState(false);
@@ -1222,6 +1313,38 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   };
 
   const isCurrentTabAllowed = isTabAllowedMap[activeTab]?.includes(currentActiveRole);
+
+  const checkIfConversationIsUnread = useCallback((c: any, activePageId: string) => {
+    if (selectedConversation?.id === c.id) {
+      return false;
+    }
+    const lastMsg = getLastMessage(c.messages);
+    if (!lastMsg) {
+      return false;
+    }
+    const pageIdsSet = new Set((pages || []).map((p: any) => p.id));
+    if (
+      lastMsg.from?.id === activePageId || 
+      lastMsg.from?.id === "bot" ||
+      pageIdsSet.has(lastMsg.from?.id) ||
+      lastMsg.from?.id === c._associatedPageId
+    ) {
+      return false;
+    }
+    const lastMsgId = `${lastMsg.id || ''}_${lastMsg.created_time || ''}_${lastMsg.message || ''}`;
+    const seenMsgId = seenConversations[c.id];
+    
+    if (seenMsgId === lastMsgId) {
+      return false;
+    }
+    
+    return true;
+  }, [selectedConversation?.id, pages, seenConversations]);
+
+  const totalUnreadConversationsCount = (conversations || []).filter((c: any) => {
+    const activePageId = c._associatedPageId || selectedPage?.id;
+    return checkIfConversationIsUnread(c, activePageId);
+  }).length;
 
   return (
     <div className="min-h-screen bg-[#F0F2F5] flex font-sans overflow-x-hidden">
@@ -1310,7 +1433,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
             <SidebarItem icon={<Globe className="w-5 h-5" />} label="Pages" active={activeTab === 'pages'} onClick={() => { setActiveTab('pages'); setIsMobileMenuOpen(false); }} />
           )}
           
-          <SidebarItem icon={<MessageSquare className="w-5 h-5" />} label="Conversations" active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setIsMobileMenuOpen(false); }} />
+          <SidebarItem icon={<MessageSquare className="w-5 h-5" />} label="Conversations" active={activeTab === 'chat'} onClick={() => { setActiveTab('chat'); setIsMobileMenuOpen(false); }} badge={totalUnreadConversationsCount} />
           
           <SidebarItem icon={<Users className="w-5 h-5" />} label="Audience" active={activeTab === 'audience'} onClick={() => { setActiveTab('audience'); setIsMobileMenuOpen(false); }} />
           
@@ -1661,7 +1784,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               handleReply={handleReply}
               handleFileChange={handleFileChange}
               isLoading={isLoading}
-              getPages={getPages}
+              getPages={handleRefreshInbox}
+              seenConversations={seenConversations}
+              markAsRead={markAsRead}
+              markAsUnread={markAsUnread}
             />
           )}
 
@@ -1753,7 +1879,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                        const activePageId = c._associatedPageId || selectedPage?.id;
                        const other = c.participants?.data?.find((p: any) => p.id !== activePageId);
                        const matchesSearch = other?.name?.toLowerCase().includes(chatSearch.toLowerCase());
-                       const isUnread = c.unread_count > 0 || c.unread === true || (c.messages?.data?.[0]?.from?.id !== (c._associatedPageId || selectedPage?.id) && selectedConversation?.id !== c.id);
+                       const isUnread = checkIfConversationIsUnread(c, activePageId);
                        const matchesUnread = chatFilter === 'all' || isUnread;
                        return matchesSearch && matchesUnread;
                     }).map((c: any) => {
@@ -1761,7 +1887,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                        const other = c.participants.data.find((p: any) => p.id !== activePageId);
                        const isActive = selectedConversation?.id === c.id;
                        const lastMsg = c.messages?.data?.[0]?.message;
-                       const isUnread = c.unread_count > 0 || c.unread === true || (c.messages?.data?.[0]?.from?.id !== activePageId && !isActive);
+                       const isUnread = checkIfConversationIsUnread(c, activePageId);
                        return (
                           <button 
                              key={c.id}
@@ -1771,6 +1897,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                 // Clear unread property immediately client-side
                                 c.unread_count = 0;
                                 c.unread = false;
+                                const lastMsgObj = c.messages?.data?.[0];
+                                if (lastMsgObj) {
+                                   const lastMsgId = `${lastMsgObj.id || ''}_${lastMsgObj.created_time || ''}_${lastMsgObj.message || ''}`;
+                                   localStorage.setItem(`seen_${c.id}`, lastMsgId);
+                                }
                              }}
                              className={`w-full p-4 sm:p-5 lg:p-6 flex gap-3 sm:gap-4 transition-all group relative border-b border-slate-50/50 ${isActive ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}
                           >
@@ -2669,23 +2800,24 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               );
             }
 
-            // If a specific broadcast is selected, show the detailed design
-            if (selectedBroadcastId) {
-              const selectedBSelection = broadcastsHistory.find(x => x.id === selectedBroadcastId);
-              if (selectedBSelection) {
-                return (
-                  <BroadcastDetailsView 
-                    broadcast={selectedBSelection}
-                    onBack={() => {
-                      setSelectedBroadcastId(null);
-                      getBroadcastHistory();
-                    }}
-                    isLiveBroadcasting={isBroadcasting}
-                    liveProgress={broadcastProgress}
-                  />
-                );
-              }
-            }
+             // If a specific broadcast is selected, show the detailed design
+             if (selectedBroadcastId) {
+               const selectedBSelection = broadcastsHistory.find(x => x.id === selectedBroadcastId);
+               if (selectedBSelection) {
+                 return (
+                   <BroadcastDetailsView 
+                     broadcast={selectedBSelection}
+                     onBack={() => {
+                       setSelectedBroadcastId(null);
+                       getBroadcastHistory();
+                     }}
+                     isLiveBroadcasting={isBroadcasting}
+                     liveProgress={broadcastProgress}
+                     onRefresh={getBroadcastHistory}
+                   />
+                 );
+               }
+             }
 
             const hasActiveFilters = 
               appliedFilters.status !== "all" ||
@@ -3008,10 +3140,20 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                       )}
                     </div>
                     <button 
-                      className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors shadow-sm"
+                      onClick={() => {
+                        setIsSelectMode(!isSelectMode);
+                        if (isSelectMode) {
+                          setSelectedBroadcastIds([]);
+                        }
+                      }}
+                      className={`flex items-center gap-2 border px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer transition-all shadow-sm ${
+                        isSelectMode 
+                          ? 'border-indigo-650 bg-indigo-50/70 text-indigo-700 ring-2 ring-indigo-50 shadow-inner' 
+                          : 'border-slate-200 bg-white hover:bg-slate-50 text-slate-700'
+                      }`}
                     >
-                      <CheckSquare className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span>Select</span>
+                      <CheckSquare className={`w-4 h-4 shrink-0 ${isSelectMode ? 'text-indigo-600' : 'text-slate-400'}`} />
+                      <span>{isSelectMode ? 'Done' : 'Select'}</span>
                     </button>
                     <button 
                       onClick={getBroadcastHistory}
@@ -3022,6 +3164,196 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                     </button>
                   </div>
                 </div>
+
+                {/* Bulk Selection Action Bar */}
+                {(isSelectMode || selectedBroadcastIds.length > 0) && (
+                  <div className="bg-[#EFF6FF] border border-[#BFDBFE] px-5 py-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between text-xs sm:text-sm font-semibold gap-4 animate-in slide-in-from-top-2 duration-200 shadow-sm w-full mb-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4 w-full md:w-auto">
+                      <div className="flex items-center gap-3 shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedBroadcastIds.length > 0 && selectedBroadcastIds.length === filteredHistory.length}
+                          ref={(el) => {
+                            if (el) {
+                              el.indeterminate = selectedBroadcastIds.length > 0 && selectedBroadcastIds.length < filteredHistory.length;
+                            }
+                          }}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedBroadcastIds(filteredHistory.map(b => b.id));
+                            } else {
+                              setSelectedBroadcastIds([]);
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600 border-blue-300 rounded focus:ring-blue-500 cursor-pointer animate-none"
+                        />
+                        <span className="text-blue-700 text-xs sm:text-sm">
+                          <span className="font-extrabold text-blue-950">{selectedBroadcastIds.length} selected</span> of {filteredHistory.length}
+                        </span>
+                      </div>
+
+                      {/* Decorative vertical divider */}
+                      <div className="h-5 w-px bg-blue-200 hidden sm:block" />
+
+                      {/* Primary Actions Button Group */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Pause Button */}
+                        <button
+                          onClick={async () => {
+                            if (selectedBroadcastIds.length === 0) return;
+                            try {
+                              await axios.post('/api/facebook/broadcasts/pause', { ids: selectedBroadcastIds, email: appUser?.email });
+                              addToast(`Paused ${selectedBroadcastIds.length} broadcasts successfully.`, "success");
+                              getBroadcastHistory();
+                              setSelectedBroadcastIds([]);
+                            } catch (err: any) {
+                              addToast("Failed to pause broadcasts.", "error");
+                            }
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-200 hover:border-slate-350 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <Pause className="w-3.5 h-3.5 text-amber-500" />
+                          <span>Pause</span>
+                        </button>
+
+                        {/* Cancel Button */}
+                        <button
+                          onClick={async () => {
+                            if (selectedBroadcastIds.length === 0) return;
+                            try {
+                              await axios.post('/api/facebook/broadcasts/cancel', { ids: selectedBroadcastIds, email: appUser?.email });
+                              addToast(`Cancelled ${selectedBroadcastIds.length} broadcasts successfully.`, "success");
+                              getBroadcastHistory();
+                              setSelectedBroadcastIds([]);
+                            } catch (err: any) {
+                              addToast("Failed to cancel broadcasts.", "error");
+                            }
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-200 hover:border-slate-350 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <XCircle className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Cancel</span>
+                        </button>
+
+                        {/* Resend button */}
+                        <button
+                          onClick={async () => {
+                            if (selectedBroadcastIds.length === 0) return;
+                            try {
+                              await axios.post('/api/facebook/broadcasts/resend', { ids: selectedBroadcastIds, email: appUser?.email });
+                              addToast(`Resend flow triggered for ${selectedBroadcastIds.length} campaigns.`, "success");
+                              getBroadcastHistory();
+                              setSelectedBroadcastIds([]);
+                            } catch (err: any) {
+                              addToast("Failed to trigger resend.", "error");
+                            }
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:text-indigo-650 border border-slate-200 hover:border-indigo-150 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
+                          <span>Resend</span>
+                        </button>
+
+                        {/* Duplicate Button */}
+                        <button
+                          onClick={() => {
+                            const firstId = selectedBroadcastIds[0];
+                            const original = filteredHistory.find(b => b.id === firstId);
+                            if (original) {
+                              setBroadcastMessage(original.message || "");
+                              setBroadcastView("single");
+                              setBroadcastPageId(original.pageId || "");
+                              if (original.messageTag) setBroadcastMessageTag(original.messageTag);
+                              addToast("Loaded campaign details to Create Broadcast layout.", "success");
+                              setSelectedBroadcastIds([]);
+                              setIsSelectMode(false);
+                            }
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-200 hover:border-slate-350 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <Copy className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Duplicate</span>
+                        </button>
+
+                        {/* Export Button */}
+                        <button
+                          onClick={() => {
+                            const selectedBcasts = filteredHistory.filter(b => selectedBroadcastIds.includes(b.id));
+                            if (selectedBcasts.length === 0) return;
+
+                            let csvContent = "data:text/csv;charset=utf-8,";
+                            csvContent += "ID,Campaign Message,Connected Page,Status,Total Recipients,Success Count,FailCount,Tag,Created At\n";
+
+                            selectedBcasts.forEach(b => {
+                              const rawTag = b.messageTag || b.tag || "UTILITY";
+                              const line = `"${b.id}","${b.message?.replace(/"/g, '""') || ''}","${b.pageName || ''}","${b.status || ''}",${b.totalRecipients || 0},${b.successCount || 0},${b.failCount || 0},"${rawTag}","${b.createdAt || ''}"`;
+                              csvContent += line + "\n";
+                            });
+
+                            const encodedUri = encodeURI(csvContent);
+                            const link = document.createElement("a");
+                            link.setAttribute("href", encodedUri);
+                            link.setAttribute("download", `broadcasts_export_${Date.now()}.csv`);
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+
+                            addToast(`Exported ${selectedBcasts.length} campaigns to CSV.`, "success");
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-200 hover:border-slate-350 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <Download className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>Export</span>
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          onClick={async () => {
+                            if (selectedBroadcastIds.length === 0) return;
+                            if (!window.confirm(`Are you sure you want to permanently delete these ${selectedBroadcastIds.length} campaign history records?`)) return;
+                            try {
+                              await axios.post('/api/facebook/broadcasts/delete', { ids: selectedBroadcastIds, email: appUser?.email });
+                              addToast(`Deleted ${selectedBroadcastIds.length} history records.`, "success");
+                              getBroadcastHistory();
+                              setSelectedBroadcastIds([]);
+                            } catch (err: any) {
+                              addToast("Failed to delete records.", "error");
+                            }
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-200 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Delete</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-end shrink-0">
+                      <button
+                        onClick={() => setSelectedBroadcastIds(filteredHistory.map(b => b.id))}
+                        className="text-blue-600 hover:text-blue-800 text-xs font-extrabold tracking-wider uppercase cursor-pointer bg-transparent border-none mt-1 sm:mt-0"
+                      >
+                        Select all
+                      </button>
+                      
+                      <button
+                        onClick={() => {
+                          setSelectedBroadcastIds([]);
+                          setIsSelectMode(false);
+                        }}
+                        className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Live Progress Bar Section if broadcast is currently running */}
                 {isBroadcasting && broadcastProgress && (
@@ -3114,7 +3446,23 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                       <table className="w-full text-left border-collapse">
                         <thead>
                           <tr className="border-b border-slate-100 bg-slate-50/20">
-                            <th className="pl-6 pr-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Campaign Message</th>
+                            {isSelectMode && (
+                              <th className="pl-6 pr-2 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B] w-12 text-center select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={selectedBroadcastIds.length > 0 && selectedBroadcastIds.length === filteredHistory.length}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedBroadcastIds(filteredHistory.map(b => b.id));
+                                    } else {
+                                      setSelectedBroadcastIds([]);
+                                    }
+                                  }}
+                                  className="w-4 h-4 text-indigo-600 border-indigo-200 rounded focus:ring-indigo-550 cursor-pointer"
+                                />
+                              </th>
+                            )}
+                            <th className={`${isSelectMode ? 'pl-4' : 'pl-6'} pr-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]`}>Campaign Message</th>
                             <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Connected Page</th>
                             <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Status</th>
                             <th className="px-4 py-4.5 text-[10px] font-black uppercase tracking-widest text-[#64748B]">Delivery Progress</th>
@@ -3159,11 +3507,43 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                             return (
                               <React.Fragment key={b.id || Math.random().toString()}>
                                 <tr 
-                                  className={`hover:bg-slate-50/50 transition-colors cursor-pointer text-xs ${isCurrentlySelected ? 'bg-indigo-50/10' : ''}`}
-                                  onClick={() => setSelectedBroadcastId(selectedBroadcastId === b.id ? null : b.id)}
+                                  className={`hover:bg-slate-50/50 transition-colors cursor-pointer text-xs ${
+                                    isCurrentlySelected ? 'bg-indigo-50/10' : ''
+                                  } ${selectedBroadcastIds.includes(b.id) ? 'bg-indigo-50/45 hover:bg-indigo-55/65' : ''}`}
+                                  onClick={(e) => {
+                                    if (isSelectMode) {
+                                      if (selectedBroadcastIds.includes(b.id)) {
+                                        setSelectedBroadcastIds(selectedBroadcastIds.filter(id => id !== b.id));
+                                      } else {
+                                        setSelectedBroadcastIds([...selectedBroadcastIds, b.id]);
+                                      }
+                                    } else {
+                                      setSelectedBroadcastId(selectedBroadcastId === b.id ? null : b.id);
+                                    }
+                                  }}
                                 >
+                                  {isSelectMode && (
+                                    <td 
+                                      className="pl-6 pr-2 py-4 text-center w-12"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedBroadcastIds.includes(b.id)}
+                                        onChange={(e) => {
+                                          if (e.target.checked) {
+                                            setSelectedBroadcastIds([...selectedBroadcastIds, b.id]);
+                                          } else {
+                                            setSelectedBroadcastIds(selectedBroadcastIds.filter(id => id !== b.id));
+                                          }
+                                        }}
+                                        className="w-4 h-4 text-indigo-600 border-indigo-200 rounded focus:ring-indigo-550 cursor-pointer"
+                                      />
+                                    </td>
+                                  )}
+                                  
                                   {/* Campaign Name Column */}
-                                  <td className="pl-6 pr-4 py-4 min-w-[200px]">
+                                  <td className={`${isSelectMode ? 'pl-4' : 'pl-6'} pr-4 py-4 min-w-[200px]`}>
                                     <div className="flex items-center gap-2.5 min-w-0">
                                       <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform shrink-0 ${isCurrentlySelected ? 'rotate-90 text-indigo-650 font-black' : ''}`} />
                                       <div className="min-w-0">
@@ -3238,11 +3618,32 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                 {/* Expansion Delivery Log Row */}
                                 {isCurrentlySelected && (
                                   <tr className="bg-slate-50/15">
-                                    <td colSpan={6} className="px-6 py-4">
+                                    <td colSpan={isSelectMode ? 7 : 6} className="px-6 py-4">
                                       <div className="p-5 bg-slate-50/50 rounded-2xl border border-slate-200 shadow-inner max-h-60 overflow-y-auto space-y-3.5">
-                                        <div className="flex justify-between items-center text-[10px] font-black uppercase text-slate-450 tracking-wider">
+                                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 text-[10px] font-black uppercase text-slate-450 tracking-wider">
                                           <span>Delivery Log Details ({b.recipientsStatus?.length || 0} contacts)</span>
-                                          <span className="text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">Success Rate: {Math.round((success / total) * 100)}%</span>
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-emerald-700 font-extrabold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">Success Rate: {Math.round((success / total) * 100)}%</span>
+                                            
+                                            <button
+                                              onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (!window.confirm("Are you sure you want to permanently delete this campaign's history?")) return;
+                                                try {
+                                                  await axios.post('/api/facebook/broadcasts/delete', { ids: [b.id], email: appUser?.email });
+                                                  addToast("Campaign deleted successfully.", "success");
+                                                  getBroadcastHistory();
+                                                  setSelectedBroadcastId(null);
+                                                } catch (err: any) {
+                                                  addToast("Failed to delete this campaign.", "error");
+                                                }
+                                              }}
+                                              className="flex items-center gap-1 px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-250 rounded-lg text-[9px] font-black tracking-widest uppercase transition-all shadow-sm cursor-pointer select-none"
+                                            >
+                                              <Trash2 className="w-3 h-3 text-rose-600" />
+                                              <span>Delete Campaign</span>
+                                            </button>
+                                          </div>
                                         </div>
                                         {b.recipientsStatus && b.recipientsStatus.length > 0 ? (
                                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
