@@ -51,6 +51,9 @@ interface ChatPageProps {
   seenConversations: Record<string, string>;
   markAsRead: (convId: string, lastMsgId: string) => void;
   markAsUnread: (convId: string) => void;
+  conversationsHasMore?: boolean;
+  isConversationsLoadingMore?: boolean;
+  loadMoreConversations?: () => void | Promise<void>;
 }
 
 export const ChatPage: React.FC<ChatPageProps> = ({
@@ -83,7 +86,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   getPages,
   seenConversations,
   markAsRead,
-  markAsUnread
+  markAsUnread,
+  conversationsHasMore,
+  isConversationsLoadingMore,
+  loadMoreConversations
 }) => {
   const [visibleCount, setVisibleCount] = React.useState(50);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
@@ -257,8 +263,20 @@ export const ChatPage: React.FC<ChatPageProps> = ({
           </div>
         </div>
 
-        {/* Conversations List */}
-        <div className="flex-1 overflow-y-auto pb-10 scrollbar-hide">
+        {/* Conversations List with Ultra-Fast Auto-Scroll Infinite Pagination */}
+        <div 
+          className="flex-1 overflow-y-auto pb-10 scrollbar-hide"
+          onScroll={(e) => {
+            const target = e.currentTarget;
+            // When scrolled near the end (150px threshold), trigger batch-loads automatically
+            if (target.scrollTop + target.clientHeight >= target.scrollHeight - 150) {
+              setVisibleCount(prev => prev + 40);
+              if (conversationsHasMore && !isConversationsLoadingMore && loadMoreConversations) {
+                loadMoreConversations();
+              }
+            }
+          }}
+        >
           {!selectedPage ? (
             <div className="p-20 text-center flex flex-col items-center gap-4 opacity-30">
               <ShieldAlert className="w-12 h-12" />
@@ -327,7 +345,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                       {isActive && <div className="absolute left-0 top-4 bottom-4 w-0.5 sm:w-1 bg-indigo-600 rounded-r-full shadow-[0_0_10px_rgba(79,70,229,0.5)]"></div>}
                       <div className="relative shrink-0">
                         <div className={`w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl overflow-hidden border-2 transition-all shadow-sm ${isActive ? 'border-indigo-600 scale-105 shadow-xl' : 'border-white bg-slate-100'}`}>
-                          <SafeAvatar src={other?.picture?.data?.url} name={other?.name} className="w-full h-full" />
+                           <SafeAvatar src={other?.picture?.data?.url} name={other?.name} className="w-full h-full" />
                         </div>
                         <div className="absolute -bottom-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-emerald-500 border-2 border-white rounded-full"></div>
                       </div>
@@ -373,15 +391,27 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                   );
                 })}
 
-                {filteredConversations.length > visibleCount && (
-                  <div className="px-6 py-6 flex justify-center">
-                    <button
-                      onClick={() => setVisibleCount(prev => prev + 50)}
-                      className="flex items-center gap-2 px-6 py-3 text-sm font-black text-blue-600 hover:text-blue-800 hover:bg-blue-50/50 rounded-2xl transition-all cursor-pointer bg-transparent border-none"
-                    >
-                      <ChevronDown className="w-4 h-4 text-blue-600" />
-                      <span>Load more</span>
-                    </button>
+                {(filteredConversations.length > visibleCount || conversationsHasMore) && (
+                  <div className="px-6 py-6 flex flex-col items-center justify-center gap-2">
+                    {isConversationsLoadingMore ? (
+                      <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest animate-pulse flex items-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                        <span>Loading older conversations...</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          setVisibleCount(prev => prev + 40);
+                          if (conversationsHasMore && loadMoreConversations) {
+                            loadMoreConversations();
+                          }
+                        }}
+                        className="flex items-center gap-2 px-6 py-3 text-xs font-black text-indigo-600 hover:text-indigo-800 hover:bg-slate-50 rounded-2xl transition-all cursor-pointer bg-transparent border-none uppercase tracking-widest"
+                      >
+                        <ChevronDown className="w-4 h-4 text-indigo-600" />
+                        <span>Load more</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </>

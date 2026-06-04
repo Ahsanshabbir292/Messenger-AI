@@ -726,7 +726,13 @@ async function getDb(): Promise<any> {
     // Connectivity check on startup to verify setup
     try {
       const pingDocRef = doc(webDb, "_connectivity_test", "ping");
-      await getDoc(pingDocRef);
+      
+      // Wrapped in highly resilient timeout to prevent Node gRPC connection hang and maintain server uptime
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Connection check timed out after 3000ms")), 3000)
+      );
+      await Promise.race([getDoc(pingDocRef), timeoutPromise]);
+      
       console.log(`[Firebase] Web SDK Connectivity check passed successfully!`);
       db = new CompatFirestore(webDb);
     } catch (err: any) {
@@ -743,6 +749,7 @@ async function getDb(): Promise<any> {
       const isNotFoundErr = err.message?.includes("NOT_FOUND") || 
                             err.message?.includes("not-found") || 
                             err.message?.includes("5") ||
+                            err.message?.includes("timed out") ||
                             err.code === "not-found";
                             
       if (dbId && dbId !== "(default)" && isNotFoundErr) {
@@ -751,7 +758,12 @@ async function getDb(): Promise<any> {
         try {
           fallbackDb = getWebFirestore(app);
           const pingDocRef = doc(fallbackDb, "_connectivity_test", "ping");
-          await getDoc(pingDocRef);
+          
+          const fallbackTimeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Fallback connection check timed out after 3000ms")), 3000)
+          );
+          await Promise.race([getDoc(pingDocRef), fallbackTimeoutPromise]);
+          
           console.log(`[Firebase] Web SDK Connectivity check passed successfully with '(default)' database!`);
           webDb = fallbackDb;
           db = new CompatFirestore(webDb);
@@ -861,21 +873,172 @@ async function startServer() {
     }
   });
 
+  // Helper to resolve the main workspace owner's email
+  async function getWorkspaceOwnerEmail(req: any, db: any, userEmail: string): Promise<string> {
+    if (!userEmail || userEmail === "anonymous" || userEmail === "ahsan.shabbir292@gmail.com") {
+      return "ahsan.shabbir292@gmail.com";
+    }
+
+    // 1. Check if already resolved in session
+    if (req.session?.user && req.session.user.email === userEmail && req.session.ownerEmail) {
+      return req.session.ownerEmail;
+    }
+
+    try {
+      // 2. Fetch the user document
+      const userDoc = await db.collection("users").doc(userEmail).get();
+      if (userDoc.exists) {
+        const uData = userDoc.data();
+        
+        // If they have an explicit inviter/owner email, use that
+        if (uData?.inviterEmail) {
+          if (req.session?.user && req.session.user.email === userEmail) {
+            req.session.ownerEmail = uData.inviterEmail;
+          }
+          return uData.inviterEmail;
+        }
+
+        // If they are an owner or have no role, they are the owner
+        if (!uData?.role || uData.role === 'owner') {
+          if (req.session?.user && req.session.user.email === userEmail) {
+            req.session.ownerEmail = userEmail;
+          }
+          return userEmail;
+        }
+      }
+
+      // 3. Fallback: Check invitations for this email to find who invited them
+      const inviteDoc = await db.collection("invitations").doc(userEmail).get();
+      if (inviteDoc.exists) {
+        const inviteData = inviteDoc.data();
+        if (inviteData?.inviterEmail) {
+          // Auto-heal user document in DB
+          await db.collection("users").doc(userEmail).update({
+            inviterEmail: inviteData.inviterEmail,
+            workspaceId: inviteData.inviterWorkspaceId || "ws_default"
+          });
+          if (req.session?.user && req.session.user.email === userEmail) {
+            req.session.ownerEmail = inviteData.inviterEmail;
+          }
+          return inviteData.inviterEmail;
+        }
+      }
+
+      // 4. Trace in workspace team roasters
+      const usersSnap = await db.collection("users").get();
+      for (const doc of usersSnap.docs) {
+        const u = doc.data();
+        if (u.teamMembers && Array.isArray(u.teamMembers)) {
+          if (u.teamMembers.some((m: any) => m.email && m.email.toLowerCase() === userEmail.toLowerCase())) {
+            const ownerEmail = doc.id;
+            const wsId = u.workspaceId || "ws_default";
+            
+            // Auto-heal
+            await db.collection("users").doc(userEmail).update({
+              inviterEmail: ownerEmail,
+              workspaceId: wsId
+            });
+
+            if (req.session?.user && req.session.user.email === userEmail) {
+              req.session.ownerEmail = ownerEmail;
+            }
+            return ownerEmail;
+          }
+        }
+      }
+
+    } catch (err) {
+      console.error("[getWorkspaceOwnerEmail] Error:", err);
+    }
+
+    return userEmail;
+  }
+
+  // Middleware to auto-intercept and augment request context for team members/invited users
+  app.use(async (req: any, res: any, next: any) => {
+    // Exclude basic auth/registration endpoints
+    if (
+      req.path.startsWith('/api/auth/') || 
+      req.path === '/api/team/verify-and-register'
+    ) {
+      return next();
+    }
+
+    const db = await getDb();
+    if (db) {
+      const headerEmail = req.headers['x-user-email'] as string || req.query.email as string || req.body?.email as string || req.session?.user?.email as string;
+      if (headerEmail && headerEmail !== "anonymous") {
+        try {
+          const ownerEmail = await getWorkspaceOwnerEmail(req, db, headerEmail);
+          if (ownerEmail && ownerEmail.toLowerCase() !== headerEmail.toLowerCase()) {
+            console.log(`[WORKSPACE RESOLVER] Mapping team member ${headerEmail} -> Owner: ${ownerEmail}`);
+            
+            // Rewrite headers and request query/body fields transparently
+            req.headers['x-user-email'] = ownerEmail;
+            
+            if (req.query.email) {
+              req.query.email = ownerEmail;
+            }
+            if (req.body && 'email' in req.body) {
+              req.body.email = ownerEmail;
+            }
+
+            // Load and rewrite workspace ID to owner's workspace ID
+            const ownerDoc = await db.collection("users").doc(ownerEmail).get();
+            if (ownerDoc.exists) {
+              const wsId = ownerDoc.data()?.workspaceId || "ws_default";
+              req.headers['x-workspace-id'] = wsId;
+              if (req.query.workspaceId) {
+                req.query.workspaceId = wsId;
+              }
+              if (req.body && 'workspaceId' in req.body) {
+                req.body.workspaceId = wsId;
+              }
+            }
+          }
+        } catch (err: any) {
+          console.error("[WORKSPACE INTERCEPTOR] Error resolving owner:", err.message);
+        }
+      }
+    }
+    next();
+  });
+
+  // Helper to get resolved owner user email based on workspace mapping for team members
+  async function getResolvedUserEmail(req: any): Promise<string> {
+    const db = await getDb();
+    let email = req.session?.user?.email || req.headers['x-user-email'] || req.query?.email || req.body?.email;
+    if (!email || email === "anonymous") {
+      email = "ahsan.shabbir292@gmail.com";
+    }
+    if (db) {
+      const ownerEmail = await getWorkspaceOwnerEmail(req, db, email);
+      return ownerEmail || email;
+    }
+    return email;
+  }
+
   // Helper to fetch Facebook config from either User document or Session
   async function getFacebookData(req: any) {
     const db = await getDb();
     if (!db) return null;
 
-    // 1. Check logged-in user in DB (preferred/most robust!)
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email || req.body?.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
-    }
-    const workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
-
-    if (userEmail) {
+    const resolvedUserEmail = await getResolvedUserEmail(req);
+    
+    // Check workspace-id
+    let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
+    if (!workspaceId && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
       try {
-        const userDoc = await db.collection("users").doc(userEmail).get();
+        const ownerDoc = await db.collection("users").doc(resolvedUserEmail).get();
+        if (ownerDoc.exists) {
+          workspaceId = ownerDoc.data()?.workspaceId;
+        }
+      } catch (e) {}
+    }
+
+    if (resolvedUserEmail) {
+      try {
+        const userDoc = await db.collection("users").doc(resolvedUserEmail).get();
         if (userDoc.exists) {
           const u = userDoc.data();
           if (u) {
@@ -890,7 +1053,7 @@ async function startServer() {
             }
             // Fallback to global facebook
             if (u.facebook) {
-              console.log(`[Firebase] Loaded FB data from user document: ${userEmail}`);
+              console.log(`[Firebase] Loaded FB data from user document: ${resolvedUserEmail}`);
               return u.facebook;
             }
           }
@@ -901,7 +1064,7 @@ async function startServer() {
     }
 
     // 2. Fallback to session
-    const sessionId = req.session.fbSessionId || (userEmail ? `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
+    const sessionId = req.session.fbSessionId || (resolvedUserEmail ? `fb_${resolvedUserEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
     if (sessionId) {
       try {
         const sessionDoc = await db.collection("sessions").doc(sessionId).get();
@@ -910,7 +1073,7 @@ async function startServer() {
           return sessionDoc.data();
         }
       } catch (e: any) {
-        console.error(`[Firebase] Error fetching session doc: ${e.message}`);
+        console.error(`[Firebase] Error fetching session doc for FB data: ${e.message}`);
       }
     }
 
@@ -931,9 +1094,16 @@ async function startServer() {
     console.log(`[Cache Invalidation] Cleared conversations cache for page: ${pageId}`);
   }
 
-  // Helper to fetch ALL conversation threads of a Facebook Page recursively following pagination links
-  async function fetchAllPageConversations(pageId: string, accessToken: string, fields: string = "id", bypassCache: boolean = false) {
-    const cacheKey = `${pageId}_${fields}`;
+  // Helper to fetch ALL conversation threads of a Facebook Page recursively following pagination links, supporting custom limit/cursor for instant execution
+  async function fetchAllPageConversations(
+    pageId: string, 
+    accessToken: string, 
+    fields: string = "id", 
+    bypassCache: boolean = false,
+    limitParam?: number,
+    afterParam?: string
+  ) {
+    const cacheKey = `${pageId}_${fields}_${limitParam || 'all'}_${afterParam || 'first'}`;
     
     if (!bypassCache) {
       const cached = fbConversationsCache.get(cacheKey);
@@ -944,67 +1114,83 @@ async function startServer() {
     }
 
     const list: any[] = [];
+    let pagingResult: any = null;
     try {
-      let nextPageUrl: string | null = null;
-      
-      const firstRes = await axios.get(`https://graph.facebook.com/v19.0/me/conversations`, {
-        params: {
-          access_token: accessToken,
-          fields: fields,
-          limit: 500
-        }
-      });
-      const firstBatch = firstRes.data?.data || [];
-      list.push(...firstBatch);
-      nextPageUrl = firstRes.data?.paging?.next || null;
-
-      while (nextPageUrl) {
-        const res: any = await axios.get(nextPageUrl);
-        const batch = res.data?.data || [];
-        list.push(...batch);
-        nextPageUrl = res.data?.paging?.next || null;
+      const params: any = {
+        access_token: accessToken,
+        fields: fields,
+        limit: limitParam || 500
+      };
+      if (afterParam) {
+        params.after = afterParam;
       }
       
-      // Update cache
-      fbConversationsCache.set(cacheKey, {
-        data: list,
-        timestamp: Date.now()
-      });
-      
-    } catch (err: any) {
-      console.error(`[FB Helper] Error fetching conversations for page ${pageId}:`, err.response?.data || err.message);
-      // Fallback: fetch using pageId instead of me
-      try {
-        let nextPageUrl: string | null = null;
-        const fallbackRes = await axios.get(`https://graph.facebook.com/v19.0/${pageId}/conversations`, {
-          params: {
-            access_token: accessToken,
-            fields: fields,
-            limit: 500
-          }
-        });
-        const firstBatch = fallbackRes.data?.data || [];
-        list.push(...firstBatch);
-        nextPageUrl = fallbackRes.data?.paging?.next || null;
+      const firstRes = await axios.get(`https://graph.facebook.com/v19.0/me/conversations`, { params });
+      const firstBatch = firstRes.data?.data || [];
+      list.push(...firstBatch);
+      pagingResult = firstRes.data?.paging || null;
 
+      if (!limitParam) {
+        let nextPageUrl = firstRes.data?.paging?.next || null;
         while (nextPageUrl) {
           const res: any = await axios.get(nextPageUrl);
           const batch = res.data?.data || [];
           list.push(...batch);
           nextPageUrl = res.data?.paging?.next || null;
         }
+      }
+      
+      const returnList = [...list];
+      (returnList as any).pagingResult = pagingResult;
+
+      // Update cache
+      fbConversationsCache.set(cacheKey, {
+        data: returnList,
+        timestamp: Date.now()
+      });
+      return returnList;
+      
+    } catch (err: any) {
+      console.error(`[FB Helper] Error fetching conversations for page ${pageId}:`, err.response?.data || err.message);
+      // Fallback: fetch using pageId instead of me
+      try {
+        const params: any = {
+          access_token: accessToken,
+          fields: fields,
+          limit: limitParam || 500
+        };
+        if (afterParam) {
+          params.after = afterParam;
+        }
+        const fallbackRes = await axios.get(`https://graph.facebook.com/v19.0/${pageId}/conversations`, { params });
+        const firstBatch = fallbackRes.data?.data || [];
+        list.push(...firstBatch);
+        pagingResult = fallbackRes.data?.paging || null;
+
+        if (!limitParam) {
+          let nextPageUrl = fallbackRes.data?.paging?.next || null;
+          while (nextPageUrl) {
+            const res: any = await axios.get(nextPageUrl);
+            const batch = res.data?.data || [];
+            list.push(...batch);
+            nextPageUrl = res.data?.paging?.next || null;
+          }
+        }
+
+        const returnList = [...list];
+        (returnList as any).pagingResult = pagingResult;
 
         // Update cache
         fbConversationsCache.set(cacheKey, {
-          data: list,
+          data: returnList,
           timestamp: Date.now()
         });
+        return returnList;
       } catch (errFallback: any) {
         console.error(`[FB Helper Fallback] Error fetching for page ${pageId}:`, errFallback.response?.data || errFallback.message);
         throw errFallback;
       }
     }
-    return list;
   }
 
   // API Routes
@@ -1386,25 +1572,14 @@ async function startServer() {
       const inviteToken = "inv_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
       const inviterName = req.session.user?.fullName || "Ahsan Shabbir";
 
-      // 1. Save invitation in Firestore
-      await db.collection("invitations").doc(email.toLowerCase()).set({
-        email: email.toLowerCase(),
-        name,
-        role,
-        assignedPages: assignedPages || [],
-        inviterEmail: userEmail,
-        inviterName,
-        token: inviteToken,
-        status: "pending",
-        createdAt: new Date().toISOString()
-      });
-
-      // 2. Fetch admin user profile to update teamMembers array
+      // 2. Fetch admin user profile to update teamMembers array and resolve workspaceId
       const adminDoc = await db.collection("users").doc(userEmail).get();
       let teamMembers = [];
+      let inviterWorkspaceId = "ws_default";
       if (adminDoc.exists) {
         const adminData = adminDoc.data();
         teamMembers = adminData.teamMembers || [];
+        inviterWorkspaceId = adminData.workspaceId || "ws_default";
       }
 
       // Check if already in the roster, if not, add/update
@@ -1425,6 +1600,20 @@ async function startServer() {
       } else {
         teamMembers.push(newMember);
       }
+
+      // 1. Save invitation in Firestore
+      await db.collection("invitations").doc(email.toLowerCase()).set({
+        email: email.toLowerCase(),
+        name,
+        role,
+        assignedPages: assignedPages || [],
+        inviterEmail: userEmail,
+        inviterName,
+        inviterWorkspaceId,
+        token: inviteToken,
+        status: "pending",
+        createdAt: new Date().toISOString()
+      });
 
       // Save back to admin document
       await db.collection("users").doc(userEmail).update({ teamMembers });
@@ -1538,15 +1727,16 @@ async function startServer() {
       // Hash password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Create user
+      // Create user within inviter's workspace
       const userData = {
         email: email.toLowerCase(),
         password: hashedPassword,
         fullName: fullName || inviteData.name || email.split('@')[0],
-        workspaceId: "ws_" + Math.random().toString(36).substring(7),
-        role: role || inviteData.role || "member",
+        workspaceId: inviteData.inviterWorkspaceId || inviteData.workspaceId || "ws_default",
+        role: role || inviteData.role || inviteData.role || "member",
         assignedPages: assignedPages || inviteData.assignedPages || [],
         invited: true,
+        inviterEmail: inviteData.inviterEmail || null,
         createdAt: new Date().toISOString()
       };
 
@@ -3181,9 +3371,43 @@ async function startServer() {
       console.warn("Could not load or set credits in Database:", err.message);
     }
 
+    let selectedPageIds = data.selectedPageIds || [];
+    if (selectedPageIds.length === 0 && rawPages.length > 0) {
+      selectedPageIds = rawPages.slice(0, 3).map((p: any) => p.id);
+      try {
+        const resolvedUserEmail = await getResolvedUserEmail(req);
+        let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
+        if (!workspaceId && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
+          const ownerDoc = await db.collection("users").doc(resolvedUserEmail).get();
+          if (ownerDoc.exists) {
+            workspaceId = ownerDoc.data()?.workspaceId;
+          }
+        }
+        if (resolvedUserEmail) {
+          const userDocRef = db.collection("users").doc(resolvedUserEmail);
+          const snap = await userDocRef.get();
+          if (snap.exists) {
+            const u = snap.data();
+            const updatedFB = { ...((workspaceId ? (u?.facebookWorkspaces?.[workspaceId] || u?.facebook) : u?.facebook) || {}), selectedPageIds };
+            
+            const updates: any = {};
+            if (workspaceId) {
+              updates[`facebookWorkspaces.${workspaceId}`] = updatedFB;
+            } else {
+              updates.facebook = updatedFB;
+            }
+            await userDocRef.update(updates);
+            console.log(`[Firebase] Auto-selected first 3 pages for email: ${resolvedUserEmail} workspace: ${workspaceId || 'global'}`);
+          }
+        }
+      } catch (err: any) {
+        console.warn("Could not auto-persist default selectedPageIds:", err.message);
+      }
+    }
+
     res.json({ 
       pages: mappedPages, 
-      selectedPageIds: data.selectedPageIds || [],
+      selectedPageIds,
       trialLocked: !!data.trialLocked,
       credits,
       lastSyncedContacts: data.lastSyncedContacts || null
@@ -3220,10 +3444,7 @@ async function startServer() {
     }
 
     // A. Update in user document directly
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     if (userEmail) {
       try {
@@ -3259,10 +3480,7 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email || req.body.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     const workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body.workspaceId;
 
@@ -3375,10 +3593,7 @@ async function startServer() {
     }
 
     // A. Update in user document directly
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com"; // Smart fallback for developer sandbox
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     if (userEmail) {
       try {
@@ -3751,10 +3966,7 @@ async function startServer() {
   }
 
   async function getOrCreateSimulatedConversations(db: any, req: any, pageId: string) {
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     try {
       const simColRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
@@ -3847,39 +4059,62 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const page = data.pages?.find((p: any) => p.id === pageId);
     if (!page) return res.status(404).json({ error: "Page not found" });
 
+    const limit = parseInt(req.query.limit as string, 10) || 25;
+    const after = req.query.after as string || undefined;
+
     // Check if simulated
     if (page.access_token && page.access_token.startsWith("sim_")) {
       const mockConversations = await getOrCreateSimulatedConversations(db, req, pageId);
-      return res.json({ conversations: mockConversations });
+      
+      let startIdx = 0;
+      if (after) {
+        startIdx = parseInt(after, 10) || 0;
+      }
+      
+      const chunk = mockConversations.slice(startIdx, startIdx + limit);
+      const nextCursor = (startIdx + limit < mockConversations.length) ? String(startIdx + limit) : null;
+      const hasMore = startIdx + limit < mockConversations.length;
+      
+      return res.json({ 
+        conversations: chunk,
+        nextCursor,
+        hasMore
+      });
     }
 
     try {
       const forceRefresh = req.query.refresh === "true";
-      // Fetch all conversations recursively without the 50 limit!
+      // Fetch paginated conversations fast! Include limit & after cursor to prevent slow recursive loops.
       const realConvs = await fetchAllPageConversations(
         pageId,
         page.access_token,
         "participants{name,picture.type(large){url},id},messages.limit(1){message,from,created_time,attachments},updated_time",
-        forceRefresh
+        forceRefresh,
+        limit,
+        after
       );
+
+      const pagingResult = (realConvs as any).pagingResult;
+      const nextCursor = pagingResult?.cursors?.after || null;
+      const hasMore = !!pagingResult?.next;
+
       // Return real conversations from Meta. If empty, the inbox will show "No conversations found" cleanly, not mock conversations.
-      return res.json({ conversations: realConvs });
+      return res.json({ 
+        conversations: realConvs,
+        nextCursor,
+        hasMore
+      });
     } catch (error: any) {
-      console.warn("[Facebook Error - Falling back to Simulation] Failed to retrieve conversations for real page:", pageId, error.response?.data || error.message);
-      try {
-        const mockConversations = await getOrCreateSimulatedConversations(db, req, pageId);
-        return res.json({ 
-          conversations: mockConversations,
-          isSimulatedFallback: true,
-          warning: "Facebook's API is currently unresponsive. Loaded high-fidelity simulated sandbox data instead."
-        });
-      } catch (fallbackErr: any) {
-        console.error("[Facebook Error] Extremely critical fallback crash:", fallbackErr.message);
-        return res.status(500).json({ 
-          error: "Failed to fetch conversations and failed to launch simulated sandbox.", 
-          details: fallbackErr.message 
-        });
-      }
+      console.warn("[Facebook Error] Failed to retrieve conversations for page:", pageId, error.response?.data || error.message);
+      const errDetails = error.response?.data?.error || { message: error.message };
+      
+      // Since the user requested to REMOVE dummy conversations inside real connected pages,
+      // return a clear error structure with empty conversations list.
+      return res.status(400).json({ 
+        error: "Failed to fetch conversations from Meta Graph API. Access token may be expired or invalid.",
+        details: errDetails,
+        conversations: []
+      });
     }
   });
 
@@ -3933,10 +4168,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
     // Check if simulated
     if (page.access_token && page.access_token.startsWith("sim_")) {
-      let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-      if (!userEmail || userEmail === "anonymous") {
-        userEmail = "ahsan.shabbir292@gmail.com";
-      }
+      const userEmail = await getResolvedUserEmail(req);
 
       try {
         const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
@@ -4085,10 +4317,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
     // Check if simulated
     if (page.access_token && page.access_token.startsWith("sim_")) {
-      let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-      if (!userEmail || userEmail === "anonymous") {
-        userEmail = "ahsan.shabbir292@gmail.com";
-      }
+      const userEmail = await getResolvedUserEmail(req);
 
       try {
         const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
@@ -4200,10 +4429,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     let recipients: any[] = [];
     const isSimulated = page.access_token && page.access_token.startsWith("sim_");
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     // 1. Fetch conversations & participants (recipients)
     if (isSimulated) {
@@ -4827,10 +5053,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     try {
       let snap;
@@ -4869,8 +5092,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "Invalid ids list" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email || req.body.email;
-    if (!userEmail || userEmail === "anonymous") userEmail = "ahsan.shabbir292@gmail.com";
+    const userEmail = await getResolvedUserEmail(req);
 
     try {
       const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");
@@ -4890,8 +5112,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "Invalid ids list" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email || req.body.email;
-    if (!userEmail || userEmail === "anonymous") userEmail = "ahsan.shabbir292@gmail.com";
+    const userEmail = await getResolvedUserEmail(req);
 
     try {
       const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");
@@ -4911,8 +5132,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "Invalid ids list" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email || req.body.email;
-    if (!userEmail || userEmail === "anonymous") userEmail = "ahsan.shabbir292@gmail.com";
+    const userEmail = await getResolvedUserEmail(req);
 
     try {
       const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");
@@ -4932,8 +5152,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "Invalid ids list" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email || req.body.email;
-    if (!userEmail || userEmail === "anonymous") userEmail = "ahsan.shabbir292@gmail.com";
+    const userEmail = await getResolvedUserEmail(req);
 
     try {
       const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");

@@ -264,6 +264,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [conversations, setConversations] = useState<any[]>([]);
+  const [conversationsNextCursor, setConversationsNextCursor] = useState<string | null>(null);
+  const [conversationsHasMore, setConversationsHasMore] = useState<boolean>(false);
+  const [isConversationsLoadingMore, setIsConversationsLoadingMore] = useState<boolean>(false);
   const [selectedPage, setSelectedPage] = useState<any>(null);
   const [selectedConversation, setSelectedConversation] = useState<any>(null);
   const [replyMessage, setReplyMessage] = useState("");
@@ -278,6 +281,15 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   useEffect(() => {
     localStorage.setItem('current_plan_v1', currentPlan);
   }, [currentPlan]);
+
+  useEffect(() => {
+    if (!selectedPage && pages.length > 0 && selectedPageIds.length > 0) {
+      const firstActive = pages.find((p: any) => selectedPageIds.includes(p.id));
+      if (firstActive) {
+        setSelectedPage(firstActive);
+      }
+    }
+  }, [pages, selectedPageIds, selectedPage]);
 
   useEffect(() => {
     if (conversations && conversations.length > 0) {
@@ -998,10 +1010,12 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     setIsLoading(true);
     try {
       const urlSuffix = forceRefresh ? "?refresh=true" : "";
+      // When we query a single page, we can optimize by query-limiting to 25.
+      // If of type "all", we can fetch the top 20 for each page to keep initial loads instant.
       if (pageId === "all") {
         const activePages = pages.filter(p => selectedPageIds.includes(p.id));
         const promises = activePages.map(page => 
-          axios.get(`/api/facebook/conversations/${page.id}${urlSuffix}`)
+          axios.get(`/api/facebook/conversations/${page.id}${urlSuffix}`, { params: { limit: 20 } })
             .then(res => (res.data.conversations || []).map((c: any) => ({
               ...c,
               _associatedPageId: page.id
@@ -1019,9 +1033,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
           return tB - tA;
         });
         setConversations(merged);
+        setConversationsNextCursor(null);
+        setConversationsHasMore(false);
       } else {
-        const res = await axios.get(`/api/facebook/conversations/${pageId}${urlSuffix}`);
+        const res = await axios.get(`/api/facebook/conversations/${pageId}${urlSuffix}`, { params: { limit: 25 } });
         setConversations(res.data.conversations || []);
+        setConversationsNextCursor(res.data.nextCursor || null);
+        setConversationsHasMore(!!res.data.hasMore);
       }
     } catch (err: any) {
       console.error("Failed to get conversations", err);
@@ -1029,6 +1047,32 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       addToast(`Retrieval Error: ${errMsg}`, "error");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadMoreConversations = async () => {
+    if (isConversationsLoadingMore || !conversationsHasMore || !selectedPage?.id || selectedPage.id === "all") return;
+    setIsConversationsLoadingMore(true);
+    try {
+      const params: any = { limit: 25 };
+      if (conversationsNextCursor) {
+        params.after = conversationsNextCursor;
+      }
+      const res = await axios.get(`/api/facebook/conversations/${selectedPage.id}`, { params });
+      const newConversations = res.data.conversations || [];
+      if (newConversations.length > 0) {
+        setConversations(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const filteredNew = newConversations.filter((c: any) => !existingIds.has(c.id));
+          return [...prev, ...filteredNew];
+        });
+      }
+      setConversationsNextCursor(res.data.nextCursor || null);
+      setConversationsHasMore(!!res.data.hasMore);
+    } catch (err) {
+      console.error("Failed to load more conversations on scroll:", err);
+    } finally {
+      setIsConversationsLoadingMore(false);
     }
   };
 
@@ -1858,6 +1902,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               seenConversations={seenConversations}
               markAsRead={markAsRead}
               markAsUnread={markAsUnread}
+              conversationsHasMore={conversationsHasMore}
+              isConversationsLoadingMore={isConversationsLoadingMore}
+              loadMoreConversations={loadMoreConversations}
             />
           )}
 
