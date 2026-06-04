@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Bot, LayoutDashboard, MessageSquare, Settings, 
   Plus, MoreHorizontal, Activity, BarChart2,
@@ -272,6 +272,26 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   const [replyMessage, setReplyMessage] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [socket, setSocket] = useState<any>(null);
+  const selectedPageRef = useRef<any>(null);
+  const selectedConversationRef = useRef<any>(null);
+  const pagesRef = useRef<any[]>([]);
+  const selectedPageIdsRef = useRef<string[]>([]);
+
+  useEffect(() => {
+    selectedPageRef.current = selectedPage;
+  }, [selectedPage]);
+
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation;
+  }, [selectedConversation]);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+
+  useEffect(() => {
+    selectedPageIdsRef.current = selectedPageIds;
+  }, [selectedPageIds]);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<'trial' | 'architect' | 'empire' | 'expired'>(() => {
     const saved = localStorage.getItem('current_plan_v1');
@@ -1006,14 +1026,14 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     }
   }, []);
 
-  const getConversations = async (pageId: string, forceRefresh: boolean = false) => {
-    setIsLoading(true);
+  const getConversations = async (pageId: string, forceRefresh: boolean = false, showLoader: boolean = true) => {
+    if (showLoader) setIsLoading(true);
     try {
       const urlSuffix = forceRefresh ? "?refresh=true" : "";
       // When we query a single page, we can optimize by query-limiting to 25.
       // If of type "all", we can fetch the top 20 for each page to keep initial loads instant.
       if (pageId === "all") {
-        const activePages = pages.filter(p => selectedPageIds.includes(p.id));
+        const activePages = pagesRef.current.filter(p => selectedPageIdsRef.current.includes(p.id));
         const promises = activePages.map(page => 
           axios.get(`/api/facebook/conversations/${page.id}${urlSuffix}`, { params: { limit: 20 } })
             .then(res => (res.data.conversations || []).map((c: any) => ({
@@ -1046,7 +1066,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       const errMsg = err.response?.data?.details?.message || err.response?.data?.error || err.message;
       addToast(`Retrieval Error: ${errMsg}`, "error");
     } finally {
-      setIsLoading(false);
+      if (showLoader) setIsLoading(false);
     }
   };
 
@@ -1147,24 +1167,100 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     if (!selectedPage || !selectedConversation || !replyMessage.trim()) return;
     
     setIsSending(true);
-    try {
-      const activePageId = selectedConversation._associatedPageId || selectedPage.id;
-      const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.id;
-      if (!recipientId) throw new Error("Could not find recipient");
+    const textToSend = replyMessage;
+    const activePageId = selectedConversation._associatedPageId || selectedPage.id;
+    const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.id;
+    if (!recipientId) {
+      setIsSending(false);
+      return;
+    }
 
+    const tempId = `temp_${Date.now()}`;
+    const meMsg = {
+      id: tempId,
+      message: textToSend,
+      created_time: new Date().toISOString(),
+      from: { id: activePageId, name: selectedPage.name }
+    };
+
+    // Append to active chat instantly
+    setSelectedConversation(prev => {
+      if (!prev || prev.id !== selectedConversation.id) return prev;
+      const currentMsgs = prev.messages?.data || [];
+      return {
+        ...prev,
+        updated_time: meMsg.created_time,
+        messages: {
+          ...prev.messages,
+          data: [meMsg, ...currentMsgs]
+        }
+      };
+    });
+
+    // Update sidebar instantly
+    setConversations(prev => {
+      return prev.map(c => {
+        if (c.id === selectedConversation.id) {
+          const currentMsgs = c.messages?.data || [];
+          return {
+            ...c,
+            updated_time: meMsg.created_time,
+            messages: {
+              ...c.messages,
+              data: [meMsg, ...currentMsgs]
+            }
+          };
+        }
+        return c;
+      });
+    });
+
+    setReplyMessage("");
+
+    try {
       await axios.post('/api/facebook/reply', {
         pageId: activePageId,
         recipientId,
-        message: replyMessage
+        message: textToSend
       });
       
-      setReplyMessage("");
-      getConversations(selectedPage.id);
+      getConversations(selectedPage.id, false, false);
     } catch (err: any) {
       console.error("Failed to send reply", err);
       const serverFriendlyError = err.response?.data?.error;
-      const details = err.response?.data?.details;
-      alert(serverFriendlyError || details?.error?.message || "Failed to send message.");
+      const fbErrorMsg = err.response?.data?.details?.error?.message;
+      const friendlyError = serverFriendlyError || fbErrorMsg || "Failed to send message.";
+
+      addToast(friendlyError, "error");
+
+      // Set failed state on the message
+      setSelectedConversation(prev => {
+        if (!prev || prev.id !== selectedConversation.id) return prev;
+        const currentMsgs = prev.messages?.data || [];
+        return {
+          ...prev,
+          messages: {
+            ...prev.messages,
+            data: currentMsgs.map((m: any) => m.id === tempId ? { ...m, failed: true, errorText: friendlyError } : m)
+          }
+        };
+      });
+
+      setConversations(prev => {
+        return prev.map(c => {
+          if (c.id === selectedConversation.id) {
+            const currentMsgs = c.messages?.data || [];
+            return {
+              ...c,
+              messages: {
+                ...c.messages,
+                data: currentMsgs.map((m: any) => m.id === tempId ? { ...m, failed: true, errorText: friendlyError } : m)
+              }
+            };
+          }
+          return c;
+        });
+      });
     } finally {
       setIsSending(false);
     }
@@ -1174,35 +1270,126 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     if (!selectedPage || !selectedConversation || !pendingFile) return;
 
     setIsSending(true);
-    try {
-      const activePageId = selectedConversation._associatedPageId || selectedPage.id;
-      const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.id;
-      if (!recipientId) throw new Error("Could not find recipient");
+    const fileToUpload = pendingFile;
+    const activePageId = selectedConversation._associatedPageId || selectedPage.id;
+    const recipientId = selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.id;
+    if (!recipientId) {
+      setIsSending(false);
+      return;
+    }
 
+    const tempId = `temp_file_${Date.now()}`;
+    const meMsg = {
+      id: tempId,
+      message: "Sent an attachment...",
+      created_time: new Date().toISOString(),
+      from: { id: activePageId, name: selectedPage.name },
+      attachments: {
+        data: [{
+          type: fileToUpload.type,
+          payload: { url: URL.createObjectURL(fileToUpload.file) }
+        }]
+      }
+    };
+
+    // Append instantly
+    setSelectedConversation(prev => {
+      if (!prev || prev.id !== selectedConversation.id) return prev;
+      const currentMsgs = prev.messages?.data || [];
+      return {
+        ...prev,
+        updated_time: meMsg.created_time,
+        messages: {
+          ...prev.messages,
+          data: [meMsg, ...currentMsgs]
+        }
+      };
+    });
+
+    // Update sidebar instantly
+    setConversations(prev => {
+      return prev.map(c => {
+        if (c.id === selectedConversation.id) {
+          const currentMsgs = c.messages?.data || [];
+          return {
+            ...c,
+            updated_time: meMsg.created_time,
+            messages: {
+              ...c.messages,
+              data: [meMsg, ...currentMsgs]
+            }
+          };
+        }
+        return c;
+      });
+    });
+
+    setPendingFile(null);
+
+    try {
       const formData = new FormData();
       formData.append('pageId', activePageId);
       formData.append('recipientId', recipientId);
-      formData.append('type', pendingFile.type);
-      formData.append('file', pendingFile.file);
+      formData.append('type', fileToUpload.type);
+      formData.append('file', fileToUpload.file);
 
       await axios.post('/api/facebook/send-attachment', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       
-      setPendingFile(null);
-      getConversations(selectedPage.id);
+      getConversations(selectedPage.id, false, false);
     } catch (err: any) {
       console.error("Failed to send attachment", err);
-      alert("Failed to send attachment. Please try again.");
+      const serverFriendlyError = err.response?.data?.error;
+      const fbErrorMsg = err.response?.data?.details?.error?.message;
+      const friendlyError = serverFriendlyError || fbErrorMsg || "Failed to send attachment.";
+
+      addToast(friendlyError, "error");
+
+      setSelectedConversation(prev => {
+        if (!prev || prev.id !== selectedConversation.id) return prev;
+        const currentMsgs = prev.messages?.data || [];
+        return {
+          ...prev,
+          messages: {
+            ...prev.messages,
+            data: currentMsgs.map((m: any) => m.id === tempId ? { ...m, failed: true, errorText: friendlyError } : m)
+          }
+        };
+      });
+
+      setConversations(prev => {
+        return prev.map(c => {
+          if (c.id === selectedConversation.id) {
+            const currentMsgs = c.messages?.data || [];
+            return {
+              ...c,
+              messages: {
+                ...c.messages,
+                data: currentMsgs.map((m: any) => m.id === tempId ? { ...m, failed: true, errorText: friendlyError } : m)
+              }
+            };
+          }
+          return c;
+        });
+      });
     } finally {
       setIsSending(false);
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'image' | 'audio' | 'file') => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type?: 'image' | 'audio' | 'file') => {
     const file = e.target.files?.[0];
     if (file) {
-      setPendingFile({ file, type, name: file.name });
+      let resolvedType: 'image' | 'audio' | 'file' = type || 'file';
+      if (file.type.startsWith('image/')) {
+        resolvedType = 'image';
+      } else if (file.type.startsWith('audio/')) {
+        resolvedType = 'audio';
+      } else {
+        resolvedType = 'file';
+      }
+      setPendingFile({ file, type: resolvedType, name: file.name });
     }
   };
 
@@ -1313,10 +1500,35 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     const newSocket = socketUrl ? io(socketUrl, { path: '/socket.io' }) : io();
     setSocket(newSocket);
     newSocket.on("new_message", (data) => {
-      getConversations(selectedPage?.id);
+      const activePageId = selectedPageRef.current?.id;
+      getConversations(activePageId, false, false);
+
+      // Smoothly update the current message thread instantly if looking at this user's conversation
+      const currentConv = selectedConversationRef.current;
+      if (currentConv) {
+        const associatedPageId = currentConv._associatedPageId || activePageId;
+        const currentRecipient = currentConv.participants?.data?.find((p: any) => p.id !== associatedPageId);
+        
+        if (associatedPageId === data.pageId && currentRecipient && (currentRecipient.id === data.recipientId || currentRecipient.id === data.senderId)) {
+          axios.get(`/api/facebook/conversations/${associatedPageId}/messages/${currentConv.id}`)
+            .then(res => {
+              if (res.data && res.data.messages) {
+                setSelectedConversation(prev => {
+                  if (prev?.id === currentConv.id) {
+                    return {
+                      ...prev,
+                      messages: res.data.messages
+                    };
+                  }
+                  return prev;
+                });
+              }
+            }).catch(e => console.error("Realtime thread update failed:", e));
+        }
+      }
     });
     return () => { newSocket.close(); };
-  }, [selectedPage]);
+  }, []);
 
   useEffect(() => {
     if (appUser?.email) {

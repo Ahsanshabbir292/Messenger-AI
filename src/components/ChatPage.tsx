@@ -2,7 +2,8 @@ import React from 'react';
 import axios from 'axios';
 import { 
   RefreshCw, Facebook, ChevronDown, Search, ShieldAlert, MessageSquare, 
-  ChevronRight, Activity, Settings, Download, ImageIcon, X, Mic, Paperclip, Send 
+  ChevronRight, Activity, Settings, Download, ImageIcon, X, Mic, Paperclip, Send,
+  Volume2, FileText
 } from 'lucide-react';
 import { SafeAvatar } from './SafeAvatar';
 
@@ -36,8 +37,8 @@ interface ChatPageProps {
   setSelectedConversation: (conv: any) => void;
   replyMessage: string;
   setReplyMessage: (msg: string) => void;
-  pendingFile: File | null;
-  setPendingFile: (file: File | null) => void;
+  pendingFile: any;
+  setPendingFile: (file: any) => void;
   isRecording: boolean;
   recordingTime: number;
   startRecording: () => void;
@@ -45,7 +46,7 @@ interface ChatPageProps {
   isSending: boolean;
   handleSendFile: () => void;
   handleReply: () => void;
-  handleFileChange: (e: React.ChangeEvent<HTMLInputElement>, type: string) => void;
+  handleFileChange: (e: React.ChangeEvent<HTMLInputElement>, type?: any) => void;
   isLoading: boolean;
   getPages: () => void | Promise<void>;
   seenConversations: Record<string, string>;
@@ -93,6 +94,16 @@ export const ChatPage: React.FC<ChatPageProps> = ({
 }) => {
   const [visibleCount, setVisibleCount] = React.useState(50);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (messagesEndRef.current) {
+      const scrollTimer = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+      return () => clearTimeout(scrollTimer);
+    }
+  }, [selectedConversation?.id, selectedConversation?.messages?.data?.length]);
 
   // Helper to determine if a conversation is unread
   const checkIfConversationIsUnread = React.useCallback((c: any, activePageId: string) => {
@@ -478,44 +489,154 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                       {!isMe && <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">{sender?.name || 'Customer'}</p>}
                       <div className={`p-6 rounded-[2.25rem] text-sm font-semibold leading-relaxed shadow-xl ${
                         isMe 
-                          ? 'bg-indigo-600 text-white rounded-br-none shadow-indigo-100' 
+                          ? m.failed 
+                            ? 'bg-rose-50 text-rose-900 border-2 border-rose-200 rounded-br-none shadow-rose-50/50' 
+                            : 'bg-indigo-600 text-white rounded-br-none shadow-indigo-100' 
                           : 'bg-white text-slate-800 rounded-bl-none shadow-slate-200/50'
                       }`}>
                         {m.message}
-                        {m.attachments?.data?.map((att: any, attIdx: number) => (
-                          <div key={attIdx} className="mt-5 rounded-2xl overflow-hidden shadow-2xl">
-                            {att.type === 'image' && <img src={att.payload?.url?.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(att.payload.url)}` : (att.payload?.url || '')} alt="Attachment" className="max-w-full hover:scale-105 transition-transform duration-700" referrerPolicy="no-referrer" />}
-                            {att.type === 'audio' && <div className="bg-black/5 p-4"><audio controls className="w-full h-8 opacity-80"><source src={att.payload?.url} /></audio></div>}
-                            {att.type === 'file' && (
-                              <a href={att.payload?.url} target="_blank" rel="noreferrer" className={`flex items-center gap-3 p-4 rounded-xl text-xs font-black transition-all ${isMe ? 'bg-indigo-700 hover:bg-indigo-800' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                                <Download className="w-5 h-5" /> Download Attachment
-                              </a>
-                            )}
+                        {m.failed && m.errorText && (
+                          <div className="mt-3 pt-2 border-t border-rose-100 text-[10px] text-rose-600 font-extrabold tracking-wider uppercase flex items-center gap-1.5 leading-tight">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                            <span>Error: {m.errorText}</span>
                           </div>
-                        ))}
+                        )}
+                        {(() => {
+                          const attachments = Array.isArray(m.attachments) 
+                            ? m.attachments 
+                            : (m.attachments?.data || []);
+                          if (attachments.length === 0) return null;
+                          return (
+                            <div className="space-y-4 mt-4">
+                              {attachments.map((att: any, attIdx: number) => {
+                                const url = att.payload?.url || "";
+                                const isAudio = att.type === 'audio' || url.endsWith('.mp3') || url.endsWith('.wav') || url.endsWith('.webm') || url.endsWith('.ogg') || url.endsWith('.aac') || url.includes('.audio') || att.type === 'voice_msg' || att.mime_type?.startsWith('audio/');
+                                const isImage = att.type === 'image' || url.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || att.mime_type?.startsWith('image/');
+                                const isVideo = att.type === 'video' || url.match(/\.(mp4|mov|avi|mkv|webm)$/i) || att.mime_type?.startsWith('video/');
+
+                                return (
+                                  <div key={attIdx} className="rounded-2xl overflow-hidden shadow-sm max-w-full">
+                                    {isImage && (
+                                      <div className="relative group max-w-sm rounded-[1.5rem] overflow-hidden border border-slate-100 bg-slate-50 mt-1">
+                                        <img 
+                                          src={url.startsWith('http') && !url.startsWith('blob:') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url} 
+                                          alt="Attachment Image" 
+                                          className="max-h-72 w-auto object-contain cursor-zoom-in hover:scale-[1.02] transition-transform duration-300" 
+                                          referrerPolicy="no-referrer"
+                                          onError={(e) => {
+                                            (e.currentTarget as HTMLImageElement).src = url;
+                                          }}
+                                        />
+                                        <a 
+                                          href={url} 
+                                          target="_blank" 
+                                          rel="noreferrer" 
+                                          className="absolute right-3 top-3 p-2 bg-slate-950/40 hover:bg-slate-950/60 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs shadow-sm"
+                                          title="Open Full Image"
+                                        >
+                                          <Download className="w-3.5 h-3.5" />
+                                        </a>
+                                      </div>
+                                    )}
+
+                                    {isAudio && (
+                                      <div className={`p-4 rounded-2xl flex flex-col gap-2 mt-1 ${isMe ? 'bg-indigo-700/40 text-indigo-50 border border-indigo-500/20' : 'bg-slate-100/70 text-slate-800 border border-slate-200/50'}`}>
+                                        <div className="flex items-center gap-2.5">
+                                          <div className={`p-2 rounded-xl shrink-0 ${isMe ? 'bg-indigo-500/50' : 'bg-indigo-50 text-indigo-600'}`}>
+                                            <Volume2 className="w-4 h-4 animate-pulse" />
+                                          </div>
+                                          <div className="min-w-0 flex-1">
+                                            <p className="text-xs font-black tracking-tight truncate">Voice Note / Audio</p>
+                                            <p className={`text-[9px] font-medium opacity-70`}>Play directly or save locally</p>
+                                          </div>
+                                        </div>
+                                        <audio 
+                                          controls 
+                                          className="w-full h-8 mt-1 opacity-90 filter brightness-100 contrast-100 focus:outline-none"
+                                          src={url}
+                                          preload="metadata"
+                                        >
+                                          <source src={url} />
+                                          Your web browser doesn't support built-in audio playbacks.
+                                        </audio>
+                                        <a 
+                                          href={url} 
+                                          target="_blank" 
+                                          rel="noreferrer" 
+                                          className={`flex items-center justify-center gap-1.5 py-1.5 mt-1 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all select-none border ${isMe ? 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400' : 'bg-white hover:bg-slate-50 text-indigo-600 border-slate-200'}`}
+                                        >
+                                          <Download className="w-3 h-3" /> Download Voice Note
+                                        </a>
+                                      </div>
+                                    )}
+
+                                    {isVideo && (
+                                      <div className={`p-2 rounded-2xl mt-1 ${isMe ? 'bg-indigo-700/50 text-white' : 'bg-slate-50 text-slate-800'}`}>
+                                        <video controls className="w-full max-h-72 rounded-xl">
+                                          <source src={url} />
+                                        </video>
+                                      </div>
+                                    )}
+
+                                    {!isImage && !isAudio && !isVideo && (
+                                      <a 
+                                        href={url} 
+                                        target="_blank" 
+                                        rel="noreferrer" 
+                                        className={`flex items-center gap-3 p-4 rounded-xl text-xs font-black transition-all border mt-1 ${isMe ? 'bg-indigo-700 hover:bg-indigo-800 text-white border-indigo-500/30' : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'}`}
+                                      >
+                                        <FileText className="w-5 h-5" /> Download Attachment ({att.name || att.type || 'Attachment'})
+                                      </a>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </div>
                       <p className={`text-[8px] mt-2 font-black uppercase tracking-widest opacity-30 ${isMe ? 'text-right pr-2' : 'text-left pl-2'}`}>{new Date(m.created_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                     </div>
                   </div>
                 );
               })}
+              <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
             <div className="p-10 bg-white border-t border-slate-100 relative">
               {pendingFile && (
                 <div className="absolute left-10 right-10 bottom-full mb-6 animate-in slide-in-from-bottom-4 duration-300">
-                  <div className="bg-slate-900 text-white p-5 rounded-3xl shadow-2xl flex justify-between items-center">
+                  <div className="bg-slate-900 text-white p-5 rounded-[2.25rem] shadow-2xl flex justify-between items-center border border-slate-850">
                     <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
-                        <ImageIcon className="w-6 h-6" />
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest opacity-50">Upload Queue</p>
-                        <p className="text-xs font-black truncate max-w-xs">{pendingFile.name}</p>
+                      {pendingFile.type === 'image' && pendingFile.file instanceof File && (
+                        <img 
+                          src={URL.createObjectURL(pendingFile.file)} 
+                          className="w-12 h-12 rounded-xl object-cover border border-white/20 shrink-0" 
+                          alt="Thumbnail Preview"
+                        />
+                      )}
+                      {pendingFile.type === 'image' && !(pendingFile.file instanceof File) && (
+                        <div className="w-12 h-12 bg-white/10 text-white rounded-xl flex items-center justify-center shrink-0 border border-white/10">
+                          <ImageIcon className="w-5 h-5" />
+                        </div>
+                      )}
+                      {pendingFile.type === 'audio' && (
+                        <div className="w-12 h-12 bg-rose-500/20 text-rose-450 rounded-xl flex items-center justify-center shrink-0 border border-rose-500/30">
+                          <Mic className="w-5 h-5 animate-pulse text-rose-400" />
+                        </div>
+                      )}
+                      {pendingFile.type === 'file' && (
+                        <div className="w-12 h-12 bg-indigo-500/20 text-indigo-400 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/30">
+                          <FileText className="w-5 h-5 text-indigo-300" />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Ready to Send</p>
+                        <p className="text-xs font-bold truncate max-w-xs">{pendingFile.name}</p>
                       </div>
                     </div>
-                    <button onClick={() => setPendingFile(null)} className="p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all">
+                    <button onClick={() => setPendingFile(null)} className="p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all text-white cursor-pointer hover:scale-105 active:scale-95 shrink-0">
                       <X className="w-5 h-5" />
                     </button>
                   </div>
@@ -538,7 +659,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                 <div className="flex gap-2 bg-slate-50 p-2 rounded-[2rem]">
                   <label className="w-14 h-14 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-white hover:text-indigo-600 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95">
                     <Paperclip className="w-5 h-5" />
-                    <input type="file" className="hidden" onChange={(e) => handleFileChange(e, 'file')} />
+                    <input type="file" className="hidden" onChange={(e) => handleFileChange(e)} />
                   </label>
                   <button 
                     onClick={isRecording ? stopRecording : startRecording}
