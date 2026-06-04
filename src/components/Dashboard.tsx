@@ -681,6 +681,46 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     localStorage.setItem('team_members_v3', JSON.stringify(teamMembers));
   }, [teamMembers]);
 
+  // Keep the owner member in sync with the dynamically logged-in user profile/email
+  useEffect(() => {
+    if (appUser?.email) {
+      const actualOwnerEmail = appUser.email;
+      const actualOwnerName = userProfile?.name || appUser.fullName || "Owner";
+      
+      setTeamMembers(prev => {
+        // Find owner or member with id '1' or role 'owner'
+        const ownerIndex = prev.findIndex(m => m.role === 'owner' || m.id === '1');
+        if (ownerIndex > -1) {
+          const owner = prev[ownerIndex];
+          if (owner.email !== actualOwnerEmail || owner.name !== actualOwnerName) {
+            const updated = [...prev];
+            updated[ownerIndex] = {
+              ...owner,
+              name: actualOwnerName,
+              email: actualOwnerEmail
+            };
+            return updated;
+          }
+        } else {
+          // Add owner if not found
+          return [
+            {
+              id: '1',
+              name: actualOwnerName,
+              email: actualOwnerEmail,
+              role: 'owner',
+              avatar_url: null,
+              joined_at: new Date().toISOString(),
+              assigned_pages: []
+            },
+            ...prev
+          ];
+        }
+        return prev;
+      });
+    }
+  }, [appUser?.email, appUser?.fullName, userProfile?.name]);
+
   // Support Assigned Pages mapping
   // Get all support-assigned page IDs for active calculations
   const getSimulatedAssignedPages = () => {
@@ -881,6 +921,33 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       console.error("Failed to get pages", err);
     }
   }, []);
+
+  const handleSyncContacts = async () => {
+    setIsSyncingContacts(true);
+    try {
+      const res = await axios.post('/api/facebook/sync-contacts', {
+        email: appUser?.email,
+        workspaceId: currentWorkspaceId
+      }, {
+        headers: {
+          'x-user-email': appUser?.email,
+          'x-workspace-id': currentWorkspaceId
+        }
+      });
+      if (res.data.success) {
+        setPages(res.data.pages || []);
+        if (res.data.lastSyncedContacts) {
+          setLastSyncedContacts(res.data.lastSyncedContacts);
+        }
+        addToast(res.data.message || "Contacts synchronized successfully.", "success");
+      }
+    } catch (err: any) {
+      console.error("Failed to sync contacts", err);
+      addToast(err.response?.data?.error || "Failed to sync contacts. Please try again.", "error");
+    } finally {
+      setIsSyncingContacts(false);
+    }
+  };
 
   const handleSelectTrialPage = async (pageId: string, selected: boolean) => {
     try {
@@ -1615,6 +1682,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               handleSelectTrialPage={handleSelectTrialPage}
               currentPlan={currentPlan}
               onUpgrade={() => setActiveTab('billing')}
+              lastSyncedContacts={lastSyncedContacts}
+              isSyncingContacts={isSyncingContacts}
+              handleSyncContacts={handleSyncContacts}
             />
           )}
 
@@ -3741,7 +3811,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                     <div className="divide-y divide-slate-100">
                       {[...teamMembers]
                         .map((member) => {
-                          const isCurrentUser = member.email.toLowerCase() === appUser?.email?.toLowerCase() || member.email === 'ahsan.shabbir292@gmail.com';
+                          const isCurrentUser = member.email && appUser?.email && member.email.toLowerCase() === appUser?.email?.toLowerCase();
                           return (
                             <div key={member.id} className="p-6 md:p-8 flex items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
                               <div className="flex items-center gap-4">

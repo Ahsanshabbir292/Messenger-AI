@@ -77,7 +77,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
             <div className="divide-y divide-slate-100">
               {[...teamMembers]
                 .map((member) => {
-                  const isCurrentUser = member.email.toLowerCase() === appUser?.email?.toLowerCase() || member.email === 'ahsan.shabbir292@gmail.com';
+                  const isCurrentUser = member.email && appUser?.email && member.email.toLowerCase() === appUser?.email?.toLowerCase();
                   return (
                     <div key={member.id} className="p-6 md:p-8 flex items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
                       <div className="flex items-center gap-4">

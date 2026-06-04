@@ -12,6 +12,9 @@ interface PagesPageProps {
   currentPlan?: 'trial' | 'architect' | 'empire' | 'expired';
   onUpgrade?: () => void;
   onLockTrial?: () => void;
+  lastSyncedContacts?: string | null;
+  isSyncingContacts?: boolean;
+  handleSyncContacts?: () => void | Promise<void>;
 }
 
 export const PagesPage: React.FC<PagesPageProps> = ({
@@ -22,7 +25,10 @@ export const PagesPage: React.FC<PagesPageProps> = ({
   handleSelectTrialPage,
   currentPlan = 'trial',
   onUpgrade,
-  onLockTrial
+  onLockTrial,
+  lastSyncedContacts = null,
+  isSyncingContacts = false,
+  handleSyncContacts
 }) => {
   // Sync states for each individual page
   const [pageSyncStates, setPageSyncStates] = useState<Record<string, { status: 'idle' | 'syncing' | 'completed'; stageText: string }>>({});
@@ -120,14 +126,37 @@ export const PagesPage: React.FC<PagesPageProps> = ({
         <div className="p-5 sm:p-8 md:p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center sm:items-start md:items-center gap-4 bg-slate-50/25 text-center sm:text-left">
           <div>
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Connected Facebook Pages</h3>
-            <p className="text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase tracking-widest mt-1">Status of your linked commercial pages and automated bots</p>
+            <p className="text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase tracking-widest mt-1">
+              Status of your linked commercial pages and automated bots
+              {lastSyncedContacts && (
+                <span className="text-emerald-600 block mt-1 normal-case font-semibold">
+                  Contacts Last Synced: {new Date(lastSyncedContacts).toLocaleString()}
+                </span>
+              )}
+            </p>
           </div>
-          <button 
-            onClick={handleSyncPages}
-            className="w-full sm:w-auto justify-center bg-slate-900 text-white px-6 sm:px-8 py-3.5 sm:py-4.5 rounded-xl sm:rounded-[1.25rem] font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-indigo-650 transition-all shadow-md active:scale-95 flex items-center gap-3 shrink-0"
-          >
-            <Facebook className="w-4 h-4" /> Sync Facebook Pages
-          </button>
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <button 
+              onClick={handleSyncPages}
+              className="w-full sm:w-auto justify-center bg-slate-900 text-white px-6 sm:px-8 py-3.5 sm:py-4.5 rounded-xl sm:rounded-[1.25rem] font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-slate-850 transition-all shadow-md active:scale-95 flex items-center gap-3 shrink-0"
+            >
+              <Facebook className="w-4 h-4" /> Sync Facebook Pages
+            </button>
+            {handleSyncContacts && (
+              <button 
+                onClick={handleSyncContacts}
+                disabled={isSyncingContacts}
+                className="w-full sm:w-auto justify-center bg-indigo-600 hover:bg-indigo-700 text-white px-6 sm:px-8 py-3.5 sm:py-4.5 rounded-xl sm:rounded-[1.25rem] font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-3 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSyncingContacts ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                {isSyncingContacts ? "Syncing Contacts..." : "Sync Contacts"}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
