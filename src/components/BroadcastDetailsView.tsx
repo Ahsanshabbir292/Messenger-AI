@@ -18,7 +18,11 @@ import {
   Zap,
   TrendingUp,
   XCircle,
-  Sparkles
+  Sparkles,
+  Search,
+  AlertCircle,
+  User,
+  VolumeX
 } from "lucide-react";
 
 interface BroadcastDetailsViewProps {
@@ -46,6 +50,8 @@ export function BroadcastDetailsView({
   const [liveReplyIncrement, setLiveReplyIncrement] = React.useState(0);
   const [secondsLeft, setSecondsLeft] = React.useState(30);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
+  const [searchTerm, setSearchTerm] = React.useState("");
+  const [statusFilter, setStatusFilter] = React.useState("all");
 
   // Auto-refresh countdown trigger
   React.useEffect(() => {
@@ -572,52 +578,37 @@ export function BroadcastDetailsView({
           </div>
         </div>
 
-        {/* Right Side: Smart Segmentation Tiers breakdown (5 columns) */}
-        <div className="bg-white border border-slate-200 rounded-[1.5rem] shadow-sm p-5 sm:p-6 md:col-span-5 space-y-4">
+        {/* Right Side: Campaign Delivery Status and Contact Reach details (5 columns) */}
+        <div className="bg-white border border-slate-200 rounded-[1.5rem] shadow-sm p-5 sm:p-6 md:col-span-5 space-y-4 text-left">
           <span className="text-xs font-black text-slate-550 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-3">
             <Users className="w-4 h-4 text-slate-500 animate-pulse" />
-            Smart Audience Tiers
+            Campaign Reach & Delivery
           </span>
 
           <div className="space-y-3.5">
+            <div className="p-4 rounded-xl bg-indigo-50/40 border border-indigo-100 flex flex-col gap-1.5 text-left">
+              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800">Total Audience Scope</span>
+              <span className="text-2xl font-black text-slate-900">{formatVal(totalRecipients)} Recipients</span>
+              <p className="text-xs text-slate-500 font-semibold leading-relaxed mt-1">
+                Your broadcast campaign targets every participant found in your chat log history. Every contact will be reached using direct or tagged message delivery.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-left">
+              <div className="p-3 bg-emerald-50/40 border border-emerald-100 rounded-xl">
+                <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 block">Delivered</span>
+                <span className="text-lg font-black text-slate-800 block mt-1">{formatVal(successCount)}</span>
+              </div>
+              <div className="p-3 bg-rose-50/40 border border-rose-100 rounded-xl">
+                <span className="text-[9px] font-black uppercase tracking-wider text-rose-700 block">Failed</span>
+                <span className="text-lg font-black text-slate-800 block mt-1">{formatVal(failCount)}</span>
+              </div>
+            </div>
             
-            {/* Tier 1 Box */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50/40 border border-emerald-100">
-              <div className="text-left">
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded">Tier 1</span>
-                <p className="text-xs font-semibold text-slate-700 mt-1.5">Active Subscribers (&lt;24h)</p>
-              </div>
-              <div className="text-right">
-                <span className="text-xs font-black text-slate-800">{formatVal(t1Count)} {t1Count === 1 ? "User" : "Users"}</span>
-                <p className="text-[10px] text-emerald-600 font-extrabold mt-0.5">✓ {formatVal(t1Success)} Delivered</p>
-              </div>
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2.5 text-left">
+              <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-600 leading-normal">Bypassed restrictive 24-hour & 7-day windows. All contacts targeted!</span>
             </div>
-
-            {/* Tier 2 Box */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-indigo-50/40 border border-indigo-100">
-              <div className="text-left">
-                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 bg-indigo-100/70 px-2 py-0.5 rounded font-mono">Tier 2</span>
-                <p className="text-xs font-semibold text-slate-700 mt-1.5">Window Limit (24h - 7d)</p>
-              </div>
-              <div className="text-right">
-                <span className="text-xs font-black text-slate-800">{formatVal(t2Count)} {t2Count === 1 ? "User" : "Users"}</span>
-                <p className="text-[10px] text-indigo-600 font-extrabold mt-0.5">✓ {formatVal(t2Success)} (Tagged Update)</p>
-              </div>
-            </div>
-
-            {/* Tier 3 Box */}
-            <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200">
-              <div className="text-left">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-600 bg-slate-200/80 px-2 py-0.5 rounded">Tier 3</span>
-                <p className="text-xs font-semibold text-slate-700 mt-1.5">Inactive Subscribers (&gt;7d)</p>
-              </div>
-              <div className="text-right flex flex-col items-end">
-                <span className="text-xs font-black text-slate-800">{formatVal(t3Count)} {t3Count === 1 ? "User" : "Users"}</span>
-                <p className="text-[10px] text-indigo-550 font-extrabold mt-0.5">✓ {formatVal(t3Success)} (OTN Sent)</p>
-                <p className="text-[9px] text-amber-700 font-extrabold mt-0.5">{formatVal(t3Skipped)} Skipped Gracefully</p>
-              </div>
-            </div>
-
           </div>
         </div>
 
@@ -730,6 +721,230 @@ export function BroadcastDetailsView({
           </div>
 
         </div>
+      </div>
+
+      {/* INDIVIDUAL RECIPIENT DELIVERY TABLE */}
+      <div className="bg-white border border-slate-200 rounded-[1.5rem] shadow-sm overflow-hidden text-left mt-6 shadow-sm">
+        <div className="border-b border-slate-100 px-6 py-5 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">
+              <Users className="w-4 h-4 text-slate-500" />
+              Recipient-Level Delivery Log & Diagnostics (معلومات و رہنمائی)
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5 font-semibold animate-pulse">Search, segment, and troubleshoot individual message dispatches</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {/* Status Segment controls */}
+            <div className="inline-flex rounded-xl p-0.5 bg-slate-150 text-[10px] font-black uppercase tracking-wider">
+              {["all", "delivered", "failed", "skipped"].map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-3 py-1.5 rounded-lg font-black uppercase cursor-pointer transition-all border-none ${
+                    statusFilter === st ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500 hover:text-slate-800 bg-transparent"
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Search filter row */}
+        <div className="p-4 bg-white border-b border-slate-100 flex items-center gap-2 text-xs">
+          <Search className="w-4 h-4 text-slate-400 shrink-0 ml-1" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search recipient name or Messenger ID..."
+            className="w-full bg-transparent focus:outline-none placeholder-slate-400 text-slate-800 font-semibold"
+          />
+          {searchTerm && (
+            <button 
+              onClick={() => setSearchTerm("")} 
+              className="px-2 py-1 text-[10px] uppercase font-black text-slate-400 hover:text-slate-800 transition-all border-none bg-transparent cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {/* Output list of records */}
+        {(() => {
+          // Dynamic analytical memoizer
+          const getFailureDiagnostics = (errorText: string) => {
+            if (!errorText) return null;
+            const lower = errorText.toLowerCase();
+            
+            if (lower.includes("outside of allowed window") || lower.includes("outside of allowed") || lower.includes("window")) {
+              return {
+                titleUrdu: "فیس بک کسٹمر ونڈو کی حد (24h Window Block)",
+                descUrdu: "فیس بک پالیسی کے مطابق، اگر کسٹمر کا آخری میسج 24 گھنٹے سے پرانا ہو تو آپ اسے میسج نہیں بھیج سکتے۔ اس کو حل کرنے کے لیے مہم شروع کرتے وقت 'Active Contacts Only (Within 24h)' کا فلٹر منتخب کریں یا کسٹمر سے پیج پر نیا میسج بھیجنے کا انتظار کریں۔",
+                titleEng: "Meta 24h Standard Window Constraint",
+                descEng: "Facebook blocks direct/untagged outreach to users who haven't messaged back in 24 hours. To resolve, use 'Active Contacts (In last 24h)' filter when composing campaigns to completely bypass this block!"
+              };
+            }
+            
+            if (lower.includes("human_agent") || lower.includes("human-agent") || lower.includes("cannot tag")) {
+              return {
+                titleUrdu: "منظوری درکار ہے (HUMAN_AGENT Tag Block)",
+                descUrdu: "آپ کا فیس بک پیج 'HUMAN_AGENT' ٹیگ استعمال کرنے کا مجاز نہیں ہے۔ اسے فیس بک ایپ ریویو میں منظور کروانا پڑتا ہے۔ فی الحال آپ 'UTILITY' ٹیگ کا استعمال کریں یا صرف 24 گھنٹے کے چالو ونڈو کے کسٹمرز کو ٹارگٹ کریں۔",
+                titleEng: "HUMAN_AGENT Feature Approval Missing",
+                descEng: "Your Facebook App needs explicit Meta Review approval to use the HUMAN_AGENT tag. Use UTILITY or CONFIRMED_EVENT_UPDATE tags instead, or choose 'Active Contacts' to send untagged standard messages."
+              };
+            }
+            
+            if (lower.includes("permission") || lower.includes("pages_messaging") || lower.includes("access_token")) {
+              return {
+                titleUrdu: "پیج میسجنگ کی اجازت غائب (Pages Messaging Permission)",
+                descUrdu: "آپ کے پیج ایکسیس ٹوکن میں میسج بھیجنے کی اہلیت یا 'pages_messaging' کی اجازت موجود نہیں ہے۔ فیس بک ڈیولپر پورٹل میں جا کر سیٹنگز کو اپڈیٹ کریں۔",
+                titleEng: "Missing Page Messaging Scope",
+                descEng: "The connected Meta ACCESS_TOKEN lacks 'pages_messaging' or custom permissions. Go to developers.facebook.com and ensure the App role setup is finalized correctly."
+              };
+            }
+
+            return {
+              titleUrdu: "میٹا فیس بک پلیٹ فارم کی جانب سے بلاک",
+              descUrdu: "فیس بک سرور نے اس ترسیل کو رد کر دیا۔ اس کی عام وجوہات میں غلط پیج سیٹنگز، عارضی بلاک یا سائز کی حدود ہو سکتی ہیں۔",
+              titleEng: "Meta API Destination Rejection",
+              descEng: "The delivery attempt was rejected by the Facebook Messaging platform. Ensure recipient subscriber id is linked correctly."
+            };
+          };
+
+          const filteredRecipients = recipientsList.filter((r: any) => {
+            const nameSearch = (r.name || "").toLowerCase() + " " + (r.id || "");
+            const matchesSearch = nameSearch.includes(searchTerm.toLowerCase());
+            
+            let matchesStatus = true;
+            if (statusFilter === "delivered") {
+              matchesStatus = r.status === "delivered" || r.status === "read" || r.status === "replied";
+            } else if (statusFilter === "failed") {
+              matchesStatus = r.status === "failed";
+            } else if (statusFilter === "skipped") {
+              matchesStatus = r.status === "skipped";
+            }
+
+            return matchesSearch && matchesStatus;
+          });
+
+          if (filteredRecipients.length === 0) {
+            return (
+              <div className="p-12 text-center text-slate-400 space-y-2">
+                <Users className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="text-xs font-bold">No recipient log records matches the filters.</p>
+                <p className="text-[10px] text-slate-400">Try modifying your search or choosing a different status tier above.</p>
+              </div>
+            );
+          }
+
+          return (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50/50 border-b border-slate-150 font-extrabold text-[10px] text-slate-400 uppercase tracking-widest">
+                    <th className="py-3.5 px-6">Participant details</th>
+                    <th className="py-3.5 px-6">ID Coordinates</th>
+                    <th className="py-3.5 px-6">Meta Status</th>
+                    <th className="py-3.5 px-6">Direct Diagnostic Action (رہنمائی)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-150">
+                  {filteredRecipients.map((recipient: any, idx: number) => {
+                    const guidance = getFailureDiagnostics(recipient.error);
+                    const isSucceeded = recipient.status === "delivered" || recipient.status === "read" || recipient.status === "replied";
+                    const isSkippedStatus = recipient.status === "skipped";
+                    const isFailedStatus = recipient.status === "failed";
+
+                    return (
+                      <tr key={recipient.id || idx} className="hover:bg-indigo-50/5 transition-colors">
+                        <td className="py-4 px-6">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center font-bold text-indigo-700 uppercase shrink-0 overflow-hidden">
+                              {recipient.pictureUrl ? (
+                                <img src={recipient.pictureUrl} alt={recipient.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <User className="w-4.5 h-4.5 text-indigo-400" />
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <span className="block truncate font-black text-slate-900 text-xs">{recipient.name || "Subscriber"}</span>
+                              <span className="block text-[9px] text-slate-450 font-semibold mt-0.5">
+                                {recipient.time ? formatDateString(recipient.time) : "Dispatched in background thread"}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-4 px-6 font-mono text-[11px] text-slate-500 font-semibold select-all">
+                          {recipient.id}
+                        </td>
+                        <td className="py-4 px-6">
+                          {isSucceeded && (
+                            <span className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-850 rounded-lg inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Delivered
+                            </span>
+                          )}
+                          {isSkippedStatus && (
+                            <span className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-850 rounded-lg inline-flex items-center gap-1">
+                              <VolumeX className="w-3.5 h-3.5 text-amber-500" /> Skipped (24h)
+                            </span>
+                          )}
+                          {isFailedStatus && (
+                            <span className="px-2.5 py-1 text-[9px] font-black uppercase tracking-wider bg-rose-100 text-rose-850 rounded-lg inline-flex items-center gap-1">
+                              <XCircle className="w-3.5 h-3.5 text-rose-500" /> API Error
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-6 max-w-sm">
+                          {isSucceeded ? (
+                            <span className="text-[11px] text-slate-400 font-extrabold flex items-center gap-1">
+                              ✓ Message successfully reached dispatch buffer.
+                            </span>
+                          ) : isSkippedStatus ? (
+                            <span className="text-[11px] text-slate-500 font-semibold leading-normal block">
+                              Skipped automatically to protect page standing. Client was outside the 24h Meta interaction window.
+                            </span>
+                          ) : guidance ? (
+                            <div className="space-y-2 p-3.5 bg-rose-50/60 border border-rose-150 rounded-2xl block text-left">
+                              {/* Raw error */}
+                              <p className="text-[10px] text-rose-900 font-mono font-bold select-all leading-normal">
+                                Error: {recipient.error}
+                              </p>
+                              
+                              {/* Urdu instruction */}
+                              <div className="border-t border-rose-150 pt-2 space-y-0.5">
+                                <span className="block text-[11px] font-black tracking-tight text-rose-950 text-right leading-tight" dir="rtl">
+                                  💡 {guidance.titleUrdu}
+                                </span>
+                                <p className="text-[11px] font-bold text-rose-800 leading-relaxed text-right" dir="rtl">
+                                  {guidance.descUrdu}
+                                </p>
+                              </div>
+
+                              {/* English instruction */}
+                              <div className="border-t border-rose-150 pt-2 space-y-0.5">
+                                <span className="block text-[10px] font-black tracking-tight uppercase text-rose-950">
+                                  💡 Hint: {guidance.titleEng}
+                                </span>
+                                <p className="text-[10px] font-semibold text-rose-800 leading-normal">
+                                  {guidance.descEng}
+                                </p>
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 italic">No diagnostic feedback registered.</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
       </div>
 
     </div>

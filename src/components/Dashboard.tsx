@@ -53,13 +53,19 @@ const renderDashboardAttachments = (attachmentsData: any, isMe: boolean) => {
   return (
     <div className="space-y-4 mt-4 text-left">
       {attachments.map((att: any, attIdx: number) => {
-        const url = att.payload?.url || "";
+        const url = att.payload?.url || 
+                    att.file_url || 
+                    att.image_data?.url || 
+                    att.video_data?.url || 
+                    att.audio_data?.url || 
+                    "";
         if (!url) return null;
         const cleanUrl = url.split('?')[0].toLowerCase();
         const isAudio = att.type === 'audio' || 
                         att.type === 'voice' || 
                         att.type === 'voice_msg' || 
                         att.type === 'voice_message' || 
+                        !!att.audio_data ||
                         cleanUrl.endsWith('.mp3') || 
                         cleanUrl.endsWith('.wav') || 
                         cleanUrl.endsWith('.webm') || 
@@ -69,8 +75,10 @@ const renderDashboardAttachments = (attachmentsData: any, isMe: boolean) => {
                         cleanUrl.endsWith('.m4a') || 
                         cleanUrl.includes('audioclip') ||
                         url.includes('.audio') || 
+                        url.includes('audioclip') ||
                         att.mime_type?.startsWith('audio/');
         const isImage = att.type === 'image' || 
+                        !!att.image_data ||
                         cleanUrl.endsWith('.jpeg') || 
                         cleanUrl.endsWith('.jpg') || 
                         cleanUrl.endsWith('.gif') || 
@@ -79,6 +87,7 @@ const renderDashboardAttachments = (attachmentsData: any, isMe: boolean) => {
                         cleanUrl.endsWith('.bmp') || 
                         att.mime_type?.startsWith('image/');
         const isVideo = att.type === 'video' || 
+                        !!att.video_data ||
                         cleanUrl.endsWith('.mp4') || 
                         cleanUrl.endsWith('.mov') || 
                         cleanUrl.endsWith('.avi') || 
@@ -608,6 +617,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
     const formData = new FormData();
     formData.append("pageId", broadcastPageId);
+    formData.append("messageTag", broadcastMessageTag);
     if (broadcastMessage) formData.append("message", broadcastMessage);
     if (broadcastFile) {
       formData.append("file", broadcastFile);
@@ -648,6 +658,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
     const formData = new FormData();
     formData.append("pageId", data.pageId);
+    if (data.messageTag) {
+      formData.append("messageTag", data.messageTag);
+    }
     if (data.message) formData.append("message", data.message);
     if (data.file) {
       formData.append("file", data.file);
@@ -695,6 +708,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
         
         const formData = new FormData();
         formData.append("pageId", pageId);
+        if (data.messageTag) {
+          formData.append("messageTag", data.messageTag);
+        }
         if (data.message) formData.append("message", data.message);
         if (data.file) {
           formData.append("file", data.file);
@@ -1591,20 +1607,48 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     const socketUrl = (window as any).__BACKEND_URL__ || undefined;
     const newSocket = socketUrl ? io(socketUrl, { path: '/socket.io' }) : io();
     setSocket(newSocket);
+
+    newSocket.on("connect", () => {
+      console.log("[Socket Realtime] Connected to Socket.IO server with ID:", newSocket.id);
+    });
+
+    newSocket.on("connect_error", (error) => {
+      console.error("[Socket Realtime] Connection error:", error);
+    });
+
     newSocket.on("new_message", (data) => {
+      console.log("[Socket Realtime] Received new_message event:", data);
       const activePageId = selectedPageRef.current?.id;
       getConversations(activePageId, false, false);
 
       // Smoothly update the current message thread instantly if looking at this user's conversation
       const currentConv = selectedConversationRef.current;
+      console.log("[Socket Realtime] Current conversation in view:", currentConv?.id);
+      
       if (currentConv) {
         const associatedPageId = currentConv._associatedPageId || activePageId;
-        const currentRecipient = currentConv.participants?.data?.find((p: any) => p.id !== associatedPageId);
         
-        if (associatedPageId === data.pageId && currentRecipient && (currentRecipient.id === data.recipientId || currentRecipient.id === data.senderId)) {
+        console.log("[Socket Realtime] Comparing conversation associatedPageID:", associatedPageId, "with data.pageId:", data.pageId);
+        
+        // Match if the message comes from the corresponding page room
+        const isPageMatch = String(associatedPageId).trim().toLowerCase() === String(data.pageId || "").trim().toLowerCase();
+        
+        // Match if any of the participants in this conversation match the sender or receiver of the update
+        const isParticipantMatch = currentConv.participants?.data?.some((p: any) => {
+          const pId = String(p.id).trim().toLowerCase();
+          const rId = String(data.recipientId || "").trim().toLowerCase();
+          const sId = String(data.senderId || "").trim().toLowerCase();
+          return pId === rId || pId === sId;
+        });
+
+        console.log("[Socket Realtime] Matches -> isPageMatch:", isPageMatch, "isParticipantMatch:", isParticipantMatch);
+
+        if (isPageMatch && isParticipantMatch) {
+          console.log("[Socket Realtime] Match verified! Fetching fresh message log...");
           axios.get(`/api/facebook/conversations/${associatedPageId}/messages/${currentConv.id}`)
             .then(res => {
               if (res.data && res.data.messages) {
+                console.log("[Socket Realtime] Message log updated successfully. Count:", res.data.messages.data?.length);
                 setSelectedConversation(prev => {
                   if (prev?.id === currentConv.id) {
                     return {
@@ -1615,10 +1659,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                   return prev;
                 });
               }
-            }).catch(e => console.error("Realtime thread update failed:", e));
+            }).catch(e => console.error("[Socket Realtime] Failed to fetch updated thread:", e));
+        } else {
+          console.log("[Socket Realtime] Message received is not for the currently active thread.");
         }
       }
     });
+
     return () => { newSocket.close(); };
   }, []);
 
@@ -2033,6 +2080,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               lastSyncedContacts={lastSyncedContacts}
               isSyncingContacts={isSyncingContacts}
               handleSyncContacts={handleSyncContacts}
+              onLockTrial={handleLockTrial}
             />
           )}
 

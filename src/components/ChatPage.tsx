@@ -510,13 +510,19 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                           return (
                             <div className="space-y-4 mt-4">
                               {attachments.map((att: any, attIdx: number) => {
-                                const url = att.payload?.url || "";
+                                const url = att.payload?.url || 
+                                            att.file_url || 
+                                            att.image_data?.url || 
+                                            att.video_data?.url || 
+                                            att.audio_data?.url || 
+                                            "";
                                 if (!url) return null;
                                 const cleanUrl = url.split('?')[0].toLowerCase();
                                 const isAudio = att.type === 'audio' || 
                                                 att.type === 'voice' || 
                                                 att.type === 'voice_msg' || 
                                                 att.type === 'voice_message' || 
+                                                !!att.audio_data ||
                                                 cleanUrl.endsWith('.mp3') || 
                                                 cleanUrl.endsWith('.wav') || 
                                                 cleanUrl.endsWith('.webm') || 
@@ -526,8 +532,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                                                 cleanUrl.endsWith('.m4a') || 
                                                 cleanUrl.includes('audioclip') ||
                                                 url.includes('.audio') || 
+                                                url.includes('audioclip') ||
                                                 att.mime_type?.startsWith('audio/');
                                 const isImage = att.type === 'image' || 
+                                                !!att.image_data ||
                                                 cleanUrl.endsWith('.jpeg') || 
                                                 cleanUrl.endsWith('.jpg') || 
                                                 cleanUrl.endsWith('.gif') || 
@@ -536,6 +544,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                                                 cleanUrl.endsWith('.bmp') || 
                                                 att.mime_type?.startsWith('image/');
                                 const isVideo = att.type === 'video' || 
+                                                !!att.video_data ||
                                                 cleanUrl.endsWith('.mp4') || 
                                                 cleanUrl.endsWith('.mov') || 
                                                 cleanUrl.endsWith('.avi') || 

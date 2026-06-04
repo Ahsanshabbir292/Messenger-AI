@@ -259,6 +259,84 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
           )}
         </div>
 
+        {/* Step 2: Define Campaign Target Audience */}
+        <div id="target-audience-step" className="bg-white p-6 sm:p-8 rounded-[2rem] border border-slate-150 shadow-sm space-y-4 text-left">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400">
+              Step 2: Campaign Target Audience (Critical Facebook Policy)
+            </label>
+            <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded">Facebook Standard Window Rules</span>
+          </div>
+
+          <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-left flex gap-2 w-full items-start">
+            <AlertTriangle className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
+            <div className="text-xs text-indigo-950 font-semibold leading-relaxed">
+              <p className="font-extrabold text-indigo-900 mb-0.5">Facebook Messenger Policy Guide:</p>
+              Under Meta guidelines, pages can send direct normal messages <strong>strictly within 24 hours</strong> of the customer's last incoming message. Outside the 24h window, Meta blocks standard messages unless Page Message Tags are approved. Adding this filter protects your page from Meta blockages!
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+            <button
+              type="button"
+              onClick={() => setTargetAudience('eligible')}
+              className={`p-5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between h-40 ${
+                targetAudience === 'eligible'
+                  ? 'border-indigo-600 bg-indigo-50/10'
+                  : 'border-slate-100 hover:border-slate-150 bg-slate-50'
+              }`}
+            >
+              <div className="flex justify-between items-start w-full">
+                <span className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg ${
+                  targetAudience === 'eligible' ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  100% Real Deliverable (Recommended)
+                </span>
+                <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  targetAudience === 'eligible' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
+                }`}>
+                  {targetAudience === 'eligible' && <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>}
+                </span>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs font-black text-slate-800 mb-0.5">Active Contacts (In last 24h)</p>
+                <p className="text-[10px] text-slate-400 font-bold leading-normal">
+                  Saves your credits and delivers real-time direct messages with zero blocks or errors!
+                </p>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTargetAudience('all')}
+              className={`p-5 rounded-2xl border-2 text-left transition-all cursor-pointer flex flex-col justify-between h-40 ${
+                targetAudience === 'all'
+                  ? 'border-indigo-600 bg-indigo-50/10'
+                  : 'border-slate-100 hover:border-slate-150 bg-slate-50'
+              }`}
+            >
+              <div className="flex justify-between items-start w-full">
+                <span className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg ${
+                  targetAudience === 'all' ? 'bg-amber-600 text-white' : 'bg-amber-100 text-amber-800'
+                }`}>
+                  Requires Approved Message Tags
+                </span>
+                <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  targetAudience === 'all' ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
+                }`}>
+                  {targetAudience === 'all' && <span className="w-1.5 h-1.5 rounded-full bg-white"></span>}
+                </span>
+              </div>
+              <div className="mt-4">
+                <p className="text-xs font-black text-slate-800 mb-0.5">All Connected Contacts</p>
+                <p className="text-[10px] text-slate-400 font-bold leading-normal">
+                  Fires tagging parameters (e.g. UTILITY). Facebook blocks these on real pages without app approvals.
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+
 
 
         {/* Step 3: Message Sub-type */}
