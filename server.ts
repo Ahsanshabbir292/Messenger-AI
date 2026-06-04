@@ -1198,6 +1198,50 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // Keep a map of custom uploaded attachments for instant, rich playbacks/displays
+  const uploadedAttachments = new Map<string, { buffer: Buffer; mimetype: string; filename: string }>();
+
+  app.get("/api/file-attachment/:id", (req, res) => {
+    const { id } = req.params;
+    const fileData = uploadedAttachments.get(id);
+    if (!fileData) {
+      return res.status(404).send("Attachment not found");
+    }
+    res.setHeader("Content-Type", fileData.mimetype);
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(fileData.filename)}"`);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(fileData.buffer);
+  });
+
+  app.get("/api/proxy-audio", async (req, res) => {
+    try {
+      const { url } = req.query;
+      if (!url || typeof url !== "string") {
+        return res.status(400).send("URL parameter is required");
+      }
+
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        return res.status(400).send("Invalid URL protocol");
+      }
+
+      const response = await axios.get(url, {
+        responseType: "arraybuffer",
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        timeout: 15000,
+      });
+
+      const contentType = String(response.headers["content-type"] || "audio/mpeg");
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 1 day
+      res.send(Buffer.from(response.data));
+    } catch (error: any) {
+      console.error("[Proxy-Audio] Error proxying audio:", error?.response?.status || "unknown", error?.message);
+      res.status(500).send("Error fetching audio");
+    }
+  });
+
   app.get("/api/proxy-image", async (req, res) => {
     try {
       const { url } = req.query;
@@ -4315,6 +4359,15 @@ Write a realistic, short and natural response expressing your reaction, query, o
     if (!page) return res.status(404).json({ error: "Page not found" });
     if (!file) return res.status(400).json({ error: "No file uploaded" });
 
+    // Store file in server-side cached map for direct serving in web interface
+    const attachmentId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+    uploadedAttachments.set(attachmentId, {
+      buffer: file.buffer,
+      mimetype: file.mimetype,
+      filename: file.originalname || `attachment_${Date.now()}`
+    });
+    const attachmentUrl = `/api/file-attachment/${attachmentId}`;
+
     // Check if simulated
     if (page.access_token && page.access_token.startsWith("sim_")) {
       const userEmail = await getResolvedUserEmail(req);
@@ -4334,10 +4387,9 @@ Write a realistic, short and natural response expressing your reaction, query, o
         );
 
         if (conversation) {
-          const fakeUrl = "https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=600&q=80";
           const newAttachmentMessage = {
             message: `Sent an attachment file (${type})`,
-            attachments: [{ type, payload: { url: fakeUrl } }],
+            attachments: [{ type, payload: { url: attachmentUrl } }],
             from: { name: page.name || "Agent", id: pageId },
             created_time: new Date().toISOString()
           };
@@ -4354,7 +4406,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
             pageId,
             recipientId,
             message: {
-              attachments: [{ type, payload: { url: fakeUrl } }],
+              attachments: [{ type, payload: { url: attachmentUrl } }],
               from: { id: pageId, name: page.name },
               created_time: new Date().toISOString()
             }
@@ -4365,7 +4417,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
              await generateSimulatedCustomerReply(db, pageId, recipientId, `Sent an attachment file (${type})`, userEmail);
           }, 1500);
 
-          return res.json({ success: true, messageId: `msg_sim_attach_${Math.random().toString(36).substr(2, 9)}` });
+          return res.json({ success: true, messageId: `msg_sim_attach_${Math.random().toString(36).substr(2, 9)}`, url: attachmentUrl });
         } else {
           return res.status(404).json({ error: "Simulated conversation not found" });
         }
@@ -4394,19 +4446,19 @@ Write a realistic, short and natural response expressing your reaction, query, o
         headers: { "Content-Type": "multipart/form-data" }
       });
 
-      // Emit real-time event
+      // Emit real-time event with our newly hosted local proxy attachmentUrl so it lists/plays instantly on UI
       io.to(`page_${pageId}`).emit("new_message", {
         pageId,
         recipientId,
         message: {
-          attachments: [{ type, payload: { url: "Attachment (refresh to view)" } }],
+          attachments: [{ type, payload: { url: attachmentUrl } }],
           from: { id: pageId, name: page.name },
           created_time: new Date().toISOString()
         }
       });
 
       clearPageConversationsCache(pageId);
-      res.json({ success: true, messageId: response.data.message_id });
+      res.json({ success: true, messageId: response.data.message_id, url: attachmentUrl });
     } catch (error: any) {
       const fbError = error.response?.data || error.message;
       console.error("FB Attachment Error:", JSON.stringify(fbError, null, 2));

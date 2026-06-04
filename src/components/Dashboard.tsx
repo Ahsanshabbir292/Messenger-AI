@@ -26,6 +26,7 @@ import { ChatPage, getLastMessage } from './ChatPage';
 import { TeamPage } from './TeamPage';
 import { BillingPage } from './BillingPage';
 import { SettingsPage } from './SettingsPage';
+import { CustomAudioPlayer } from './CustomAudioPlayer';
 
 const getAvatarColors = (name: string) => {
   const themes = [
@@ -42,6 +43,97 @@ const getAvatarColors = (name: string) => {
     sum += name.charCodeAt(i);
   }
   return themes[sum % themes.length];
+};
+
+const renderDashboardAttachments = (attachmentsData: any, isMe: boolean) => {
+  const attachments = Array.isArray(attachmentsData) 
+    ? attachmentsData 
+    : (attachmentsData?.data || []);
+  if (attachments.length === 0) return null;
+  return (
+    <div className="space-y-4 mt-4 text-left">
+      {attachments.map((att: any, attIdx: number) => {
+        const url = att.payload?.url || "";
+        if (!url) return null;
+        const cleanUrl = url.split('?')[0].toLowerCase();
+        const isAudio = att.type === 'audio' || 
+                        att.type === 'voice' || 
+                        att.type === 'voice_msg' || 
+                        att.type === 'voice_message' || 
+                        cleanUrl.endsWith('.mp3') || 
+                        cleanUrl.endsWith('.wav') || 
+                        cleanUrl.endsWith('.webm') || 
+                        cleanUrl.endsWith('.ogg') || 
+                        cleanUrl.endsWith('.aac') || 
+                        cleanUrl.endsWith('.m4v') || 
+                        cleanUrl.endsWith('.m4a') || 
+                        cleanUrl.includes('audioclip') ||
+                        url.includes('.audio') || 
+                        att.mime_type?.startsWith('audio/');
+        const isImage = att.type === 'image' || 
+                        cleanUrl.endsWith('.jpeg') || 
+                        cleanUrl.endsWith('.jpg') || 
+                        cleanUrl.endsWith('.gif') || 
+                        cleanUrl.endsWith('.png') || 
+                        cleanUrl.endsWith('.webp') || 
+                        cleanUrl.endsWith('.bmp') || 
+                        att.mime_type?.startsWith('image/');
+        const isVideo = att.type === 'video' || 
+                        cleanUrl.endsWith('.mp4') || 
+                        cleanUrl.endsWith('.mov') || 
+                        cleanUrl.endsWith('.avi') || 
+                        cleanUrl.endsWith('.mkv') || 
+                        cleanUrl.endsWith('.webm') || 
+                        att.mime_type?.startsWith('video/');
+
+        return (
+          <div key={attIdx} className="rounded-2xl overflow-hidden max-w-full">
+            {isImage && (
+              <div className="relative max-w-sm rounded-[1.5rem] overflow-hidden border border-slate-100 bg-slate-50 mt-1">
+                <img 
+                  src={url.startsWith('http') && !url.startsWith('blob:') && !url.includes('/api/') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url} 
+                  alt="Attachment" 
+                  className="max-h-56 w-auto object-contain cursor-zoom-in hover:scale-[1.02] transition-transform duration-300" 
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = url;
+                  }}
+                />
+              </div>
+            )}
+
+            {isAudio && (
+              <div className="mt-1">
+                <CustomAudioPlayer 
+                  src={url.startsWith('http') && !url.startsWith('blob:') && !url.includes('/api/') ? `/api/proxy-audio?url=${encodeURIComponent(url)}` : url} 
+                  isMe={isMe} 
+                />
+              </div>
+            )}
+
+            {isVideo && (
+              <div className={`p-2 rounded-2xl mt-1 ${isMe ? 'bg-indigo-700/50 text-white' : 'bg-slate-50 text-slate-800'}`}>
+                <video controls className="w-full max-h-56 rounded-xl">
+                  <source src={url} />
+                </video>
+              </div>
+            )}
+
+            {!isImage && !isAudio && !isVideo && (
+              <a 
+                href={url} 
+                target="_blank" 
+                rel="noreferrer" 
+                className={`flex items-center gap-2 p-3 rounded-xl text-xs font-black transition-all border mt-1 ${isMe ? 'bg-indigo-700 hover:bg-indigo-800 text-white border-indigo-500/30' : 'bg-slate-50 hover:bg-slate-100 text-slate-800 border-slate-200'}`}
+              >
+                <FileIcon className="w-4 h-4" /> Download Attachment ({att.name || att.type || 'Attachment'})
+              </a>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 };
 
 const SafeAvatar = ({ src, name, className = "w-12 h-12 rounded-xl" }: { src?: string, name?: string, className?: string }) => {
@@ -2316,7 +2408,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                             : 'bg-white text-slate-800 rounded-bl-none shadow-slate-200/50'
                                       }`}>
                                          {m.message}
-                                         {m.attachments?.data?.map((att: any, attIdx: number) => (
+                                         {renderDashboardAttachments(m.attachments, isMe) || m.attachments?.data?.filter(() => false).map((att: any, attIdx: number) => (
                                             <div key={attIdx} className="mt-5 rounded-2xl overflow-hidden shadow-2xl">
                                                {att.type === 'image' && <img src={att.payload?.url?.startsWith('http') ? `/api/proxy-image?url=${encodeURIComponent(att.payload.url)}` : (att.payload?.url || '')} alt="Attachment" className="max-w-full hover:scale-105 transition-transform duration-700" referrerPolicy="no-referrer" />}
                                                {att.type === 'audio' && <div className="bg-black/5 p-4"><audio controls className="w-full h-8 opacity-80"><source src={att.payload?.url} /></audio></div>}

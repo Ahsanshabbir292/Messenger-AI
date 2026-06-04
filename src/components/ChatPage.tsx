@@ -6,6 +6,7 @@ import {
   Volume2, FileText
 } from 'lucide-react';
 import { SafeAvatar } from './SafeAvatar';
+import { CustomAudioPlayer } from './CustomAudioPlayer';
 
 export const getLastMessage = (messages: any) => {
   if (!messages || !Array.isArray(messages.data) || messages.data.length === 0) {
@@ -510,16 +511,44 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                             <div className="space-y-4 mt-4">
                               {attachments.map((att: any, attIdx: number) => {
                                 const url = att.payload?.url || "";
-                                const isAudio = att.type === 'audio' || url.endsWith('.mp3') || url.endsWith('.wav') || url.endsWith('.webm') || url.endsWith('.ogg') || url.endsWith('.aac') || url.includes('.audio') || att.type === 'voice_msg' || att.mime_type?.startsWith('audio/');
-                                const isImage = att.type === 'image' || url.match(/\.(jpeg|jpg|gif|png|webp|bmp)$/i) || att.mime_type?.startsWith('image/');
-                                const isVideo = att.type === 'video' || url.match(/\.(mp4|mov|avi|mkv|webm)$/i) || att.mime_type?.startsWith('video/');
+                                if (!url) return null;
+                                const cleanUrl = url.split('?')[0].toLowerCase();
+                                const isAudio = att.type === 'audio' || 
+                                                att.type === 'voice' || 
+                                                att.type === 'voice_msg' || 
+                                                att.type === 'voice_message' || 
+                                                cleanUrl.endsWith('.mp3') || 
+                                                cleanUrl.endsWith('.wav') || 
+                                                cleanUrl.endsWith('.webm') || 
+                                                cleanUrl.endsWith('.ogg') || 
+                                                cleanUrl.endsWith('.aac') || 
+                                                cleanUrl.endsWith('.m4v') || 
+                                                cleanUrl.endsWith('.m4a') || 
+                                                cleanUrl.includes('audioclip') ||
+                                                url.includes('.audio') || 
+                                                att.mime_type?.startsWith('audio/');
+                                const isImage = att.type === 'image' || 
+                                                cleanUrl.endsWith('.jpeg') || 
+                                                cleanUrl.endsWith('.jpg') || 
+                                                cleanUrl.endsWith('.gif') || 
+                                                cleanUrl.endsWith('.png') || 
+                                                cleanUrl.endsWith('.webp') || 
+                                                cleanUrl.endsWith('.bmp') || 
+                                                att.mime_type?.startsWith('image/');
+                                const isVideo = att.type === 'video' || 
+                                                cleanUrl.endsWith('.mp4') || 
+                                                cleanUrl.endsWith('.mov') || 
+                                                cleanUrl.endsWith('.avi') || 
+                                                cleanUrl.endsWith('.mkv') || 
+                                                cleanUrl.endsWith('.webm') || 
+                                                att.mime_type?.startsWith('video/');
 
-                                return (
-                                  <div key={attIdx} className="rounded-2xl overflow-hidden shadow-sm max-w-full">
+                                 return (
+                                  <div key={attIdx} className="rounded-2xl overflow-hidden max-w-full">
                                     {isImage && (
-                                      <div className="relative group max-w-sm rounded-[1.5rem] overflow-hidden border border-slate-100 bg-slate-50 mt-1">
+                                      <div className="relative max-w-sm rounded-[1.5rem] overflow-hidden border border-slate-100 bg-slate-50 mt-1">
                                         <img 
-                                          src={url.startsWith('http') && !url.startsWith('blob:') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url} 
+                                          src={url.startsWith('http') && !url.startsWith('blob:') && !url.includes('/api/') ? `/api/proxy-image?url=${encodeURIComponent(url)}` : url} 
                                           alt="Attachment Image" 
                                           className="max-h-72 w-auto object-contain cursor-zoom-in hover:scale-[1.02] transition-transform duration-300" 
                                           referrerPolicy="no-referrer"
@@ -527,46 +556,15 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                                             (e.currentTarget as HTMLImageElement).src = url;
                                           }}
                                         />
-                                        <a 
-                                          href={url} 
-                                          target="_blank" 
-                                          rel="noreferrer" 
-                                          className="absolute right-3 top-3 p-2 bg-slate-950/40 hover:bg-slate-950/60 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-xs shadow-sm"
-                                          title="Open Full Image"
-                                        >
-                                          <Download className="w-3.5 h-3.5" />
-                                        </a>
                                       </div>
                                     )}
 
                                     {isAudio && (
-                                      <div className={`p-4 rounded-2xl flex flex-col gap-2 mt-1 ${isMe ? 'bg-indigo-700/40 text-indigo-50 border border-indigo-500/20' : 'bg-slate-100/70 text-slate-800 border border-slate-200/50'}`}>
-                                        <div className="flex items-center gap-2.5">
-                                          <div className={`p-2 rounded-xl shrink-0 ${isMe ? 'bg-indigo-500/50' : 'bg-indigo-50 text-indigo-600'}`}>
-                                            <Volume2 className="w-4 h-4 animate-pulse" />
-                                          </div>
-                                          <div className="min-w-0 flex-1">
-                                            <p className="text-xs font-black tracking-tight truncate">Voice Note / Audio</p>
-                                            <p className={`text-[9px] font-medium opacity-70`}>Play directly or save locally</p>
-                                          </div>
-                                        </div>
-                                        <audio 
-                                          controls 
-                                          className="w-full h-8 mt-1 opacity-90 filter brightness-100 contrast-100 focus:outline-none"
-                                          src={url}
-                                          preload="metadata"
-                                        >
-                                          <source src={url} />
-                                          Your web browser doesn't support built-in audio playbacks.
-                                        </audio>
-                                        <a 
-                                          href={url} 
-                                          target="_blank" 
-                                          rel="noreferrer" 
-                                          className={`flex items-center justify-center gap-1.5 py-1.5 mt-1 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all select-none border ${isMe ? 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-400' : 'bg-white hover:bg-slate-50 text-indigo-600 border-slate-200'}`}
-                                        >
-                                          <Download className="w-3 h-3" /> Download Voice Note
-                                        </a>
+                                      <div className="mt-1">
+                                        <CustomAudioPlayer 
+                                          src={url.startsWith('http') && !url.startsWith('blob:') && !url.includes('/api/') ? `/api/proxy-audio?url=${encodeURIComponent(url)}` : url} 
+                                          isMe={isMe} 
+                                        />
                                       </div>
                                     )}
 
