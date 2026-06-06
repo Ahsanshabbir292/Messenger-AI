@@ -298,8 +298,8 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                             selectedPageIds.includes(p.id) 
                               ? 'bg-rose-50 text-rose-500 hover:bg-rose-100 cursor-pointer' 
                               : selectedPageIds.length >= 3
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95 cursor-pointer'
+                                ? 'bg-slate-150 text-slate-400 cursor-not-allowed border-none'
+                                : 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95 cursor-pointer border-none'
                           }`}
                         >
                           {selectedPageIds.includes(p.id) ? 'Remove Page' : 'Add Page'}
@@ -309,7 +309,6 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                   </td>
                 </tr>
               ))}
-              
               {pages.length > 3 && selectedPageIds.length < 3 && !trialLocked && (
                 <tr className="bg-indigo-50/20">
                   <td colSpan={5} className="px-10 py-8">

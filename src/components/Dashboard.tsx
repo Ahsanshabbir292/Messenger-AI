@@ -2185,10 +2185,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                        {selectedPageIds.includes(p.id) ? (
                                          <>
                                            <span className="inline-flex px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-[9px] font-black text-emerald-600 uppercase tracking-widest">
-                                             {trialLocked ? 'Trial Active' : 'Selected for Trial'}
+                                             Active & Unrestricted
                                            </span>
                                            <p className="text-[9px] font-bold text-amber-500 flex items-center gap-1.5 mt-1">
-                                              <Clock className="w-3 h-3" /> 3 days left
+
                                            </p>
                                          </>
                                        ) : (
@@ -2198,7 +2198,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                  </td>
                                  <td className="px-10 py-8">
                                     <div className="flex items-center gap-4">
-                                       {trialLocked || selectedPageIds.includes(p.id) ? (
+                                       {false ? (
                                          <span className={`px-4 py-2 border rounded-xl font-black text-[9px] uppercase tracking-wider flex items-center gap-1.5 ${
                                            selectedPageIds.includes(p.id)
                                              ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
@@ -2209,13 +2209,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                        ) : (
                                          <button 
                                             onClick={() => handleSelectTrialPage(p.id, !selectedPageIds.includes(p.id))}
-                                            disabled={!selectedPageIds.includes(p.id) && selectedPageIds.length >= 3}
+                                            disabled={false}
                                             className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-sm ${
                                               selectedPageIds.includes(p.id) 
                                                 ? 'bg-rose-50 text-rose-500 hover:bg-rose-100' 
-                                                : selectedPageIds.length >= 3
-                                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                                  : 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95'
+                                                : 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95'
+                                                  
+
                                             }`}
                                          >
                                             {selectedPageIds.includes(p.id) ? 'Remove Page' : 'Add Page'}

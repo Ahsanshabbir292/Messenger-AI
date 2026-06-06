@@ -3167,7 +3167,7 @@ async function startServer() {
 
       // 2. Get user's pages recursively to support up to 500+ pages
       let rawPages: any[] = [];
-      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=100`;
+      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=500`;
 
       while (nextPageUrl) {
         try {
@@ -3193,7 +3193,7 @@ async function startServer() {
             params: { 
               access_token: userAccessToken,
               fields: "name,id,access_token,picture.type(large){url}",
-              limit: 100
+              limit: 500
             }
           });
           rawPages = pagesResponse.data.data || [];
@@ -3606,15 +3606,15 @@ async function startServer() {
     const data = await getFacebookData(req);
     if (!data) return res.status(401).json({ error: "Not authenticated" });
 
+    let selectedIds = data.selectedPageIds || [];
+
     if (data.trialLocked) {
       return res.status(400).json({ error: "Trial has already been locked. You cannot change your pages anymore." });
     }
 
-    let selectedIds = data.selectedPageIds || [];
-
     if (selected) {
       if (selectedIds.length >= 3) {
-        return res.status(400).json({ error: "Trial limit reached. You can only select up to 3 pages." });
+        return res.status(400).json({ error: "Trial limit reached. You can only select up to 3 pages manually." });
       }
       if (!selectedIds.includes(pageId)) {
         selectedIds.push(pageId);
