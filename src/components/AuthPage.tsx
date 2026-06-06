@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth } from '../lib/firebase';
 import { 
   GoogleAuthProvider,
+  FacebookAuthProvider,
   signInWithPopup 
 } from 'firebase/auth';
 import CloudflareTurnstile from './CloudflareTurnstile';
@@ -247,6 +248,56 @@ export default function AuthPage({
     }
   };
 
+  const handleFacebookAuth = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const provider = new FacebookAuthProvider();
+      provider.setCustomParameters({ display: 'popup' });
+      const result = await signInWithPopup(auth, provider);
+      
+      if (!result.user) {
+        throw new Error('Facebook Sign-In was successful but did not return user info.');
+      }
+
+      const facebookEmail = result.user.email || "";
+      const facebookFullName = result.user.displayName || "Facebook User";
+      const facebookUid = result.user.uid;
+      const finalEmail = facebookEmail || `${facebookUid}@facebook.com`;
+
+      const res = await axios.post('/api/auth/facebook-login', {
+        email: finalEmail,
+        fullName: facebookFullName
+      });
+
+      const loggedUser = res.data.user;
+      const appUserObj = {
+        email: loggedUser?.email || finalEmail,
+        fullName: loggedUser?.fullName || facebookFullName,
+        workspaceId: loggedUser?.workspaceId,
+        role: loggedUser?.role || "admin"
+      };
+
+      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
+      axios.defaults.headers.common['x-user-email'] = appUserObj.email;
+      onLoginSuccess();
+    } catch (err: any) {
+      console.error("[Facebook Auth Error]:", err);
+      if (err.code === 'auth/popup-closed-by-user') {
+        setError('Facebook login popup was closed before completion.');
+      } else if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/configuration-not-found') {
+        setError(
+          "Facebook Login is not enabled in Firebase Console yet.\n" +
+          "Bhai, enable Facebook Auth and load correct Facebook App credentials in Firebase Console: Authentication -> Sign-in method -> Add provider -> Facebook."
+        );
+      } else {
+        setError(err.response?.data?.error || err.message || String(err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSigninSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -474,18 +525,29 @@ export default function AuthPage({
                 </h1>
               </div>
 
-              {/* Google OAuth Login Button */}
+              {/* Google & Facebook OAuth Login Buttons */}
               {mode !== 'forgot' && (
                 <div className="mt-2 text-center animate-in fade-in duration-300">
-                  <button 
-                    type="button"
-                    onClick={handleGoogleAuth}
-                    disabled={loading}
-                    className="w-full h-11 bg-white hover:bg-slate-50 text-slate-800 hover:text-slate-950 border border-slate-200 rounded-lg font-bold text-sm tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-3"
-                  >
-                    <Globe className="w-4 h-4 text-indigo-600 animate-pulse" />
-                    Continue with Google
-                  </button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button 
+                      type="button"
+                      onClick={handleGoogleAuth}
+                      disabled={loading}
+                      className="h-11 bg-white hover:bg-slate-50 text-slate-800 hover:text-slate-950 border border-slate-200 rounded-lg font-bold text-xs tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      <Globe className="w-4 h-4 text-indigo-600 animate-pulse" />
+                      Continue with Google
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={handleFacebookAuth}
+                      disabled={loading}
+                      className="h-11 bg-[#1877f2] hover:bg-[#166fe5] text-white border border-transparent rounded-lg font-bold text-xs tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
+                    >
+                      <Facebook className="w-4 h-4 text-white animate-pulse" />
+                      Continue with Facebook
+                    </button>
+                  </div>
 
                   <div className="flex items-center my-5">
                     <div className="flex-1 border-t border-slate-100" />

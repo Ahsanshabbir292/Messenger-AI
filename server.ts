@@ -2144,6 +2144,59 @@ async function startServer() {
     }
   });
 
+  // Facebook OAuth Login / Link Route
+  app.post("/api/auth/facebook-login", async (req, res) => {
+    const { email, fullName } = req.body;
+    console.log(`[AUTH] Facebook Login action request for: ${email}`);
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const db = await getDb();
+    if (!db) {
+      return res.status(500).json({ error: "Database not initialized" });
+    }
+
+    try {
+      const userRef = db.collection("users").doc(email.toLowerCase());
+      const userDoc = await userRef.get();
+      
+      let userData: any;
+
+      if (!userDoc.exists) {
+        // Create new user for first-time Facebook Sign up
+        userData = {
+          email: email.toLowerCase(),
+          fullName: fullName || email.split('@')[0],
+          workspaceId: "ws_" + Math.random().toString(36).substring(7),
+          workspaceName: `${fullName || email.split('@')[0]}'s Workspace`,
+          facebookLinked: true,
+          createdAt: FieldValue.serverTimestamp()
+        };
+        await userRef.set(userData);
+        console.log(`[AUTH] Created new Facebook-linked user doc: ${email}`);
+      } else {
+        // User already exists
+        userData = userDoc.data();
+        if (!userData.facebookLinked) {
+          await userRef.update({ facebookLinked: true });
+          userData.facebookLinked = true;
+        }
+        console.log(`[AUTH] Logged in existing user with Facebook: ${email}`);
+      }
+
+      // Store in express session
+      const { password: _, ...userWithoutPassword } = userData;
+      req.session.user = userWithoutPassword;
+
+      res.json({ success: true, user: userWithoutPassword });
+    } catch (err: any) {
+      console.error("[AUTH] Facebook login error:", err);
+      res.status(500).json({ error: formatDbError(err) });
+    }
+  });
+
   // Password Reset Phase 1: Request Reset Code
   app.post("/api/auth/forgot-password/request", async (req, res) => {
     const { email } = req.body;
