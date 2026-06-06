@@ -350,13 +350,24 @@ let db: any = null;
 function handleFirebaseError(error: any): boolean {
   if (!error) return false;
   const msg = error.message || String(error);
+  const msgLower = msg.toLowerCase();
+  const code = error.code || "";
+  const codeStr = String(code).toLowerCase();
+  
   if (
-    msg.includes("PERMISSION_DENIED") ||
-    msg.includes("firestore.googleapis.com") ||
-    msg.toLowerCase().includes("permission-denied") ||
-    msg.includes("7")
+    msgLower.includes("permission") ||
+    msgLower.includes("denied") ||
+    msgLower.includes("insufficient") ||
+    msgLower.includes("firestore.googleapis.com") ||
+    msgLower.includes("7") ||
+    msgLower.includes("offline") ||
+    msgLower.includes("reach") ||
+    msgLower.includes("quota") ||
+    codeStr.includes("permission-denied") ||
+    codeStr.includes("unauthenticated") ||
+    codeStr.includes("unavailable")
   ) {
-    console.warn("[Firebase-Fallback] Firestore write/read threw Permission Denied, Disabled API, or Database Missing.");
+    console.warn("[Firebase-Fallback] Firestore operation failed or denied:", msg);
     console.warn("[Firebase-Fallback] Activating high-availability local JSON database on-the-fly!");
     db = new MemoryFirestore();
     return true;
@@ -3321,6 +3332,12 @@ async function startServer() {
       });
     }
 
+    // Try returning cached profile immediately if it exists, to avoid hitting rate limits on repeated loads!
+    if (data.profile && data.profile.name && data.profile.id) {
+      console.log(`[FB Profile Cache] Serving cached Facebook profile for ${data.name}`);
+      return res.json(data.profile);
+    }
+
     try {
       const response = await axios.get(`https://graph.facebook.com/v19.0/me`, {
         params: { 
@@ -3328,10 +3345,65 @@ async function startServer() {
           fields: "name,id,picture{url}"
         }
       });
-      res.json(response.data);
+      
+      const profile = response.data;
+      
+      // Update cache in database asynchronously so subsequent requests load from cache instantly
+      try {
+        const resolvedUserEmail = await getResolvedUserEmail(req);
+        let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
+        if (!workspaceId && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
+          const ownerDoc = await db.collection("users").doc(resolvedUserEmail).get();
+          if (ownerDoc.exists) {
+            workspaceId = ownerDoc.data()?.workspaceId;
+          }
+        }
+        
+        if (resolvedUserEmail) {
+          const userDocRef = db.collection("users").doc(resolvedUserEmail);
+          const userDoc = await userDocRef.get();
+          if (userDoc.exists) {
+            const u = userDoc.data();
+            if (u) {
+              if (workspaceId && u.facebookWorkspaces && u.facebookWorkspaces[workspaceId]) {
+                const fbConfig = { ...u.facebookWorkspaces[workspaceId], profile };
+                await userDocRef.update({
+                  [`facebookWorkspaces.${workspaceId}`]: fbConfig
+                });
+                console.log(`[FB Profile Cache] Saved profile to Workspace config: ${workspaceId}`);
+              } else if (u.facebook) {
+                const fbConfig = { ...u.facebook, profile };
+                await userDocRef.update({
+                  facebook: fbConfig
+                });
+                console.log("[FB Profile Cache] Saved profile to global config");
+              }
+            }
+          }
+        }
+      } catch (cacheErr: any) {
+        console.warn("[FB Profile Cache] Failed to write cache to db:", cacheErr.message);
+      }
+
+      res.json(profile);
     } catch (error: any) {
-      console.error("FB Profile Get Error:", error.response?.data || error.message);
-      res.status(500).json({ error: "Failed to fetch user info" });
+      console.warn("FB Profile Get Error, trying fallback:", error.response?.data || error.message);
+      
+      // Fallback to basic info stored in token payload to avoid 429/500 errors on dashboard
+      const fallbackName = data.name || "Connected Facebook User";
+      const fallbackId = data.id || "fb_user_id";
+      
+      return res.json({
+        name: fallbackName,
+        id: fallbackId,
+        picture: {
+          data: {
+            url: fallbackId && !fallbackId.startsWith("fb_") && !fallbackId.startsWith("sim_")
+              ? `https://graph.facebook.com/${fallbackId}/picture?type=large`
+              : "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80"
+          }
+        }
+      });
     }
   });
 
@@ -4295,19 +4367,36 @@ Write a realistic, short and natural response expressing your reaction, query, o
       const fbErrorSubcode = fbError?.error?.error_subcode;
       const fbErrorMessage = fbError?.error?.message || "";
 
-      // 1. Standard allowed window error (subcode 2018278) or allowed window message -> Retry using HUMAN_AGENT tag fallback
+      // 1. Standard allowed window error (subcode 2018278) or allowed window message -> Retry using sequential Message Tag fallbacks
       if (fbErrorSubcode === 2018278 || fbErrorMessage.includes("allowed window") || fbErrorMessage.includes("24-hour")) {
-        console.log("[Facebook API] Detected 24-hour limit error. Attempting HUMAN_AGENT message tag fallback...");
-        try {
-          const fallbackResponse = await axios.post(`https://graph.facebook.com/v19.0/me/messages`, {
-            recipient: { id: recipientId },
-            message: { text: message },
-            messaging_type: "MESSAGE_TAG",
-            tag: "HUMAN_AGENT"
-          }, {
-            params: { access_token: page.access_token }
-          });
+        console.log("[Facebook API] Detected 24-hour limit error. Attempting MESSAGE_TAG fallbacks...");
+        
+        const tagsToTry = ["HUMAN_AGENT", "CONFIRMED_EVENT_UPDATE", "POST_PURCHASE_UPDATE", "ACCOUNT_UPDATE"];
+        let fallbackResponse = null;
+        let lastFallbackError = null;
+        let tagUsedMatched = "";
 
+        for (const tagToTry of tagsToTry) {
+          try {
+            console.log(`[FB Reply Fallback] Retrying message delivery with MESSAGE_TAG tag: ${tagToTry}`);
+            fallbackResponse = await axios.post(`https://graph.facebook.com/v19.0/me/messages`, {
+              recipient: { id: recipientId },
+              message: { text: message },
+              messaging_type: "MESSAGE_TAG",
+              tag: tagToTry
+            }, {
+              params: { access_token: page.access_token }
+            });
+            tagUsedMatched = tagToTry;
+            console.log(`[FB Reply Fallback] Success! Message sent using MESSAGE_TAG tag: ${tagToTry}`);
+            break; // Delivered successfully, stop trying other tags
+          } catch (fbFallbackErr: any) {
+            lastFallbackError = fbFallbackErr.response?.data || fbFallbackErr.message;
+            console.error(`[FB Reply Fallback] Error with tag ${tagToTry}:`, JSON.stringify(lastFallbackError, null, 2));
+          }
+        }
+
+        if (fallbackResponse) {
           // Emit real-time event
           io.to(`page_${pageId}`).emit("new_message", {
             pageId,
@@ -4320,14 +4409,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
           });
 
           clearPageConversationsCache(pageId);
-          return res.json({ success: true, messageId: fallbackResponse.data.message_id, tagUsed: "HUMAN_AGENT" });
-        } catch (fallbackError: any) {
-          const fbFallbackError = fallbackError.response?.data || fallbackError.message;
-          console.error("FB Reply Fallback Error:", JSON.stringify(fbFallbackError, null, 2));
-          
+          return res.json({ success: true, messageId: fallbackResponse.data.message_id, tagUsed: tagUsedMatched });
+        } else {
+          console.error("All Facebook MESSAGE_TAG fallbacks exhausted.");
           return res.status(500).json({
-            error: "Facebook 24-Hour limit check failed. You cannot send a direct message reply after 24 hours has elapsed unless the standard 'HUMAN_AGENT' or 'pages_messaging' Advanced access tier has been approved on your Meta app, and the recipient is registered as a team developer/tester role.",
-            details: fbFallbackError
+            error: "Meta Policy Block: 24-Hour & 7-Day Messaging limits exceeded. Customer ne kafi din se page par message nahi kiya, is liye Meta ne conversation block kar di hai. Please ask the customer to message your page again to reopen the conversation window.",
+            details: lastFallbackError
           });
         }
       }
@@ -4463,12 +4550,28 @@ Write a realistic, short and natural response expressing your reaction, query, o
     } catch (error: any) {
       const fbError = error.response?.data || error.message;
       console.error("FB Attachment Error:", JSON.stringify(fbError, null, 2));
-      res.status(500).json({ error: "Failed to send attachment", details: fbError });
+      
+      const fbErrorCode = fbError?.error?.code;
+      const fbErrorSubcode = fbError?.error?.error_subcode;
+      const fbErrorMessage = fbError?.error?.message || "";
+
+      let friendlyError = "Failed to send attachment.";
+      if (fbErrorSubcode === 2018278 || fbErrorSubcode === 2018276 || fbErrorMessage.includes("allowed window") || fbErrorMessage.includes("24-hour")) {
+        friendlyError = "Meta Policy Block: 24-Hour & 7-Day Messaging limits exceeded. Customer ne kafi din se page par message nahi kiya, is liye Meta ne conversation block kar di hai. Please ask the customer to message your page again to reopen the conversation window.";
+      } else if (fbErrorCode === 10 || fbErrorMessage.includes("permission") || fbErrorMessage.includes("tester")) {
+        friendlyError = "Permission Error: Your Facebook developer app is in development mode. Messaging will only function for registered developers or tester accounts, unless 'pages_messaging' Advanced access has been approved.";
+      } else if (fbErrorMessage) {
+        friendlyError = fbErrorMessage;
+      }
+
+      res.status(500).json({ error: friendlyError, details: fbError });
     }
   });
 
+  const activeBroadcastThreads = new Set<string>();
+
   app.post("/api/facebook/broadcast", upload.single("file"), async (req: any, res) => {
-    const { pageId, message, attachmentType, targetAudience, messageTag } = req.body;
+    const { pageId, message, attachmentType, targetAudience, messageTag, scheduleDate, scheduleTime } = req.body;
     const file = req.file;
 
     const db = await getDb();
@@ -4679,7 +4782,9 @@ Write a realistic, short and natural response expressing your reaction, query, o
       tier2Success: 0,
       tier3Success: 0,
       tier3Skipped: 0,
-      status: "running",
+      status: (scheduleDate && scheduleTime) ? "scheduled" : "running",
+      scheduleDate: scheduleDate || null,
+      scheduleTime: scheduleTime || null,
       createdAt: new Date().toISOString(),
       recipientsStatus: analyzedRecipients.map(r => ({ 
         id: r.id, 
@@ -4694,16 +4799,27 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const bcastDocRef = db.collection("users").doc(userEmail).collection("broadcasts").doc(broadcastId);
     await bcastDocRef.set(broadcastRecord);
 
+    const isScheduled = !!(scheduleDate && scheduleTime);
+
     // Return immediate response with details, letting client track it live
     res.json({
       success: true,
       broadcastId,
       total: recipients.length,
-      message: "Broadcast scheduled in queue."
+      message: isScheduled 
+        ? `Campaign scheduled for ${scheduleDate} ${scheduleTime} successfully!` 
+        : "Broadcast queued and active now."
     });
+
+    if (isScheduled) {
+      console.log(`[Broadcast Scheduler] Deferred campaign ${broadcastId} saved down with state: scheduled.`);
+      return;
+    }
 
     // Execute broadcast in background asynchronously
     (async () => {
+      activeBroadcastThreads.add(broadcastId);
+
       let successCount = 0;
       let failCount = 0;
       let sentCount = 0;
@@ -4714,74 +4830,139 @@ Write a realistic, short and natural response expressing your reaction, query, o
       let tier3Success = 0;
       let tier3Skipped = 0;
 
+      // Try to recover existing counters if resuming
+      try {
+        const freshSnap = await bcastDocRef.get();
+        if (freshSnap.exists) {
+          const fd = freshSnap.data();
+          if (fd && fd.status !== "scheduled") {
+            successCount = fd.successCount || 0;
+            failCount = fd.failCount || 0;
+            sentCount = fd.sentCount || 0;
+            skippedCount = fd.skippedCount || 0;
+            tier1Success = fd.tier1Success || 0;
+            tier2Success = fd.tier2Success || 0;
+            tier3Success = fd.tier3Success || 0;
+            tier3Skipped = fd.tier3Skipped || 0;
+          }
+        }
+      } catch (err) {}
+
       const recipientsStatusList = [...broadcastRecord.recipientsStatus];
 
-      for (let i = 0; i < analyzedRecipients.length; i++) {
-        const recipient = analyzedRecipients[i];
-        let deliverySuccess = false;
-        let isSkipped = false;
-        let errorMessage = null;
+      let simulatedConversationsCached: any[] | null = null;
+      const isSimPage = isSimulated || !page.access_token || page.access_token.startsWith("sim_");
 
-        const recipientIsSimulated = isSimulated || (recipient.id && recipient.id.startsWith("usr_sim_"));
-
-        if (recipientIsSimulated) {
-          try {
-            if (!isSkipped) {
-              const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
-              const snap = await simDocRef.get();
-              let conversations = [];
-              if (snap.exists) conversations = snap.data().conversations || [];
-              else conversations = getDefaultSimulatedConversations(pageId);
-
-              let conv = conversations.find((c: any) => 
-                c.participants?.data?.some((p: any) => p.id === recipient.id)
-              );
-
-              if (!conv) {
-                conv = {
-                  id: `conv_${recipient.id}`,
-                  participants: {
-                    data: [
-                      { name: recipient.name, id: recipient.id, picture: { data: { url: recipient.pictureUrl || `https://graph.facebook.com/${recipient.id}/picture?type=large` } } },
-                      { name: page.name || "Offline Page", id: pageId }
-                    ]
-                  },
-                  messages: { data: [] },
-                  updated_time: new Date().toISOString()
-                };
-                conversations.push(conv);
-              }
-
-              if (conv) {
-                if (!conv.messages) conv.messages = { data: [] };
-                
-                if (message) {
-                  conv.messages.data.push({
-                    message,
-                    from: { name: page.name || "Agent", id: pageId },
-                    created_time: new Date().toISOString()
-                  });
-                }
-
-                if (file && attachmentType) {
-                  conv.messages.data.push({
-                    message: `Sent an attachment file (${attachmentType})`,
-                    attachments: [{ type: attachmentType, payload: { url: fakeAttachmentUrl } }],
-                    from: { name: page.name || "Agent", id: pageId },
-                    created_time: new Date().toISOString()
-                  });
-                }
-
-                conv.updated_time = new Date().toISOString();
-                await simDocRef.set({ conversations });
-              }
-            }
-            await new Promise(resolve => setTimeout(resolve, 8));
-            deliverySuccess = !isSkipped;
-          } catch (simErr: any) {
-            errorMessage = simErr.message;
+      if (isSimPage) {
+        try {
+          const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+          const snap = await simDocRef.get();
+          if (snap.exists) {
+            simulatedConversationsCached = snap.data().conversations || [];
+          } else {
+            simulatedConversationsCached = getDefaultSimulatedConversations(pageId);
           }
-        } else {
+          console.log(`[Broadcast Pre-cache] Loaded ${simulatedConversationsCached.length} simulated conversations once.`);
+        } catch (simFetchErr: any) {
+          console.error("[Broadcast] Failed to pre-fetch simulated conversations:", simFetchErr.message);
+          simulatedConversationsCached = [];
+        }
+      }
+
+      let lastStatusCheck = 0;
+      let currentStatus = "running";
+
+      try {
+        for (let i = 0; i < analyzedRecipients.length; i++) {
+          const recipient = analyzedRecipients[i];
+          let deliverySuccess = false;
+          let isSkipped = false;
+          let errorMessage = null;
+
+          // Database Pause / Cancel check (throttled to every 5s or every 50 iteration)
+          if (i === 0 || i % 50 === 0 || (Date.now() - lastStatusCheck > 5000)) {
+            try {
+              const freshBcastSnap = await bcastDocRef.get();
+              if (freshBcastSnap.exists) {
+                currentStatus = freshBcastSnap.data()?.status || "running";
+              }
+              lastStatusCheck = Date.now();
+            } catch (dbErr) {
+              console.error("[Broadcast Background] Failed to check status, continuing:", dbErr);
+            }
+          }
+
+          if (currentStatus === "cancelled") {
+            console.log(`[Broadcast Background] Broadcast ${broadcastId} has been cancelled. Stopping loop.`);
+            break; 
+          }
+
+          if (currentStatus === "paused") {
+            console.log(`[Broadcast Background] Broadcast ${broadcastId} is paused. Waiting...`);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            i--;
+            continue; 
+          }
+
+          // Resume skip check
+          const recStatusInRecord = recipientsStatusList[i];
+          if (recStatusInRecord && recStatusInRecord.status !== "pending") {
+            continue; // Skip already sent/failed/skipped entries
+          }
+
+          const recipientIsSimulated = isSimulated || (recipient.id && recipient.id.startsWith("usr_sim_"));
+
+          if (recipientIsSimulated) {
+            try {
+              if (!isSkipped) {
+                let conversations = simulatedConversationsCached || [];
+                let conv = conversations.find((c: any) => 
+                  c.participants?.data?.some((p: any) => p.id === recipient.id)
+                );
+
+                if (!conv) {
+                  conv = {
+                    id: `conv_${recipient.id}`,
+                    participants: {
+                      data: [
+                        { name: recipient.name, id: recipient.id, picture: { data: { url: recipient.pictureUrl || `https://graph.facebook.com/${recipient.id}/picture?type=large` } } },
+                        { name: page.name || "Offline Page", id: pageId }
+                      ]
+                    },
+                    messages: { data: [] },
+                    updated_time: new Date().toISOString()
+                  };
+                  conversations.push(conv);
+                }
+
+                if (conv) {
+                  if (!conv.messages) conv.messages = { data: [] };
+                  
+                  if (message) {
+                    conv.messages.data.push({
+                      message,
+                      from: { name: page.name || "Agent", id: pageId },
+                      created_time: new Date().toISOString()
+                    });
+                  }
+
+                  if (file && attachmentType) {
+                    conv.messages.data.push({
+                      message: `Sent an attachment file (${attachmentType})`,
+                      attachments: [{ type: attachmentType, payload: { url: `/api/file-attachment/sim_${Date.now()}` } }],
+                      from: { name: page.name || "Agent", id: pageId },
+                      created_time: new Date().toISOString()
+                    });
+                  }
+
+                  conv.updated_time = new Date().toISOString();
+                }
+              }
+              deliverySuccess = !isSkipped;
+            } catch (simErr: any) {
+              errorMessage = simErr.message;
+            }
+          } else {
           // Real FB messenger broadcast
           try {
             let messagePayload: any = {};
@@ -4887,18 +5068,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
             if (!deliverySuccess) {
               console.log(`[Broadcast Standby Bypass] Local virtual fallback check for recipient ${recipient.id}`);
               
-              const isSimPage = isSimulated || !page.access_token || page.access_token.startsWith("sim_");
               if (isSimPage) {
                 deliverySuccess = true;
                 errorMessage = null;
 
                 try {
-                  const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
-                  const snap = await simDocRef.get();
-                  let conversations = [];
-                  if (snap.exists) conversations = snap.data().conversations || [];
-                  else conversations = getDefaultSimulatedConversations(pageId);
-
+                  let conversations = simulatedConversationsCached || [];
                   let conv = conversations.find((c: any) => 
                     c.participants?.data?.some((p: any) => p.id === recipient.id)
                   );
@@ -4940,7 +5115,6 @@ Write a realistic, short and natural response expressing your reaction, query, o
                   }
 
                   conv.updated_time = new Date().toISOString();
-                  await simDocRef.set({ conversations });
                 } catch (simErr: any) {
                   console.error("[Broadcast API Virtual Storage] Standby routing failed:", simErr.message);
                 }
@@ -4979,6 +5153,8 @@ Write a realistic, short and natural response expressing your reaction, query, o
         sentCount++;
 
         // Live emit progression update to client via room page_${pageId}
+        // High performance: Only send the huge recipientsStatusList occasionally, or on final/start records!
+        const shouldSendFullList = (i === 0 || i === analyzedRecipients.length - 1 || (i + 1) % 35 === 0);
         io.to(`page_${pageId}`).emit("broadcast_progress", {
           broadcastId,
           pageId,
@@ -4989,8 +5165,19 @@ Write a realistic, short and natural response expressing your reaction, query, o
           total: recipients.length,
           latestRecipient: recipient.name,
           latestStatus: isSkipped ? "skipped" : (deliverySuccess ? "delivered" : "failed"),
-          recipientsStatus: recipientsStatusList
+          recipientsStatus: shouldSendFullList ? recipientsStatusList : null
         });
+      }
+
+      // If simulated conversations were cached, commit them all at once now (exactly 1 write instead of 1500!)
+      if (isSimPage && simulatedConversationsCached) {
+        try {
+          const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+          await simDocRef.set({ conversations: simulatedConversationsCached });
+          console.log(`[Broadcast Completed] Successfully committed all in-memory simulated conversations to DB.`);
+        } catch (simCommitErr: any) {
+          console.error("[Broadcast Completed] Simulated conversations bulk set failed:", simCommitErr.message);
+        }
       }
 
       // Update the Firestore DB record
@@ -5164,6 +5351,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
           }
         }, 5000); // 5 seconds wait before engagement simulation triggers
       }
+      } catch (err: any) {
+        console.error("[Broadcast Engine Thread Crash]", err.message);
+      } finally {
+        activeBroadcastThreads.delete(broadcastId);
+        console.log(`[Thread Cleanup] Deleted active reference for broadcastId: ${broadcastId}`);
+      }
     })();
   });
 
@@ -5221,6 +5414,26 @@ Write a realistic, short and natural response expressing your reaction, query, o
     } catch (err: any) {
       console.error("[Broadcast Pause API] Error pausing broadcasts:", err.message);
       res.status(500).json({ error: "Failed to pause broadcasts." });
+    }
+  });
+
+  app.post("/api/facebook/broadcasts/resume", async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids)) return res.status(400).json({ error: "Invalid ids list" });
+
+    const userEmail = await getResolvedUserEmail(req);
+
+    try {
+      const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");
+      for (const id of ids) {
+        await bcastsCollection.doc(id).update({ status: "running" });
+      }
+      res.json({ success: true, message: "Selected broadcasts resumed successfully." });
+    } catch (err: any) {
+      console.error("[Broadcast Resume API] Error resuming broadcasts:", err.message);
+      res.status(500).json({ error: "Failed to resume broadcasts." });
     }
   });
 
@@ -5377,36 +5590,128 @@ Write a realistic, short and natural response expressing your reaction, query, o
           let sentCount = 0;
           const rStatusList = [...newRecord.recipientsStatus];
 
+          let simulatedConversationsCached: any[] | null = null;
+          const isSimPage = isSimulated || !page.access_token || page.access_token.startsWith("sim_");
+
+          if (isSimPage) {
+            try {
+              const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+              const snap = await simDocRef.get();
+              if (snap.exists) {
+                simulatedConversationsCached = snap.data().conversations || [];
+              } else {
+                simulatedConversationsCached = getDefaultSimulatedConversations(pageId);
+              }
+              console.log(`[Resend Pre-cache] Loaded ${simulatedConversationsCached.length} simulated conversations once.`);
+            } catch (simFetchErr: any) {
+              console.error("[Resend] Failed to pre-fetch simulated conversations:", simFetchErr.message);
+              simulatedConversationsCached = [];
+            }
+          }
+
           for (let i = 0; i < recipients.length; i++) {
             const recipient = recipients[i];
-            let deliverySuccess = true;
+            let deliverySuccess = false;
             let errorMessage = null;
+
+            const recipientIsSimulated = isSimulated || (recipient.id && recipient.id.startsWith("usr_sim_"));
+
+            if (recipientIsSimulated) {
+              try {
+                let conversations = simulatedConversationsCached || [];
+                let conv = conversations.find((c: any) => 
+                  c.participants?.data?.some((p: any) => p.id === recipient.id)
+                );
+
+                if (!conv) {
+                  conv = {
+                    id: `conv_${recipient.id}`,
+                    link: `https://www.facebook.com/messages/t/${recipient.id}`,
+                    updated_time: new Date().toISOString(),
+                    participants: {
+                      data: [
+                        { id: recipient.id, name: recipient.name, email: `${recipient.id}@facebook.com` },
+                        { id: pageId, name: finalPageName }
+                      ]
+                    },
+                    messages: { data: [] }
+                  };
+                  conversations.push(conv);
+                }
+
+                if (!conv.messages) conv.messages = { data: [] };
+
+                if (newRecord.message) {
+                  conv.messages.data.push({
+                    message: newRecord.message,
+                    from: { name: finalPageName, id: pageId },
+                    created_time: new Date().toISOString()
+                  });
+                }
+                conv.updated_time = new Date().toISOString();
+
+                deliverySuccess = true;
+                errorMessage = null;
+              } catch (simErr: any) {
+                errorMessage = simErr.message;
+              }
+            } else if (page && page.access_token) {
+              // Real FB message send
+              try {
+                let messagePayload: any = { text: newRecord.message || "" };
+                const payload_tag = { recipient: { id: recipient.id }, messaging_type: "MESSAGE_TAG", tag: "CONFIRMED_EVENT_UPDATE", message: messagePayload };
+                const payload_response = { recipient: { id: recipient.id }, messaging_type: "RESPONSE", message: messagePayload };
+                const payloadsToTry = [
+                  { title: "MESSAGE_TAG", body: payload_tag },
+                  { title: "RESPONSE", body: payload_response }
+                ];
+
+                for (const option of payloadsToTry) {
+                  try {
+                    await axios.post(`https://graph.facebook.com/v19.0/me/messages`, option.body, {
+                      params: { access_token: page.access_token }
+                    });
+                    deliverySuccess = true;
+                    errorMessage = null;
+                    break;
+                  } catch (fbErr: any) {
+                    errorMessage = fbErr.response?.data?.error?.message || fbErr.message;
+                  }
+                }
+              } catch (outerErr: any) {
+                errorMessage = outerErr.message;
+              }
+            }
 
             await new Promise(resolve => setTimeout(resolve, 2));
 
-            // Ensure 100% successful delivery of the resend broadcast
             if (deliverySuccess) {
               successCount++;
               rStatusList[i].status = "delivered";
             } else {
               failCount++;
               rStatusList[i].status = "failed";
-              rStatusList[i].error = errorMessage;
+              rStatusList[i].error = errorMessage || "Meta Destination API Rejected; check Page settings";
             }
 
             sentCount++;
 
-            try {
-              await bcastsCollection.doc(newBroadcastId).update({
-                sentCount,
-                successCount,
-                failCount,
-                recipientsStatus: rStatusList
-              });
-            } catch (err: any) {
-              console.error("[Resend Background] DB Update fail:", err.message);
+            // Throttled DB Update to prevent write locking and slow execution! Only write every 30 records or final
+            if (i === 0 || i === recipients.length - 1 || (i + 1) % 30 === 0) {
+              try {
+                await bcastsCollection.doc(newBroadcastId).update({
+                  sentCount,
+                  successCount,
+                  failCount,
+                  recipientsStatus: rStatusList
+                });
+              } catch (err: any) {
+                console.error("[Resend Background] DB Update fail:", err.message);
+              }
             }
 
+            // High performance socket progress updates: Skip status lists on intermediate frames
+            const shouldSendFullList = (i === 0 || i === recipients.length - 1 || (i + 1) % 35 === 0);
             io.to(`page_${pageId}`).emit("broadcast_progress", {
               broadcastId: newBroadcastId,
               pageId,
@@ -5415,9 +5720,20 @@ Write a realistic, short and natural response expressing your reaction, query, o
               failCount,
               total: recipients.length,
               status: sentCount === recipients.length ? "completed" : "running",
-              recipientsStatus: rStatusList,
+              recipientsStatus: shouldSendFullList ? rStatusList : null,
               message: newRecord.message
             });
+          }
+
+          // Commit simulated bulk updates if any
+          if (isSimPage && simulatedConversationsCached) {
+            try {
+              const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+              await simDocRef.set({ conversations: simulatedConversationsCached });
+              console.log(`[Resend Completed] Committed in-memory simulated conversations to DB.`);
+            } catch (simCommitErr: any) {
+              console.error("[Resend Completed] Simulated conversations bulk set failed:", simCommitErr.message);
+            }
           }
 
           try {
@@ -5621,7 +5937,13 @@ Write a realistic, short and natural response expressing your reaction, query, o
           } else {
             let pageConvs: any[] = [];
             try {
-              pageConvs = await fetchAllPageConversations(p.id, p.access_token, "participants{name,picture.type(large){url},id},messages.limit(1){message,from,created_time},updated_time");
+              pageConvs = await fetchAllPageConversations(
+                p.id, 
+                p.access_token, 
+                "participants{name,picture.type(large){url},id},messages.limit(1){message,from,created_time},updated_time",
+                false,
+                150
+              );
             } catch (err: any) {
               console.warn(`Failed to fetch real conversations for page ${p.id}:`, err.message);
               pageConvs = [];
@@ -5705,6 +6027,325 @@ Write a realistic, short and natural response expressing your reaction, query, o
       return res.status(500).json({ error: "Failed to refresh audience" });
     }
   });
+
+  // Campaign Automatic Worker Execution Engine for Scheduled & Resumed Campaigns
+  async function executeSelfContainedCampaignLoop(db: any, userEmail: string, broadcastId: string, bcastData: any) {
+    if (activeBroadcastThreads.has(broadcastId)) return;
+    activeBroadcastThreads.add(broadcastId);
+
+    console.log(`[Campaign Worker] Spawning self-contained worker thread for campaign: ${broadcastId} of user ${userEmail}`);
+
+    try {
+      // 1. Fetch user to find accessToken
+      const userDoc = await db.collection("users").doc(userEmail).get();
+      if (!userDoc.exists) {
+        activeBroadcastThreads.delete(broadcastId);
+        return;
+      }
+      const u = userDoc.data() || {};
+      
+      let pageAccessToken = null;
+      let pageName = bcastData.pageName || "Offline Page";
+      const pageId = bcastData.pageId;
+
+      if (u.facebook && u.facebook.pages) {
+        const matched = u.facebook.pages.find((p: any) => p.id === pageId);
+        if (matched) {
+          pageAccessToken = matched.access_token;
+          pageName = matched.name || pageName;
+        }
+      }
+      if (!pageAccessToken && u.facebookWorkspaces) {
+        for (const wsId of Object.keys(u.facebookWorkspaces)) {
+          const wsPages = u.facebookWorkspaces[wsId]?.pages;
+          if (wsPages) {
+            const matched = wsPages.find((p: any) => p.id === pageId);
+            if (matched) {
+              pageAccessToken = matched.access_token;
+              pageName = matched.name || pageName;
+              break;
+            }
+          }
+        }
+      }
+
+      const isSimulated = !pageAccessToken || pageAccessToken.startsWith("sim_") || pageId.startsWith("sim_");
+      const bcastDocRef = db.collection("users").doc(userEmail).collection("broadcasts").doc(broadcastId);
+      
+      let recipientsStatusList = bcastData.recipientsStatus || [];
+      const message = bcastData.message || "";
+      const attachmentType = bcastData.attachmentType || null;
+      const messageTag = bcastData.messageTag || "CONFIRMED_EVENT_UPDATE";
+
+      let successCount = bcastData.successCount || 0;
+      let failCount = bcastData.failCount || 0;
+      let sentCount = bcastData.sentCount || 0;
+      let skippedCount = bcastData.skippedCount || 0;
+      let tier1Success = bcastData.tier1Success || 0;
+      let tier2Success = bcastData.tier2Success || 0;
+      let tier3Success = bcastData.tier3Success || 0;
+      let tier3Skipped = bcastData.tier3Skipped || 0;
+
+      let simulatedConversationsCached: any[] | null = null;
+      const isSimPage = isSimulated; // Simulated checks
+
+      if (isSimPage) {
+        try {
+          const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+          const snap = await simDocRef.get();
+          if (snap.exists) {
+            simulatedConversationsCached = snap.data().conversations || [];
+          } else {
+            simulatedConversationsCached = getDefaultSimulatedConversations(pageId);
+          }
+          console.log(`[Scheduler Worker Pre-cache] Loaded ${simulatedConversationsCached.length} simulated conversations once.`);
+        } catch (simFetchErr: any) {
+          console.error("[Scheduler Worker] Failed to pre-fetch simulated conversations:", simFetchErr.message);
+          simulatedConversationsCached = [];
+        }
+      }
+
+      let lastStatusCheck = 0;
+      let currentStatus = "running";
+
+      for (let i = 0; i < recipientsStatusList.length; i++) {
+        const recipient = recipientsStatusList[i];
+        if (recipient.status !== "pending") {
+          continue; 
+        }
+
+        // Database Pause / Cancel check (throttled to every 5s or every 50 iteration)
+        if (i === 0 || i % 50 === 0 || (Date.now() - lastStatusCheck > 5000)) {
+          try {
+            const freshSnap = await bcastDocRef.get();
+            if (freshSnap.exists) {
+              currentStatus = freshSnap.data()?.status || "running";
+            }
+            lastStatusCheck = Date.now();
+          } catch (dbErr) {
+            console.error("[Scheduler Worker] Failed to check status:", dbErr);
+          }
+        }
+
+        if (currentStatus === "cancelled") {
+          console.log(`[Scheduler Worker] Campaign ${broadcastId} is cancelled. Terminating.`);
+          break;
+        }
+
+        if (currentStatus === "paused") {
+          console.log(`[Scheduler Worker] Campaign ${broadcastId} is paused. Waiting...`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          i--;
+          continue;
+        }
+
+        let deliverySuccess = false;
+        let errorMessage = null;
+
+        const recipientIsSimulated = isSimulated || (recipient.id && recipient.id.startsWith("usr_sim_"));
+
+        if (recipientIsSimulated) {
+          try {
+            let conversations = simulatedConversationsCached || [];
+            let conv = conversations.find((c: any) => 
+              c.participants?.data?.some((p: any) => p.id === recipient.id)
+            );
+
+            if (!conv) {
+              conv = {
+                id: `conv_${recipient.id}`,
+                participants: {
+                  data: [
+                    { name: recipient.name, id: recipient.id, picture: { data: { url: `https://graph.facebook.com/${recipient.id}/picture?type=large` } } },
+                    { name: pageName, id: pageId }
+                  ]
+                },
+                messages: { data: [] },
+                updated_time: new Date().toISOString()
+              };
+              conversations.push(conv);
+            }
+
+            if (message) {
+              conv.messages.data.push({
+                message,
+                from: { name: pageName, id: pageId },
+                created_time: new Date().toISOString()
+              });
+            }
+            conv.updated_time = new Date().toISOString();
+
+            deliverySuccess = true;
+          } catch (simErr: any) {
+            errorMessage = simErr.message;
+          }
+        } else {
+          try {
+            let messagePayload: any = {};
+            if (message) {
+              messagePayload.text = message;
+            }
+
+            const activeTag = ["CONFIRMED_EVENT_UPDATE", "POST_PURCHASE_UPDATE", "ACCOUNT_UPDATE"].includes(messageTag)
+              ? messageTag
+              : "CONFIRMED_EVENT_UPDATE";
+
+            const payload_tag = { recipient: { id: recipient.id }, messaging_type: "MESSAGE_TAG", tag: activeTag, message: messagePayload };
+            const payload_response = { recipient: { id: recipient.id }, messaging_type: "RESPONSE", message: messagePayload };
+            const payloadsToTry = [
+              { title: "MESSAGE_TAG", body: payload_tag },
+              { title: "RESPONSE", body: payload_response }
+            ];
+
+            for (const option of payloadsToTry) {
+              try {
+                await axios.post(`https://graph.facebook.com/v19.0/me/messages`, option.body, {
+                  params: { access_token: pageAccessToken }
+                });
+                deliverySuccess = true;
+                errorMessage = null;
+                break;
+              } catch (fbErr: any) {
+                errorMessage = fbErr.response?.data?.error?.message || fbErr.message;
+              }
+            }
+
+            if (!deliverySuccess) {
+              // Virtual standby local bridge bypass ONLY for simulated pages
+              if (isSimulated) {
+                deliverySuccess = true;
+                errorMessage = null;
+              }
+            }
+          } catch (outerErr: any) {
+            errorMessage = outerErr.message;
+          }
+        }
+
+        if (deliverySuccess) {
+          successCount++;
+          recipientsStatusList[i].status = "delivered";
+          if (recipient.tier === 1) tier1Success++;
+          else if (recipient.tier === 2) tier2Success++;
+          else if (recipient.tier === 3) tier3Success++;
+        } else {
+          failCount++;
+          recipientsStatusList[i].status = "failed";
+          recipientsStatusList[i].error = errorMessage;
+        }
+
+        sentCount++;
+
+        // High performance progress updates
+        const shouldSendFullList = (i === 0 || i === recipientsStatusList.length - 1 || (i + 1) % 35 === 0);
+        io.to(`page_${pageId}`).emit("broadcast_progress", {
+          broadcastId,
+          pageId,
+          sentCount,
+          successCount,
+          failCount,
+          skippedCount,
+          total: recipientsStatusList.length,
+          latestRecipient: recipient.name,
+          latestStatus: deliverySuccess ? "delivered" : "failed",
+          recipientsStatus: shouldSendFullList ? recipientsStatusList : null
+        });
+
+        await new Promise(resolve => setTimeout(resolve, 2));
+      }
+
+      // Commit simulated conversations to DB at completion
+      if (isSimPage && simulatedConversationsCached) {
+        try {
+          const simDocRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
+          await simDocRef.set({ conversations: simulatedConversationsCached });
+          console.log(`[Scheduler Worker Completed] Committed simulation conversations log to DB.`);
+        } catch (simCommitErr: any) {
+          console.error("[Scheduler Worker Completed] Sim update batch write failed:", simCommitErr.message);
+        }
+      }
+
+      const finalRecord = {
+        status: "completed",
+        sentCount,
+        successCount,
+        failCount,
+        skippedCount,
+        tier1Success,
+        tier2Success,
+        tier3Success,
+        tier3Skipped,
+        recipientsStatus: recipientsStatusList,
+        completedAt: new Date().toISOString()
+      };
+
+      await bcastDocRef.update(finalRecord);
+
+      io.to(`page_${pageId}`).emit("broadcast_completed", {
+        broadcastId,
+        pageId,
+        sentCount,
+        successCount,
+        failCount,
+        skippedCount,
+        total: recipientsStatusList.length
+      });
+
+      console.log(`[Campaign Worker] Automated worker concluded campaign ${broadcastId}.`);
+    } catch (schedErr: any) {
+      console.error(`[Campaign Worker] Thread failed:`, schedErr.message);
+    } finally {
+      activeBroadcastThreads.delete(broadcastId);
+    }
+  }
+
+  // Background Campaign Scheduler & Stalled Recovery Loop (polls every 15 seconds)
+  setInterval(async () => {
+    try {
+      const db = await getDb();
+      if (!db) return;
+
+      const usersSnap = await db.collection("users").get();
+      for (const userDoc of usersSnap.docs) {
+        const userEmail = userDoc.id;
+        const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");
+        const bcastsSnap = await bcastsCollection.get();
+        const docs = bcastsSnap?.docs || [];
+
+        // 1. Process scheduled campaigns when their time has arrived
+        for (const bcastDoc of docs) {
+          const bcastData = bcastDoc.data();
+          if (bcastData?.status === "scheduled" && bcastData?.scheduleDate && bcastData?.scheduleTime) {
+            const scheduleTimeStr = `${bcastData.scheduleDate}T${bcastData.scheduleTime}`;
+            const targetTime = new Date(scheduleTimeStr);
+            if (targetTime <= new Date()) {
+              console.log(`[Scheduler Engine] Launching due scheduled campaign: ${bcastDoc.id} of user ${userEmail}`);
+              const docRef = bcastsCollection.doc(bcastDoc.id);
+              await docRef.update({ status: "running" });
+              // Fetch latest updated dataset and trigger
+              const freshBcastSnap = await docRef.get();
+              const freshBcastData = freshBcastSnap.data();
+              executeSelfContainedCampaignLoop(db, userEmail, bcastDoc.id, freshBcastData);
+            }
+          }
+        }
+
+        // 2. Process active 'running' campaigns that lost their executor thread (recovery/reboots)
+        for (const bcastDoc of docs) {
+          const bcastData = bcastDoc.data();
+          if (bcastData?.status === "running") {
+            const bcastId = bcastDoc.id;
+            if (!activeBroadcastThreads.has(bcastId)) {
+              console.log(`[Optimizer Recovery] Rediscovered stalled active campaign: ${bcastId} of user ${userEmail}. Resuming thread...`);
+              executeSelfContainedCampaignLoop(db, userEmail, bcastId, bcastData);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[Scheduler Engine Error]", err.message);
+    }
+  }, 15000);
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

@@ -669,6 +669,12 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     if (data.targetAudience) {
       formData.append("targetAudience", data.targetAudience);
     }
+    if (data.scheduleDate) {
+      formData.append("scheduleDate", data.scheduleDate);
+    }
+    if (data.scheduleTime) {
+      formData.append("scheduleTime", data.scheduleTime);
+    }
 
     try {
       const res = await axios.post("/api/facebook/broadcast", formData, {
@@ -718,6 +724,12 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
         }
         if (data.targetAudience) {
           formData.append("targetAudience", data.targetAudience);
+        }
+        if (data.scheduleDate) {
+          formData.append("scheduleDate", data.scheduleDate);
+        }
+        if (data.scheduleTime) {
+          formData.append("scheduleTime", data.scheduleTime);
         }
         
         try {
@@ -1335,9 +1347,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       getConversations(selectedPage.id, false, false);
     } catch (err: any) {
       console.error("Failed to send reply", err);
-      const serverFriendlyError = err.response?.data?.error;
-      const fbErrorMsg = err.response?.data?.details?.error?.message;
-      const friendlyError = serverFriendlyError || fbErrorMsg || "Failed to send message.";
+      const errData = err.response?.data;
+      const serverFriendlyError = typeof errData?.error === 'string' ? errData.error : (errData?.error?.message || errData?.message);
+      const fbErrorMsg = errData?.details?.error?.message || errData?.error?.message;
+      const friendlyError = serverFriendlyError || fbErrorMsg || err.message || "Failed to send message.";
 
       addToast(friendlyError, "error");
 
@@ -1448,9 +1461,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       getConversations(selectedPage.id, false, false);
     } catch (err: any) {
       console.error("Failed to send attachment", err);
-      const serverFriendlyError = err.response?.data?.error;
-      const fbErrorMsg = err.response?.data?.details?.error?.message;
-      const friendlyError = serverFriendlyError || fbErrorMsg || "Failed to send attachment.";
+      const errData = err.response?.data;
+      const serverFriendlyError = typeof errData?.error === 'string' ? errData.error : (errData?.error?.message || errData?.message);
+      const fbErrorMsg = errData?.details?.error?.message || errData?.error?.message;
+      const friendlyError = serverFriendlyError || fbErrorMsg || err.message || "Failed to send attachment.";
 
       addToast(friendlyError, "error");
 
@@ -1605,7 +1619,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
   useEffect(() => {
     const socketUrl = (window as any).__BACKEND_URL__ || undefined;
-    const newSocket = socketUrl ? io(socketUrl, { path: '/socket.io' }) : io();
+    const socketOpts = {
+      path: '/socket.io',
+      transports: ['polling', 'websocket']
+    };
+    const newSocket = socketUrl ? io(socketUrl, socketOpts) : io(socketOpts);
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
@@ -2053,6 +2071,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                 <OverviewPage
                   pages={pages}
                   broadcastsHistory={broadcastsHistory}
+                  conversations={conversations}
                   workspaceCredits={workspaceCredits}
                   currentWorkspaceId={currentWorkspaceId}
                   currentPlan={currentPlan}
@@ -2562,6 +2581,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
               pages={pages} 
               creditBalance={creditBalance} 
               broadcastsHistory={broadcastsHistory} 
+              conversations={conversations}
               addToast={addToast} 
               onSelectBroadcast={(id) => {
                 setActiveTab('broadcast');
@@ -3686,6 +3706,26 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                           <span>Pause</span>
                         </button>
 
+                        {/* Resume Button */}
+                        <button
+                          onClick={async () => {
+                            if (selectedBroadcastIds.length === 0) return;
+                            try {
+                              await axios.post('/api/facebook/broadcasts/resume', { ids: selectedBroadcastIds, email: appUser?.email });
+                              addToast(`Resumed ${selectedBroadcastIds.length} broadcasts successfully.`, "success");
+                              getBroadcastHistory();
+                              setSelectedBroadcastIds([]);
+                            } catch (err: any) {
+                              addToast("Failed to resume broadcasts.", "error");
+                            }
+                          }}
+                          disabled={selectedBroadcastIds.length === 0}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-200 hover:border-slate-350 disabled:opacity-50 rounded-xl text-xs font-bold transition-all hover:shadow-sm cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <Play className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>Resume</span>
+                        </button>
+
                         {/* Cancel Button */}
                         <button
                           onClick={async () => {
@@ -4048,7 +4088,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                   <td className="px-4 py-4 whitespace-nowrap">
                                     <span className="inline-flex items-center gap-2 text-xs font-bold text-slate-700">
                                       <span className={`w-2 h-2 rounded-full ${
-                                        b.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                                        b.status === 'running' ? 'bg-blue-500 animate-pulse' :
+                                        b.status === 'paused' ? 'bg-amber-400' :
+                                        b.status === 'cancelled' ? 'bg-rose-500' :
+                                        b.status === 'scheduled' ? 'bg-purple-500 animate-pulse' :
+                                        'bg-emerald-500'
                                       }`} />
                                       <span className="capitalize">{b.status || 'completed'}</span>
                                     </span>
@@ -4059,8 +4103,12 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                                     <div className="flex flex-col gap-1 w-44">
                                       <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
                                         <div 
-                                          className={`h-full rounded-full transition-all duration-300 ${
-                                            b.status === 'running' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                                          className={`h-full rounded-full transition-all duration-350 ${
+                                            b.status === 'running' ? 'bg-blue-500' :
+                                            b.status === 'paused' ? 'bg-amber-400' :
+                                            b.status === 'cancelled' ? 'bg-rose-400' :
+                                            b.status === 'scheduled' ? 'bg-purple-500' :
+                                            'bg-emerald-500'
                                           }`}
                                           style={{ width: `${progressPercent}%` }}
                                         />

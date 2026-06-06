@@ -104,7 +104,9 @@ export function AudiencePage({ onOpenChat, addToast }: AudiencePageProps) {
 
   // Run initial fetch and re-fetches when parameters change
   useEffect(() => {
-    fetchAudience();
+    // Show full skeleton if table is completely empty, otherwise load seamlessly in background
+    const showSkeleton = users.length === 0;
+    fetchAudience(showSkeleton);
   }, [currentPage, debouncedSearch, selectedPageId]);
 
   // Handle Refresh action

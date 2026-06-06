@@ -28,6 +28,7 @@ interface AnalyticsPageProps {
   broadcastsHistory: any[];
   addToast: (message: string, type: 'success' | 'error' | 'info') => void;
   onSelectBroadcast?: (id: string) => void;
+  conversations?: any[];
 }
 
 // Generate Pakistani theme avatars based on name hash
@@ -56,7 +57,7 @@ const getInitials = (name?: string | null) => {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToast, onSelectBroadcast }: AnalyticsPageProps) {
+export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToast, onSelectBroadcast, conversations = [] }: AnalyticsPageProps) {
   const [activeSubTab, setActiveSubTab] = useState<'overview' | 'broadcasts' | 'audience' | 'pages' | 'inbox' | 'credits'>('overview');
   const [timeRange, setTimeRange] = useState<'7D' | '30D' | '90D' | 'All' | 'Custom'>('7D');
   const [loading, setLoading] = useState(false);
@@ -958,15 +959,123 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
         {/* T5: INBOX TAB                                             */}
         {/* ========================================================= */}
         {activeSubTab === 'inbox' && (
-          <div className="bg-white p-12 sm:p-16 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center">
-            <div className="w-24 h-24 bg-indigo-50/50 rounded-[2.25rem] flex items-center justify-center mb-6 border border-indigo-100/30">
-              <Inbox className="w-10 h-10 text-indigo-600" />
+          conversations.length === 0 ? (
+            <div className="bg-white p-12 sm:p-16 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col items-center justify-center text-center">
+              <div className="w-24 h-24 bg-indigo-50/50 rounded-[2.25rem] flex items-center justify-center mb-6 border border-indigo-100/30">
+                <Inbox className="w-10 h-10 text-indigo-600" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 tracking-tight">No conversations found</h3>
+              <p className="text-sm font-semibold text-slate-400 mt-2 max-w-sm">
+                No active conversations detected across your selected Facebook pages. Visit the Inbox section to send messages and test.
+              </p>
             </div>
-            <h3 className="text-xl font-black text-slate-900 tracking-tight">No inbox data yet</h3>
-            <p className="text-sm font-semibold text-slate-400 mt-2 max-w-sm">
-              Start conversations in your inbox to see messaging analytics.
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Inbox Stats breakdown */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">Total Conversations</span>
+                  <span className="text-3xl font-black text-slate-900 block mt-1">{conversations.length}</span>
+                  <span className="text-xs text-slate-400 font-bold block mt-1">active chat threads</span>
+                </div>
+                
+                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">Unread Chats</span>
+                  <span className="text-3xl font-black text-indigo-600 block mt-1">
+                    {conversations.filter(c => (c.unread_count || 0) > 0).length}
+                  </span>
+                  <span className="text-xs text-slate-400 font-bold block mt-1">awaiting response</span>
+                </div>
+
+                <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-[#94A3B8]">Total Transmitted Messages</span>
+                  <span className="text-3xl font-black text-slate-900 block mt-1">
+                    {conversations.reduce((sum, c) => sum + (c.messages?.data?.length || 0), 0)}
+                  </span>
+                  <span className="text-xs text-slate-400 font-bold block mt-1">messages indexed</span>
+                </div>
+              </div>
+
+              {/* Page Wise distribution and list */}
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                <div className="p-6 border-b border-slate-50 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">Conversations Stream</h3>
+                    <p className="text-slate-400 text-xs font-semibold">Live status of customer message streams across all channels</p>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-slate-100 bg-slate-50/50">
+                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-wider text-slate-400">Sender Profile</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-wider text-slate-400">Associated Page</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-wider text-slate-400">Last Message Prefix</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-wider text-slate-400">Channel Status</th>
+                        <th className="px-6 py-4 text-[10px] font-black uppercase tracking-wider text-slate-400">Last Active</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-50 text-xs text-left">
+                      {conversations.map((c: any) => {
+                        // Extract recipient details correctly
+                        const recipient = c.participants?.data?.find((p: any) => p.id !== c._associatedPageId) || c.participants?.data?.[0];
+                        const recipientName = recipient?.name || "Anonymous Subscriber";
+                        const pageSource = pages.find(p => p.id === c._associatedPageId || p.id === c.pageId) || { name: c._associatedPageId || "Connected Asset" };
+                        
+                        const lastMsgObj = c.messages?.data?.[0];
+                        const lastMsgText = lastMsgObj?.message || "Attachment Sent";
+                        const rawTime = lastMsgObj?.created_time || c.updated_time;
+                        const formattedTime = rawTime ? new Date(rawTime).toLocaleString() : "Unknown";
+
+                        const isUnread = (c.unread_count || 0) > 0;
+
+                        return (
+                          <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 capitalize shrink-0 border border-slate-200 overflow-hidden">
+                                  {recipient?.picture?.data?.url ? (
+                                    <img src={recipient.picture.data.url} alt={recipientName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    getInitials(recipientName)
+                                  )}
+                                </div>
+                                <div>
+                                  <span className="block font-black text-slate-800">{recipientName}</span>
+                                  <span className="block text-[10px] font-mono text-slate-400 mt-0.5">ID: {c.id}</span>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 font-semibold text-slate-700">
+                              {pageSource.name}
+                            </td>
+                            <td className="px-6 py-4 font-medium text-slate-600 max-w-sm truncate" title={lastMsgText}>
+                              {lastMsgText}
+                            </td>
+                            <td className="px-6 py-4">
+                              {isUnread ? (
+                                <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-md text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1 animate-pulse">
+                                  Unread ({c.unread_count})
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-black uppercase tracking-wider inline-flex items-center gap-1">
+                                  Opened
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4 text-slate-450 font-mono text-[10px]">
+                              {formattedTime}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {/* ========================================================= */}

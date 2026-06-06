@@ -21,6 +21,7 @@ interface OverviewPageProps {
   addToast: (message: string, type?: 'success' | 'err' | 'info') => void;
   setCurrentPlan?: (plan: 'trial' | 'architect' | 'empire' | 'expired') => void;
   onUpgradePlan?: () => void;
+  conversations?: any[];
 }
 
 export const OverviewPage: React.FC<OverviewPageProps> = ({
@@ -38,10 +39,14 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
   addToast,
   setCurrentPlan,
   onUpgradePlan,
+  conversations = [],
 }) => {
   const totalMessagesSent = broadcastsHistory.reduce((acc: number, curr: any) => acc + (curr.successCount || 0), 0);
   const remainingTrialCredits = Math.max(0, 5000 - totalMessagesSent);
   const totalCampaignsRun = broadcastsHistory.length;
+  const totalConversationsCount = conversations.length;
+  // Compute true messages exchanged this month (inbox logs + broadcast transmissions)
+  const totalMessagesExchanged = conversations.reduce((acc: number, curr: any) => acc + (curr.messages?.data?.length || 0), 0);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
@@ -71,7 +76,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
             </div>
             <div>
               <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Conversations</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">0</h4>
+              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{totalConversationsCount.toLocaleString()}</h4>
             </div>
           </div>
           <button onClick={() => setActiveTab('chat')} className="px-4 sm:px-5 py-3 bg-slate-50/50 border-t border-slate-100 text-indigo-600 text-[10px] sm:text-xs font-semibold flex items-center gap-1 hover:bg-slate-50 transition-colors">
@@ -87,11 +92,11 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
             </div>
             <div>
               <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Messages This Month</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">0</h4>
+              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{totalMessagesExchanged.toLocaleString()}</h4>
             </div>
           </div>
           <div className="px-4 sm:px-5 py-3 bg-slate-50/50 border-t border-slate-100 text-slate-400 text-[10px] sm:text-xs font-medium">
-            Since May 1
+            Since current period
           </div>
         </div>
 
