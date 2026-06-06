@@ -1621,7 +1621,8 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     const socketUrl = (window as any).__BACKEND_URL__ || undefined;
     const socketOpts = {
       path: '/socket.io',
-      transports: ['polling', 'websocket']
+      transports: ['polling', 'websocket'],
+      withCredentials: true
     };
     const newSocket = socketUrl ? io(socketUrl, socketOpts) : io(socketOpts);
     setSocket(newSocket);

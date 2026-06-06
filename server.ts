@@ -822,10 +822,24 @@ async function startServer() {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
+      origin: (origin, callback) => {
+        // Echo back the origin to support credentials handshake safely
+        callback(null, true);
+      },
+      methods: ["GET", "POST"],
+      credentials: true
     }
   });
+
+  // Handle engine connection errors to log diagnostic details on server side
+  io.engine.on("connection_error", (err) => {
+    console.error("[Socket.io Engine Error]:", {
+      code: err.code,
+      message: err.message,
+      context: err.context
+    });
+  });
+
   const PORT = process.env.PORT || 3000;
 
   app.set("trust proxy", 1);
@@ -3098,7 +3112,8 @@ async function startServer() {
       const pagesResponse = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
         params: { 
           access_token: userAccessToken,
-          fields: "name,id,access_token,picture.type(large){url}"
+          fields: "name,id,access_token,picture.type(large){url}",
+          limit: 500
         }
       });
 
