@@ -42,7 +42,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
   setMemberToRemove
 }) => {
   return (
-    <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
+    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
       {teamSubMode === 'list' ? (
         <>
           {/* HEADER */}
@@ -73,7 +73,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
           </div>
 
           {/* MEMBERS LIST */}
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl overflow-hidden">
+          <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden">
             <div className="divide-y divide-slate-100">
               {[...teamMembers]
                 .map((member) => {

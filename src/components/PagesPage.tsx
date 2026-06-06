@@ -91,7 +91,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
     }
   };
   return (
-    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20">
+    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 pb-20">
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {[
@@ -100,21 +100,21 @@ export const PagesPage: React.FC<PagesPageProps> = ({
           { label: 'Trial Mode', value: pages.length, icon: <Clock />, color: 'bg-amber-500' },
           { label: 'Inactive', value: 0, icon: <Power />, color: 'bg-slate-400' }
         ].map((stat, i) => (
-          <div key={i} className="bg-white p-5 sm:p-6 md:p-8 rounded-2xl sm:rounded-[1.5rem] md:rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-100 flex items-center gap-4 sm:gap-6">
-            <div className={`w-12 h-12 sm:w-14 sm:h-14 ${stat.color} rounded-xl sm:rounded-2xl flex items-center justify-center text-white shadow-lg`}>
-              {React.cloneElement(stat.icon as React.ReactElement, { className: 'w-5 h-5 sm:w-6 sm:h-6' })}
+          <div key={i} className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-4">
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 ${stat.color} rounded-xl flex items-center justify-center text-white shadow-md`}>
+              {React.cloneElement(stat.icon as React.ReactElement, { className: 'w-5 h-5' })}
             </div>
             <div>
-              <p className="text-[9px] sm:text-[10px] font-black uppercase text-slate-400 tracking-[0.2em] mb-1">{stat.label}</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 leading-none">{stat.value}</h4>
+              <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">{stat.label}</p>
+              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{stat.value}</h4>
             </div>
           </div>
         ))}
       </div>
 
       {/* Table Section */}
-      <div className="bg-white rounded-2xl sm:rounded-[1.5rem] md:rounded-[3rem] border border-slate-100 shadow-xl shadow-slate-100 overflow-hidden">
-        <div className="p-5 sm:p-8 md:p-10 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center sm:items-start md:items-center gap-4 bg-slate-50/25 text-center sm:text-left">
+      <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="p-5 sm:p-6 md:p-8 border-b border-slate-50 flex flex-col md:flex-row justify-between items-center sm:items-start md:items-center gap-4 bg-slate-50/25 text-center sm:text-left">
           <div>
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">Connected Facebook Pages</h3>
             <p className="text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase tracking-widest mt-1">

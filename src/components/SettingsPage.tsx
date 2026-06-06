@@ -83,14 +83,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   appUser
 }) => {
   return (
-    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20">
+    <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 pb-20">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-100 pb-6">
         <div className="text-left">
-          <h1 className="text-2xl sm:text-4xl font-black text-[#0B1527] tracking-tight mb-2">
+          <h2 className="text-3xl font-black text-[#0B1527] tracking-tight">
             {settingsSubTab === 'workspace' ? 'Workspace Settings' : 'Settings'}
-          </h1>
-          <p className="text-slate-500 text-xs sm:text-sm font-medium">
+          </h2>
+          <p className="text-xs text-slate-400 font-bold mt-1">
             {settingsSubTab === 'workspace' 
               ? `Manage settings for ${activeWorkspace?.name || 'khaadi'}` 
               : 'Manage your account settings and preferences.'}
