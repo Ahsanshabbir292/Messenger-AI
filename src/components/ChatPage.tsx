@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   RefreshCw, Facebook, ChevronDown, Search, ShieldAlert, MessageSquare, 
   ChevronRight, Activity, Settings, Download, ImageIcon, X, Mic, Paperclip, Send,
-  Volume2, FileText
+  Volume2, FileText, Zap, Trash2, Plus
 } from 'lucide-react';
 import { SafeAvatar } from './SafeAvatar';
 import { CustomAudioPlayer } from './CustomAudioPlayer';
@@ -96,6 +96,67 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   const [visibleCount, setVisibleCount] = React.useState(50);
   const [messagesLoading, setMessagesLoading] = React.useState(false);
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  const replyInputRef = React.useRef<HTMLInputElement>(null);
+
+  const [showQuickReplies, setShowQuickReplies] = React.useState(false);
+  const [newShortkey, setNewShortkey] = React.useState('');
+  const [newMessage, setNewMessage] = React.useState('');
+  const [quickReplies, setQuickReplies] = React.useState<{id: string, shortkey: string, message: string}[]>(() => {
+    const saved = localStorage.getItem('quick_replies');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return [
+      { id: '1', shortkey: 'hi', message: 'Hello! Welcome to our support. How can I assist you today?' },
+      { id: '2', shortkey: 'wait', message: 'Please wait a moment while I check the details for you.' },
+      { id: '3', shortkey: 'thanks', message: 'Thank you for contacting us! Let us know if you need anything else.' },
+    ];
+  });
+
+  const [quickReplySearch, setQuickReplySearch] = React.useState('');
+
+  React.useEffect(() => {
+    localStorage.setItem('quick_replies', JSON.stringify(quickReplies));
+  }, [quickReplies]);
+
+  const handleAddQuickReply = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newShortkey.trim() || !newMessage.trim()) return;
+    const short = newShortkey.trim().toLowerCase().replace(/^\//, '');
+    const item = {
+      id: Date.now().toString(),
+      shortkey: short,
+      message: newMessage.trim()
+    };
+    setQuickReplies(prev => [...prev, item]);
+    setNewShortkey('');
+    setNewMessage('');
+  };
+
+  const handleDeleteQuickReply = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setQuickReplies(prev => prev.filter(q => q.id !== id));
+  };
+
+  const handleSelectQuickReply = (message: string) => {
+    setReplyMessage(message);
+    setShowQuickReplies(false);
+    setTimeout(() => {
+      replyInputRef.current?.focus();
+    }, 50);
+  };
+
+  const isTypingShortcut = replyMessage.startsWith('/');
+  const shortcutQuery = isTypingShortcut ? replyMessage.substring(1).toLowerCase() : '';
+
+  const matchingQuickReplies = React.useMemo(() => {
+    if (!isTypingShortcut) return [];
+    return quickReplies.filter(q => q.shortkey.toLowerCase().includes(shortcutQuery));
+  }, [isTypingShortcut, shortcutQuery, quickReplies]);
 
   React.useEffect(() => {
     if (messagesEndRef.current) {
@@ -662,6 +723,138 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                 </div>
               )}
 
+              {/* Quick Reply Autocomplete Autopopup */}
+              {isTypingShortcut && matchingQuickReplies.length > 0 && (
+                <div className="absolute left-10 right-10 bottom-full mb-6 bg-slate-900 border border-slate-800 text-white rounded-3xl shadow-2xl overflow-hidden z-[45] animate-in slide-in-from-bottom-2 duration-200">
+                  <div className="px-5 py-3 border-b border-white/10 bg-white/5 flex gap-1.5 items-center">
+                    <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">Quick Reply Matchings</p>
+                  </div>
+                  <div className="p-2 max-h-48 overflow-y-auto space-y-1">
+                    {matchingQuickReplies.map((q) => (
+                      <button 
+                        key={q.id}
+                        type="button"
+                        onClick={() => handleSelectQuickReply(q.message)}
+                        className="w-full text-left px-4 py-2 hover:bg-indigo-600/35 active:bg-indigo-600 rounded-2xl transition-all flex items-center justify-between gap-4 group cursor-pointer border-none bg-transparent"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="bg-white/10 text-white text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded border border-white/5 font-mono">
+                            /{q.shortkey}
+                          </span>
+                          <span className="text-xs text-slate-200 truncate font-semibold">{q.message}</span>
+                        </div>
+                        <span className="text-[9px] font-black text-indigo-400 group-hover:text-white uppercase tracking-widest leading-none">Use template</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Quick Reply Manage Panel Popover */}
+              {showQuickReplies && (
+                <div className="absolute right-10 bottom-full mb-6 w-96 max-w-full bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden z-[50] animate-in slide-in-from-bottom-4 duration-300">
+                  {/* Popover Header */}
+                  <div className="p-5 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-4 h-4 text-indigo-600 fill-indigo-100" />
+                      <p className="text-xs font-black uppercase tracking-wider text-slate-800">Quick Replies</p>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => setShowQuickReplies(false)} 
+                      className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-600 transition-all cursor-pointer border-none bg-transparent"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Add form */}
+                  <form onSubmit={handleAddQuickReply} className="p-5 border-b border-slate-100 bg-white space-y-3">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600/80 mb-1">Create New Template</p>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 font-mono">/</span>
+                        <input 
+                          type="text"
+                          value={newShortkey}
+                          onChange={(e) => setNewShortkey(e.target.value)}
+                          placeholder="shortcut (e.g. hello)"
+                          className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-100 rounded-xl pl-6 pr-3 py-2 text-xs font-bold outline-none transition-all font-mono text-slate-900"
+                          required
+                        />
+                      </div>
+                    </div>
+                    <textarea 
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      placeholder="Type template message..."
+                      rows={2}
+                      className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-100 rounded-xl px-3 py-2 text-xs font-medium outline-none transition-all resize-none text-slate-950"
+                      required
+                    />
+                    <button 
+                      type="submit"
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2 px-4 text-xs font-black flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 border-none cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" /> Save Quick Reply
+                    </button>
+                  </form>
+
+                  {/* Search and list */}
+                  <div className="p-4 bg-slate-50/50 flex-1 max-h-60 overflow-y-auto space-y-2">
+                    <div className="relative mb-2">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                      <input 
+                        type="text"
+                        value={quickReplySearch}
+                        onChange={(e) => setQuickReplySearch(e.target.value)}
+                        placeholder="Search shortcut or message..."
+                        className="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-medium outline-none text-slate-900"
+                      />
+                    </div>
+
+                    {(() => {
+                      const filtered = quickReplies.filter(q => 
+                        q.shortkey.toLowerCase().includes(quickReplySearch.toLowerCase()) ||
+                        q.message.toLowerCase().includes(quickReplySearch.toLowerCase())
+                      );
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-6 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                            No templates found
+                          </div>
+                        );
+                      }
+
+                      return filtered.map(q => (
+                        <div 
+                          key={q.id}
+                          onClick={() => handleSelectQuickReply(q.message)}
+                          className="p-3 bg-white hover:bg-indigo-50/40 rounded-xl border border-slate-100 text-left cursor-pointer transition-all hover:scale-[1.01] hover:border-indigo-100 group flex justify-between items-start gap-4 shadow-sm"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="inline-block bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-2 py-0.5 rounded-lg border border-indigo-100 mb-1 font-mono">
+                              /{q.shortkey}
+                            </span>
+                            <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed font-semibold">{q.message}</p>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={(e) => handleDeleteQuickReply(q.id, e)}
+                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 border-none bg-transparent cursor-pointer"
+                            title="Delete template"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-5">
                 <div className="flex gap-2 bg-slate-50 p-2 rounded-[2rem]">
                   <label className="w-14 h-14 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-white hover:text-indigo-600 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95">
@@ -669,19 +862,28 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                     <input type="file" className="hidden" onChange={(e) => handleFileChange(e)} />
                   </label>
                   <button 
+                    type="button"
                     onClick={isRecording ? stopRecording : startRecording}
                     className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-95 ${isRecording ? 'bg-red-600 text-white' : 'text-slate-400 hover:bg-white hover:text-indigo-600'}`}>
                     <Mic className="w-5 h-5" />
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setShowQuickReplies(!showQuickReplies)}
+                    title="Quick Replies"
+                    className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-95 ${showQuickReplies ? 'bg-indigo-600 text-white animate-pulse' : 'text-slate-400 hover:bg-white hover:text-indigo-600'}`}>
+                    <Zap className="w-5 h-5" />
                   </button>
                 </div>
                 
                 <div className="flex-1 relative">
                   <input 
+                    ref={replyInputRef}
                     value={replyMessage}
                     onChange={(e) => setReplyMessage(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (pendingFile ? handleSendFile() : handleReply())}
-                    placeholder="Reply to this conversation..."
-                    className="w-full bg-slate-50 border-2 border-transparent focus:bg-white focus:border-indigo-100 rounded-[2rem] px-8 py-5 text-sm font-bold outline-none transition-all pr-24 shadow-inner"
+                    placeholder="Reply to this conversation... (Type / for quick replies)"
+                    className="w-full bg-slate-50 border-2 border-transparent focus:bg-white focus:border-indigo-100 rounded-[2rem] px-8 py-5 text-sm font-bold outline-none transition-all pr-24 shadow-inner text-slate-900"
                   />
                   <button 
                     onClick={pendingFile ? handleSendFile : handleReply}

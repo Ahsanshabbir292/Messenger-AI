@@ -823,8 +823,12 @@ async function startServer() {
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        // Echo back the origin to support credentials handshake safely
-        callback(null, true);
+        // Echo back the origin dynamically to support credentials handshake safely
+        if (!origin) {
+          callback(null, "*");
+        } else {
+          callback(null, origin);
+        }
       },
       methods: ["GET", "POST"],
       credentials: true
@@ -4891,10 +4895,13 @@ Write a realistic, short and natural response expressing your reaction, query, o
       }))
     };
 
+    const isScheduled = !!(scheduleDate && scheduleTime);
+    if (!isScheduled) {
+      activeBroadcastThreads.add(broadcastId);
+    }
+
     const bcastDocRef = db.collection("users").doc(userEmail).collection("broadcasts").doc(broadcastId);
     await bcastDocRef.set(broadcastRecord);
-
-    const isScheduled = !!(scheduleDate && scheduleTime);
 
     // Return immediate response with details, letting client track it live
     res.json({
@@ -5675,12 +5682,14 @@ Write a realistic, short and natural response expressing your reaction, query, o
           }))
         };
 
+        activeBroadcastThreads.add(newBroadcastId);
         await bcastsCollection.doc(newBroadcastId).set(newRecord);
         newBroadcastIds.push(newBroadcastId);
 
         // Run resend engine in background
         (async () => {
-          let successCount = 0;
+          try {
+            let successCount = 0;
           let failCount = 0;
           let sentCount = 0;
           const rStatusList = [...newRecord.recipientsStatus];
@@ -5831,20 +5840,25 @@ Write a realistic, short and natural response expressing your reaction, query, o
             }
           }
 
-          try {
-            await bcastsCollection.doc(newBroadcastId).update({ status: "completed" });
-          } catch (err: any) {
-            console.error("[Resend Background] Completion mark fail:", err.message);
-          }
+            try {
+              await bcastsCollection.doc(newBroadcastId).update({ status: "completed" });
+            } catch (err: any) {
+              console.error("[Resend Background] Completion mark fail:", err.message);
+            }
 
-          io.to(`page_${pageId}`).emit("broadcast_completed", {
-            broadcastId: newBroadcastId,
-            pageId,
-            sentCount,
-            successCount,
-            failCount,
-            total: recipients.length
-          });
+            io.to(`page_${pageId}`).emit("broadcast_completed", {
+              broadcastId: newBroadcastId,
+              pageId,
+              sentCount,
+              successCount,
+              failCount,
+              total: recipients.length
+            });
+          } catch (resendError: any) {
+            console.error("[Resend Engine Error]", resendError.message);
+          } finally {
+            activeBroadcastThreads.delete(newBroadcastId);
+          }
         })();
 
       }
@@ -6009,13 +6023,17 @@ Write a realistic, short and natural response expressing your reaction, query, o
       let mergedUsers: any[] = [];
 
       if (fbData && fbData.pages && Array.isArray(fbData.pages) && fbData.pages.length > 0) {
-        clientPages = fbData.pages.map((p: any) => ({
+        const selectedPageIds = fbData.selectedPageIds || [];
+        // Only include pages that the user has selected in Pages
+        const selectedPages = fbData.pages.filter((p: any) => selectedPageIds.includes(p.id));
+
+        clientPages = selectedPages.map((p: any) => ({
           id: p.id,
           name: p.name,
           picture_url: p.picture?.data?.url || `https://graph.facebook.com/${p.id}/picture?type=large`
         }));
 
-        await Promise.all(fbData.pages.map(async (p: any) => {
+        await Promise.all(selectedPages.map(async (p: any) => {
           if (p.access_token && p.access_token.startsWith("sim_")) {
             const pageUsers = getSimulatedAudienceForPages([p]);
             for (const u of pageUsers) {
@@ -6431,6 +6449,15 @@ Write a realistic, short and natural response expressing your reaction, query, o
           if (bcastData?.status === "running") {
             const bcastId = bcastDoc.id;
             if (!activeBroadcastThreads.has(bcastId)) {
+              // Extra safety: Check if the campaign is very recently created (< 45 seconds).
+              // If it is newly created, let the starting request thread add itself to activeBroadcastThreads.
+              const createdAt = bcastData?.createdAt;
+              if (createdAt) {
+                const ageMs = Date.now() - new Date(createdAt).getTime();
+                if (ageMs < 45000) {
+                  continue; // Skip and wait for the starting request thread
+                }
+              }
               console.log(`[Optimizer Recovery] Rediscovered stalled active campaign: ${bcastId} of user ${userEmail}. Resuming thread...`);
               executeSelfContainedCampaignLoop(db, userEmail, bcastId, bcastData);
             }
