@@ -3108,16 +3108,43 @@ async function startServer() {
         }
       }
 
-      // 2. Get user's pages and their access tokens
-      const pagesResponse = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
-        params: { 
-          access_token: userAccessToken,
-          fields: "name,id,access_token,picture.type(large){url}",
-          limit: 500
-        }
-      });
+      // 2. Get user's pages recursively to support up to 500+ pages
+      let rawPages: any[] = [];
+      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=100`;
 
-      const rawPages = pagesResponse.data.data || [];
+      while (nextPageUrl) {
+        try {
+          const res: any = await axios.get(nextPageUrl);
+          if (res.data && res.data.data) {
+            rawPages = rawPages.concat(res.data.data);
+          }
+          if (res.data && res.data.paging && res.data.paging.next) {
+            nextPageUrl = res.data.paging.next;
+          } else {
+            nextPageUrl = "";
+          }
+        } catch (err: any) {
+          console.error("[FB Pages OAuth Sync] Error fetching accounts chunk:", err.response?.data || err.message);
+          nextPageUrl = "";
+        }
+      }
+
+      // Fallback if pagination loop gets empty / throws error
+      if (rawPages.length === 0) {
+        try {
+          const pagesResponse = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
+            params: { 
+              access_token: userAccessToken,
+              fields: "name,id,access_token,picture.type(large){url}",
+              limit: 100
+            }
+          });
+          rawPages = pagesResponse.data.data || [];
+        } catch (fallbackErr: any) {
+          console.error("[FB Pages OAuth Sync] Fallback me/accounts failed:", fallbackErr.response?.data || fallbackErr.message);
+        }
+      }
+
       const pages = rawPages.map((p: any) => {
         if (p.id && /^\d+$/.test(p.id)) {
           return {
