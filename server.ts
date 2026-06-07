@@ -3267,10 +3267,35 @@ async function startServer() {
 
       const db = await getDb();
       if (db) {
+        // Load existing pages and selectedPageIds from the database to merge and prevent losing access/configuration/selections
+        let mergedPages = [...pages];
+        let existingPageIdsSet = new Set(pages.map((p: any) => p.id));
+        let preservedSelectedIds: string[] = [];
+
+        try {
+          const userDocRef = db.collection("users").doc(userEmail);
+          const snap = await userDocRef.get();
+          if (snap.exists) {
+            const u = snap.data();
+            const existingFB = (workspaceId ? (u?.facebookWorkspaces?.[workspaceId] || u?.facebook) : u?.facebook) || {};
+            preservedSelectedIds = existingFB.selectedPageIds || [];
+            
+            const dbPages = existingFB.pages || [];
+            for (const dbP of dbPages) {
+              if (dbP && dbP.id && !existingPageIdsSet.has(dbP.id)) {
+                mergedPages.push(dbP);
+                existingPageIdsSet.add(dbP.id);
+              }
+            }
+          }
+        } catch (e: any) {
+          console.warn("[FB Pages Sync] Failed to read existing pages for merge:", e.message);
+        }
+
         const fbPayload = { 
           userAccessToken, 
-          pages,
-          selectedPageIds: [],
+          pages: mergedPages,
+          selectedPageIds: preservedSelectedIds,
           name: fbUserName,
           id: fbUserId
         };
@@ -3280,7 +3305,6 @@ async function startServer() {
         if (userEmail && userEmail !== "anonymous") {
           console.log(`[Firebase] Merging Facebook state directly into user document for ${userEmail}, workspace: ${workspaceId}`);
           const userDocRef = db.collection("users").doc(userEmail);
-          const snap = await userDocRef.get();
           
           const updates: any = {
             facebook: fbPayload
@@ -3289,14 +3313,14 @@ async function startServer() {
             updates[`facebookWorkspaces.${workspaceId}`] = fbPayload;
           }
 
-          if (snap.exists) {
-            await userDocRef.update(updates);
-          } else {
-            await userDocRef.set({
-              email: userEmail,
-              ...updates
-            });
-          }
+          // Use .set with { merge: true } to safely handle document and nested fields creation without Firestore schema errors
+          await userDocRef.set({
+            email: userEmail,
+            ...updates
+          }, { merge: true });
+
+          // Invalidate the cache immediately so that subsequent requests fetch the updated live configuration
+          clearFbDataCache(userEmail);
         }
       }
 
