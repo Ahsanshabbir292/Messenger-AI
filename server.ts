@@ -3192,9 +3192,9 @@ async function startServer() {
         }
       }
 
-      // 2. Get user's pages recursively to support up to 1000+ pages safely (limit=100 is perfectly supported and won't get silently truncated by FB)
+      // 2. Get user's pages recursively to support up to 10000+ pages safely (limit=400 is perfectly supported and won't get silently truncated by FB, allowing large accounts to sync in 1 request)
       let rawPages: any[] = [];
-      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=100`;
+      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=400`;
 
       let fbFetchIteration = 0;
       while (nextPageUrl && fbFetchIteration < 30) {
@@ -3225,7 +3225,7 @@ async function startServer() {
             params: { 
               access_token: userAccessToken,
               fields: "name,id,access_token,picture.type(large){url}",
-              limit: 100
+              limit: 400
             },
             timeout: 15000
           });
