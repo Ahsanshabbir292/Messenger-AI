@@ -821,17 +821,18 @@ async function startServer() {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
+    transports: ["websocket", "polling"],
     cors: {
       origin: (origin, callback) => {
-        // Echo back the origin dynamically to support credentials handshake safely
-        if (!origin) {
+        // Safe robust CORS policy supporting localhost, preview domains, and sandboxed iframe "null" origins
+        if (!origin || origin === "null") {
           callback(null, "*");
         } else {
           callback(null, origin);
         }
       },
       methods: ["GET", "POST"],
-      credentials: true
+      credentials: false
     }
   });
 
@@ -855,7 +856,7 @@ async function startServer() {
       res.setHeader("Access-Control-Allow-Origin", "*");
     }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,x-user-email,Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,x-user-email,x-workspace-id,Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
     if (req.method === "OPTIONS") {
       return res.status(200).end();
@@ -1047,6 +1048,20 @@ async function startServer() {
     return email;
   }
 
+  // Memory Cache for Facebook configuration data to solve parallel endpoint slowness
+  const fbDataCache = new Map<string, { data: any; timestamp: number }>();
+  const FB_DATA_CACHE_TTL = 8000; // 8 seconds cache (safe and handles parallel client mounting requests in one hit)
+
+  function clearFbDataCache(email: string) {
+    if (!email) return;
+    for (const key of fbDataCache.keys()) {
+      if (key.startsWith(email)) {
+        fbDataCache.delete(key);
+      }
+    }
+    console.log(`[Cache Invalidation] Cleared Facebook data cache for user: ${email}`);
+  }
+
   // Helper to fetch Facebook config from either User document or Session
   async function getFacebookData(req: any) {
     const db = await getDb();
@@ -1065,6 +1080,15 @@ async function startServer() {
       } catch (e) {}
     }
 
+    const cacheKey = `${resolvedUserEmail || "anon"}_${workspaceId || "global"}`;
+    const cached = fbDataCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < FB_DATA_CACHE_TTL)) {
+      console.log(`[Cache Hit] Serving FB data for ${cacheKey} from memory cache`);
+      return cached.data;
+    }
+
+    let result = null;
+
     if (resolvedUserEmail) {
       try {
         const userDoc = await db.collection("users").doc(resolvedUserEmail).get();
@@ -1074,16 +1098,14 @@ async function startServer() {
             // Check if workspace-specific FB connection exists
             if (workspaceId && u.facebookWorkspaces && u.facebookWorkspaces[workspaceId]) {
               console.log(`[Firebase] Loaded FB data from user document for workspace: ${workspaceId}`);
-              return u.facebookWorkspaces[workspaceId];
-            }
-            if (workspaceId && u[`facebookWorkspaces.${workspaceId}`]) {
+              result = u.facebookWorkspaces[workspaceId];
+            } else if (workspaceId && u[`facebookWorkspaces.${workspaceId}`]) {
               console.log(`[Firebase] Loaded FB data from flat legacy key for workspace: ${workspaceId}`);
-              return u[`facebookWorkspaces.${workspaceId}`];
-            }
-            // Fallback to global facebook
-            if (u.facebook) {
+              result = u[`facebookWorkspaces.${workspaceId}`];
+            } else if (u.facebook) {
+              // Fallback to global facebook
               console.log(`[Firebase] Loaded FB data from user document: ${resolvedUserEmail}`);
-              return u.facebook;
+              result = u.facebook;
             }
           }
         }
@@ -1093,25 +1115,30 @@ async function startServer() {
     }
 
     // 2. Fallback to session
-    const sessionId = req.session.fbSessionId || (resolvedUserEmail ? `fb_${resolvedUserEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
-    if (sessionId) {
-      try {
-        const sessionDoc = await db.collection("sessions").doc(sessionId).get();
-        if (sessionDoc.exists) {
-          console.log(`[Firebase] Loaded FB data from sessions collection: ${sessionId}`);
-          return sessionDoc.data();
+    if (!result) {
+      const sessionId = req.session?.fbSessionId || (resolvedUserEmail ? `fb_${resolvedUserEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
+      if (sessionId) {
+        try {
+          const sessionDoc = await db.collection("sessions").doc(sessionId).get();
+          if (sessionDoc.exists) {
+            console.log(`[Firebase] Loaded FB data from sessions collection: ${sessionId}`);
+            result = sessionDoc.data();
+          }
+        } catch (e: any) {
+          console.error(`[Firebase] Error fetching session doc for FB data: ${e.message}`);
         }
-      } catch (e: any) {
-        console.error(`[Firebase] Error fetching session doc for FB data: ${e.message}`);
       }
     }
 
-    return null;
+    if (result) {
+      fbDataCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    }
+    return result;
   }
 
   // Memory Cache for Facebook Conversations to solve performance slowness in navigation
   const fbConversationsCache = new Map<string, { data: any[]; timestamp: number }>();
-  const FB_CACHE_TTL = 30 * 1000; // 30 seconds cache lifetime
+  const FB_CACHE_TTL = 300 * 1000; // 5 minutes cache lifetime (highly optimized, invalidated automatically on message / event logs)
 
   // Helper to clear conversation list cache for a Page when new message events or replies occur
   function clearPageConversationsCache(pageId: string) {
@@ -1480,8 +1507,8 @@ async function startServer() {
       url: `https://perseus-bot.com/legal/deletion-status?id=${deletionConfirmationId}`,
       confirmation_code: deletionConfirmationId,
       message: userFound 
-        ? "Apka account aur tamam data Perseus Bot k database se permanent delete kr dya gya hai." 
-        : "Is email k sath koi account maujood nhi tha, lakin apka privacy request delete track record me record kr dya gya hai."
+        ? "Your account and all associated data have been permanently deleted from the Perseus Bot database." 
+        : "No active account was found matching this email address, but your privacy request tracker has been recorded."
     });
   });
 
@@ -1711,8 +1738,8 @@ async function startServer() {
           </div>
           
           <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; line-height: 1.6;">
-            <p style="font-size: 15px; margin-bottom: 12px;">Ayaaan / Hello <strong>${name}</strong>,</p>
-            <p style="font-size: 15px; margin-bottom: 16px;"><strong>${inviterName}</strong> has invited you to manage their customer interactions. Bhai, standard security access configuration is completed.</p>
+            <p style="font-size: 15px; margin-bottom: 12px;">Hello <strong>${name}</strong>,</p>
+            <p style="font-size: 15px; margin-bottom: 16px;"><strong>${inviterName}</strong> has invited you to manage their customer interactions. Standard security access configuration is completed.</p>
             
             <div style="background-color: #f8fafc; border-left: 4px solid #4f46e5; padding: 16px; margin: 20px 0; border-radius: 8px;">
               <span style="display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Assigned Workspace Privilege</span>
@@ -1966,7 +1993,7 @@ async function startServer() {
         code: isSimulated ? code : undefined,
         simulated: isSimulated,
         message: isSimulated 
-          ? `Bhai, verification code generated in simulation bypass mode: ${code}` 
+          ? `Verification code generated in simulation bypass mode: ${code}` 
           : "A secure verification code has been dispatched to your email address."
       });
 
@@ -2345,7 +2372,7 @@ async function startServer() {
       });
 
       console.log(`[AUTH] Password successfully updated for: ${emailLower}`);
-      res.json({ success: true, message: "Bhai, your password has been successfully updated! You can now log in using your new credentials." });
+      res.json({ success: true, message: "Your password has been successfully updated! You can now log in using your new credentials." });
 
     } catch (error: any) {
       console.error("[AUTH] Forgot password verification/reset error:", error);
@@ -2597,7 +2624,7 @@ async function startServer() {
     ].join(",");
 
     const stateValue = workspaceId ? `${userEmail}||${workspaceId}` : userEmail;
-    const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(stateValue)}`;
+    const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(stateValue)}&auth_type=rerequest`;
     
     res.json({ url: authUrl });
   });
@@ -3165,15 +3192,19 @@ async function startServer() {
         }
       }
 
-      // 2. Get user's pages recursively to support up to 500+ pages
+      // 2. Get user's pages recursively to support up to 1000+ pages safely (limit=100 is perfectly supported and won't get silently truncated by FB)
       let rawPages: any[] = [];
-      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=500`;
+      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=100`;
 
-      while (nextPageUrl) {
+      let fbFetchIteration = 0;
+      while (nextPageUrl && fbFetchIteration < 30) {
+        fbFetchIteration++;
         try {
-          const res: any = await axios.get(nextPageUrl);
+          console.log(`[FB Page Fetch Loop] Chunk #${fbFetchIteration} request start...`);
+          const res: any = await axios.get(nextPageUrl, { timeout: 20000 });
           if (res.data && res.data.data) {
             rawPages = rawPages.concat(res.data.data);
+            console.log(`[FB Page Fetch Loop] Chunk #${fbFetchIteration} successfully retrieved ${res.data.data.length} pages. Total flat list so far: ${rawPages.length} pages.`);
           }
           if (res.data && res.data.paging && res.data.paging.next) {
             nextPageUrl = res.data.paging.next;
@@ -3181,28 +3212,43 @@ async function startServer() {
             nextPageUrl = "";
           }
         } catch (err: any) {
-          console.error("[FB Pages OAuth Sync] Error fetching accounts chunk:", err.response?.data || err.message);
-          nextPageUrl = "";
+          console.error(`[FB Page Fetch Loop] Error in iteration ${fbFetchIteration}:`, err.response?.data || err.message);
+          nextPageUrl = ""; // Break out of main loop on error
         }
       }
 
-      // Fallback if pagination loop gets empty / throws error
+      // Safety Fallback query if first loop fetched absolutely nothing
       if (rawPages.length === 0) {
         try {
+          console.log("[FB Pages Fallback] Main fetch returned zero. Attempting standard fallback request...");
           const pagesResponse = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
             params: { 
               access_token: userAccessToken,
               fields: "name,id,access_token,picture.type(large){url}",
-              limit: 500
-            }
+              limit: 100
+            },
+            timeout: 15000
           });
-          rawPages = pagesResponse.data.data || [];
+          if (pagesResponse.data && pagesResponse.data.data) {
+            rawPages = pagesResponse.data.data;
+            console.log(`[FB Pages Fallback] Retrieved ${rawPages.length} pages in fallback.`);
+          }
         } catch (fallbackErr: any) {
           console.error("[FB Pages OAuth Sync] Fallback me/accounts failed:", fallbackErr.response?.data || fallbackErr.message);
         }
       }
 
-      const pages = rawPages.map((p: any) => {
+      // De-duplicate rawPages by ID to prevent overlap/redundancy across iterations
+      const uniquePagesMap = new Map();
+      for (const p of rawPages) {
+        if (p && p.id) {
+          uniquePagesMap.set(p.id, p);
+        }
+      }
+      const uniqueRawPages = Array.from(uniquePagesMap.values());
+      console.log(`[FB Pages De-duplication] Finished with ${uniqueRawPages.length} fully unique pages processed.`);
+
+      const pages = uniqueRawPages.map((p: any) => {
         if (p.id && /^\d+$/.test(p.id)) {
           return {
             ...p,
@@ -3344,7 +3390,7 @@ async function startServer() {
               </svg>
             </div>
             <h2>Facebook Connected!</h2>
-            <p>Bhai configuration complete ho chuki hai! Facebook page sahi se connect ho chuka hai aur database automatic update ho gaya hai.</p>
+            <p>Your Facebook configuration is now fully completed! The connected Facebook pages have been synchronized and the database records have been automatically updated.</p>
             
             <button onclick="closeAndReturn()" class="btn">Close Window</button>
             
@@ -3513,20 +3559,32 @@ async function startServer() {
     const data = await getFacebookData(req);
     if (!data) return res.json({ pages: [], selectedPageIds: [], trialLocked: false });
 
+    const selectedPageIds = data.selectedPageIds || [];
+
     // Dynamically map pages to use permanent public non-expiring Graph API picture URLs and true subscriber and eligible counts
     const rawPages = data.pages || [];
     const mappedPages = await Promise.all(
       rawPages.map(async (p: any) => {
-        let subscriberCount = 0;
-        let eligibleCount = 0;
+        let subscriberCount = p.subscriberCount || 0;
+        let eligibleCount = p.eligibleCount || 0;
+        
+        const isSelected = selectedPageIds.includes(p.id);
+
         if (p.access_token && p.access_token.startsWith("sim_")) {
           const simAudience = getSimulatedAudienceForPages([p]);
           subscriberCount = simAudience.length;
           eligibleCount = simAudience.filter((u: any) => u.status === "eligible").length;
-        } else if (p.access_token) {
+        } else if (p.access_token && isSelected) {
+          // Only fetch live subscriber counts for selected/active pages to avoid rate limit or excessive slowness with 200+ unselected pages
           try {
-            // Include updated_time to calculate eligible counts
-            const conversations = await fetchAllPageConversations(p.id, p.access_token, "participants{name,id},updated_time");
+            // High-Performance Optimization: limit to 100 threads for instant response
+            const conversations = await fetchAllPageConversations(
+              p.id, 
+              p.access_token, 
+              "participants{name,id},updated_time",
+              false, // bypassCache
+              100   // limitParam
+            );
             subscriberCount = conversations.length;
             eligibleCount = conversations.filter((conv: any) => {
               const lastActivity = conv.updated_time || new Date().toISOString();
@@ -3534,14 +3592,10 @@ async function startServer() {
               return diffHrs <= 24;
             }).length;
           } catch (err: any) {
-            console.warn(`Failed to fetch real conversations count for page ${p.id}, falling back to simulated sandbox data:`, err.message);
-            try {
-              const simAudience = getSimulatedAudienceForPages([p]);
-              subscriberCount = simAudience.length;
-              eligibleCount = simAudience.filter((u: any) => u.status === "eligible").length;
-            } catch (simErr: any) {
-              console.error("[FB-Fallback] Failed to generate simulated audience counts:", simErr.message);
-            }
+            console.warn(`Failed to fetch real conversations count for page ${p.id}, falling back:`, err.message);
+            // Default to 0 or mock fallback
+            subscriberCount = p.subscriberCount || 0;
+            eligibleCount = p.eligibleCount || 0;
           }
         }
 
@@ -3585,8 +3639,6 @@ async function startServer() {
     } catch (err: any) {
       console.warn("Could not load or set credits in Database:", err.message);
     }
-
-    let selectedPageIds = data.selectedPageIds || [];
 
     res.json({ 
       pages: mappedPages, 
@@ -3669,6 +3721,11 @@ async function startServer() {
       } catch (err: any) {
         console.error("Failed to update session selected pages:", err.message);
       }
+    }
+
+    // Invalidate the fast cache
+    if (userEmail) {
+      clearFbDataCache(userEmail);
     }
 
     res.json({ success: true, selectedPageIds: selectedIds });
@@ -4106,8 +4163,8 @@ async function startServer() {
           },
           messages: {
             data: [
-              { message: "Assalam o Alaikum! I need to know about your automation services price list.", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3600000).toISOString() },
-              { message: "Bhai, standard integration rates kya hain? customized options bhi hain custom logic k lye?", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3000000).toISOString() }
+              { message: "Hello! I need to know about your automation services price list.", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3600000).toISOString() },
+              { message: "What are the standard web integration rates? Are there customized options for custom business logic?", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3000000).toISOString() }
             ]
           },
           updated_time: new Date(Date.now() - 3000000).toISOString()
@@ -4680,6 +4737,11 @@ Write a realistic, short and natural response expressing your reaction, query, o
     if (!data) return res.status(401).json({ error: "Not authenticated" });
     const page = data.pages?.find((p: any) => p.id === pageId);
     if (!page) return res.status(404).json({ error: "Page not found" });
+
+    const selectedPageIds = data.selectedPageIds || [];
+    if (!selectedPageIds.includes(pageId)) {
+      return res.status(403).json({ error: "This page is not active or selected. Please select/activate this page in the 'Pages' settings tab first." });
+    }
 
     let recipients: any[] = [];
     const isSimulated = page.access_token && page.access_token.startsWith("sim_");

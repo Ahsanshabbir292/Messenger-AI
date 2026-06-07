@@ -1618,13 +1618,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   };
 
   useEffect(() => {
-    const socketUrl = (window as any).__BACKEND_URL__ || undefined;
+    const socketUrl = (window as any).__BACKEND_URL__ || window.location.origin;
     const socketOpts = {
       path: '/socket.io',
-      transports: ['polling', 'websocket'],
-      withCredentials: true
+      transports: ['websocket', 'polling'],
+      withCredentials: false
     };
-    const newSocket = socketUrl ? io(socketUrl, socketOpts) : io(socketOpts);
+    const newSocket = io(socketUrl, socketOpts);
     setSocket(newSocket);
 
     newSocket.on("connect", () => {
@@ -3269,7 +3269,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
             if (broadcastView === 'single') {
               return (
                 <BroadcastSingle
-                  pages={pages}
+                  pages={pages.filter((p: any) => selectedPageIds.includes(p.id))}
                   creditBalance={creditBalance}
                   onCancel={() => setBroadcastView('dashboard')}
                   onSubmit={handleSingleSubmit}
@@ -3281,7 +3281,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
             if (broadcastView === 'bulk') {
               return (
                 <BroadcastBulk
-                  pages={pages}
+                  pages={pages.filter((p: any) => selectedPageIds.includes(p.id))}
                   creditBalance={creditBalance}
                   onCancel={() => setBroadcastView('dashboard')}
                   onSubmit={handleBulkSubmit}
@@ -5788,7 +5788,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                    onClick={() => setIsCreateWorkspaceModalOpen(false)}
                    className="w-full py-3 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-950 transition-colors bg-transparent border-none cursor-pointer mt-1"
                  >
-                    Cancel / Wapis Jayen
+                    Cancel
                  </button>
               </div>
            </div>
@@ -5812,10 +5812,20 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
              <div className="p-4 sm:p-5 bg-amber-50 rounded-2xl border border-amber-100/60 text-amber-800 text-left text-xs sm:text-md my-5 sm:my-6 space-y-1.5 font-medium leading-relaxed">
                 <p className="font-bold text-amber-900 flex items-center gap-1.5 leading-none">
                   <span className="w-1.5 h-1.5 bg-amber-600 rounded-full inline-block animate-ping"></span>
-                  Bypass Popup Blocks (Aasan Tareeqa):
+                  Bypass Popup Blocks (Easy Way):
                 </p>
                 <p className="text-xs sm:text-sm text-amber-850 mt-1">
-                  AI Studio iframe popup window block kar deta hai. <strong>Option 1 (Direct Integration)</strong> sab se behtareen tareeqa hai jo isi tab mein connection complete kar dega!
+                  AI Studio frame automatically blocks popups. <strong>Option 1 (Direct Integration)</strong> is the recommended way to complete the connection smoothly under standard policies.
+                </p>
+             </div>
+
+             <div className="p-4 sm:p-5 bg-indigo-50 rounded-2xl border border-indigo-100/60 text-indigo-800 text-left text-xs sm:text-md mb-5 sm:mb-6 space-y-1.5 font-medium leading-relaxed">
+                <p className="font-bold text-indigo-900 flex items-center gap-1.5 leading-none">
+                  <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full inline-block animate-pulse"></span>
+                  Permissions Configuration & Select All Pages:
+                </p>
+                <p className="text-xs sm:text-sm text-indigo-850 mt-1">
+                  When the Facebook window opens, click <strong>"Edit Settings"</strong> and ensure you <strong>check/tick all your Pages</strong>. Any unchecked page cannot be synchronized as permissions are restricted.
                 </p>
              </div>
 
@@ -5851,7 +5861,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                   onClick={() => setFbSyncModalOpen(false)}
                   className="w-full py-3 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-900 transition-colors bg-transparent border-none cursor-pointer mt-1"
                 >
-                   Wapis Jayen / Cancel
+                   Cancel / Go Back
                 </button>
              </div>
           </div>

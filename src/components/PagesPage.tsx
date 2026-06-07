@@ -158,6 +158,19 @@ export const PagesPage: React.FC<PagesPageProps> = ({
           </div>
         </div>
 
+        {/* Pages Missing Help Alert */}
+        <div className="px-5 sm:px-8 py-5 bg-indigo-50/40 border-b border-indigo-100 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs">
+          <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 shrink-0">
+            <Facebook className="w-5 h-5 fill-current" />
+          </div>
+          <div>
+            <p className="font-bold text-indigo-900 text-sm">How to Synchronize All Your Facebook Pages?</p>
+            <p className="text-indigo-700/90 font-medium mt-1 leading-relaxed text-[11px] sm:text-xs">
+              If some of your pages are not listed here, click the <strong>"Sync Facebook Pages"</strong> button above. When the permissions screen opens, make sure to click <strong>"Edit Settings"</strong> and check or check-mark <strong>all of your Pages</strong>. If any page is unchecked, Facebook will hide it from being synchronized!
+            </p>
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
@@ -298,7 +311,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                             selectedPageIds.includes(p.id) 
                               ? 'bg-rose-50 text-rose-500 hover:bg-rose-100 cursor-pointer' 
                               : selectedPageIds.length >= 3
-                                ? 'bg-slate-150 text-slate-400 cursor-not-allowed border-none'
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-none'
                                 : 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95 cursor-pointer border-none'
                           }`}
                         >

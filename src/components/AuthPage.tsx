@@ -288,7 +288,7 @@ export default function AuthPage({
       } else if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/configuration-not-found') {
         setError(
           "Facebook Login is not enabled in Firebase Console yet.\n" +
-          "Bhai, enable Facebook Auth and load correct Facebook App credentials in Firebase Console: Authentication -> Sign-in method -> Add provider -> Facebook."
+          "Please enable Facebook Auth and configure the correct Facebook App credentials in Firebase Console: Authentication -> Sign-in method -> Add provider -> Facebook."
         );
       } else {
         setError(err.response?.data?.error || err.message || String(err));
@@ -389,7 +389,7 @@ export default function AuthPage({
           newPassword: forgotNewPassword
         });
 
-        setSuccessMessage(res.data.message || "Bhai, your password has been successfully reset!");
+        setSuccessMessage(res.data.message || "Your password has been successfully reset!");
         
         // Reset flows and return to signin
         setForgotEmail('');
@@ -507,7 +507,7 @@ export default function AuthPage({
                       Workspace Invitation
                     </div>
                     <p className="text-[13px] font-bold text-indigo-900 leading-normal">
-                      Bhai, <strong>{inviteData.inviter}</strong> has invited you to manage their workspace as a <strong>{inviteData.role.toUpperCase()}</strong>. Complete registration below to claim access.
+                      <strong>{inviteData.inviter}</strong> has invited you to manage their workspace as a <strong>{inviteData.role.toUpperCase()}</strong>. Complete registration below to claim access.
                     </p>
                     {onClearInvite && (
                       <button 
@@ -691,7 +691,7 @@ export default function AuthPage({
                             Email Verification Code Sent
                           </div>
                           <p className="text-[12px] font-medium leading-relaxed">
-                            Bhai, we've sent a 6-digit confirmation code to <span className="font-bold text-indigo-950">{formData.email}</span>. Enter it below to complete your registration.
+                            We've sent a 6-digit confirmation code to <span className="font-bold text-indigo-950">{formData.email}</span>. Enter it below to complete your registration.
                           </p>
                         </div>
 
@@ -810,7 +810,7 @@ export default function AuthPage({
                             Security Code Sent
                           </div>
                           <p className="text-[12px] font-medium leading-relaxed">
-                            Bhai, we've sent a 6-digit confirmation code to <span className="font-bold text-indigo-950">{forgotEmail}</span>. Enter it below along with your new password to verify and reset.
+                            We've sent a 6-digit confirmation code to <span className="font-bold text-indigo-950">{forgotEmail}</span>. Enter it below along with your new password to verify and reset.
                           </p>
                         </div>
 
