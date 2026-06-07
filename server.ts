@@ -95,12 +95,38 @@ function parseSender(fromStr: string) {
   return { name, email };
 }
 
+function isEmailSystemConfigured(): boolean {
+  const envHost = cleanEnvValue(process.env.SMTP_HOST);
+  const envUser = cleanEnvValue(process.env.SMTP_USER);
+  const envPass = cleanEnvValue(process.env.SMTP_PASS);
+  const envBrevo = cleanEnvValue(process.env.BREVO_API_KEY);
+  const envResend = cleanEnvValue(process.env.RESEND_API_KEY);
+
+  if (envBrevo && envBrevo.length > 5) return true;
+  if (envResend && envResend !== "re_MJAHZRnF_MznEWccqTu3s2nxyzjqTbKSe" && envResend.length > 5) return true;
+  if (envPass && envPass.startsWith("re_") && envPass.length > 5) return true;
+  if (envPass && (envPass.startsWith("xkeysib-") || envPass.length > 50)) return true;
+  if (envHost && envHost.toLowerCase().includes("resend")) return true;
+  if (envHost && envHost.toLowerCase().includes("brevo")) return true;
+  if (envHost && envHost.toLowerCase().includes("sendinblue")) return true;
+
+  if (envHost && envHost !== "mail.perseusbot.com" && envHost.length > 2) return true;
+  if (envUser && envUser !== "verification@perseusbot.com" && envUser.length > 2) return true;
+
+  return false;
+}
+
 async function sendMailWithFallbacks(mailOptions: {
   to: string;
   subject: string;
   text: string;
   html: string;
 }) {
+  if (!isEmailSystemConfigured()) {
+    console.log(`[EMAIL-SENDER] Sandbox environment. Bypassing outbound SMTP/API dispatch to ${mailOptions.to}. Code/link will be securely rendered inside the sandbox UI.`);
+    throw new Error("No custom email credentials are configured in workspace. Utilizing secure sandbox UI backup.");
+  }
+
   const { transporter: smtpTransporter, user: smtpUser, fromEmail: smtpFrom } = getSmtpTransporter();
 
   const errors: string[] = [];
@@ -108,7 +134,7 @@ async function sendMailWithFallbacks(mailOptions: {
   const envHost = cleanEnvValue(process.env.SMTP_HOST);
   const envPass = cleanEnvValue(process.env.SMTP_PASS);
   const brevoApiKeyEnv = cleanEnvValue(process.env.BREVO_API_KEY);
-  const resendApiKeyEnv = cleanEnvValue(process.env.RESEND_API_KEY) || "re_MJAHZRnF_MznEWccqTu3s2nxyzjqTbKSe";
+  const resendApiKeyEnv = cleanEnvValue(process.env.RESEND_API_KEY);
 
   // -------------------------------------------------------------
   // ATTEMPT 1: Brevo HTTP API (Uses port 443 - Never blocked on Cloud Run!)
@@ -157,8 +183,12 @@ async function sendMailWithFallbacks(mailOptions: {
   const isResendHost = envHost.toLowerCase().includes("resend");
 
   if (resendApiKeyEnv || isResendPass || isResendHost) {
-    const resendKey = resendApiKeyEnv || envPass;
-    const resendFrom = smtpFrom.includes("@perseusbot.com") ? '"Perseus Bot" <onboarding@resend.dev>' : smtpFrom;
+    const resendKey = resendApiKeyEnv || (isResendPass ? envPass : "") || "re_MJAHZRnF_MznEWccqTu3s2nxyzjqTbKSe";
+    let resendFrom = smtpFrom;
+    const isUsingPlaceholderResendKey = (resendKey === "re_MJAHZRnF_MznEWccqTu3s2nxyzjqTbKSe");
+    if (isUsingPlaceholderResendKey && smtpFrom.includes("@perseusbot.com")) {
+      resendFrom = '"Perseus Bot" <onboarding@resend.dev>';
+    }
     console.log(`[EMAIL-SENDER] Attempting Resend HTTP API dispatch to ${mailOptions.to} (using sender: ${resendFrom})...`);
     try {
       const response = await axios.post(
@@ -905,7 +935,10 @@ async function startServer() {
 
   // Helper to resolve the main workspace owner's email
   async function getWorkspaceOwnerEmail(req: any, db: any, userEmail: string): Promise<string> {
-    if (!userEmail || userEmail === "anonymous" || userEmail === "ahsan.shabbir292@gmail.com") {
+    if (!userEmail || userEmail === "anonymous") {
+      return "anonymous";
+    }
+    if (userEmail === "ahsan.shabbir292@gmail.com") {
       return "ahsan.shabbir292@gmail.com";
     }
 
@@ -1039,7 +1072,7 @@ async function startServer() {
     const db = await getDb();
     let email = req.session?.user?.email || req.headers['x-user-email'] || req.query?.email || req.body?.email;
     if (!email || email === "anonymous") {
-      email = "ahsan.shabbir292@gmail.com";
+      return "anonymous";
     }
     if (db) {
       const ownerEmail = await getWorkspaceOwnerEmail(req, db, email);
@@ -1071,7 +1104,7 @@ async function startServer() {
     
     // Check workspace-id
     let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
-    if (!workspaceId && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
+    if (!workspaceId && resolvedUserEmail && resolvedUserEmail !== "anonymous" && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
       try {
         const ownerDoc = await db.collection("users").doc(resolvedUserEmail).get();
         if (ownerDoc.exists) {
@@ -1089,7 +1122,7 @@ async function startServer() {
 
     let result = null;
 
-    if (resolvedUserEmail) {
+    if (resolvedUserEmail && resolvedUserEmail !== "anonymous") {
       try {
         const userDoc = await db.collection("users").doc(resolvedUserEmail).get();
         if (userDoc.exists) {
@@ -1631,9 +1664,9 @@ async function startServer() {
 
   // --- TEAM MEMBER INVITATIONS & ROSTER MANAGEMENT API ---
   app.get("/api/team/members", async (req, res) => {
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
@@ -1653,9 +1686,9 @@ async function startServer() {
 
   app.post("/api/team/invite", async (req, res) => {
     const { email, name, role, assignedPages } = req.body;
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
     if (!email || !role || !name) {
@@ -1758,14 +1791,14 @@ async function startServer() {
         </div>
       `;
 
-      if (!smtpUser) {
+      if (!isEmailSystemConfigured()) {
         console.log(`[TEAM INVITE] SUCCESS (Simulated): Invitation link for ${email}: ${inviteLink}`);
         return res.json({
           success: true,
           simulated: true,
           inviteLink,
           emailHtml,
-          message: "Invitation link generated (Simulation Mode). Use copy or direct acceptance testing below!"
+          message: "Invitation link generated (Sandbox Mode). Use copy or direct acceptance testing below!"
         });
       }
 
@@ -1981,12 +2014,16 @@ async function startServer() {
         console.log(`[AUTH] Signup verification email sent successfully to: ${emailLower}`);
         emailSentSuccessfully = true;
       } catch (mailError: any) {
-        console.error(`[AUTH] Failed to dispatch signup verification email to ${emailLower}:`, mailError);
+        if (isEmailSystemConfigured()) {
+          console.error(`[AUTH] Failed to dispatch signup verification email to ${emailLower}:`, mailError);
+        } else {
+          console.log(`[AUTH] Signup verification email bypassed (Sandbox Mode) for ${emailLower}`);
+        }
         errorReason = mailError.message || String(mailError);
       }
 
       // If mail delivery failed or no SMTP is setup, expose code in simulated bypass mode
-      const isSimulated = !smtpUser || !emailSentSuccessfully;
+      const isSimulated = !isEmailSystemConfigured() || !emailSentSuccessfully;
       
       res.json({ 
         success: true, 
@@ -2289,12 +2326,16 @@ async function startServer() {
         console.log(`[AUTH] Password reset email sent successfully to: ${emailLower}`);
         emailSentSuccessfully = true;
       } catch (mailError: any) {
-        console.error(`[AUTH] Failed to dispatch password reset email to ${emailLower}:`, mailError);
+        if (isEmailSystemConfigured()) {
+          console.error(`[AUTH] Failed to dispatch password reset email to ${emailLower}:`, mailError);
+        } else {
+          console.log(`[AUTH] Password reset email bypassed (Sandbox Mode) for ${emailLower}`);
+        }
         errorReason = mailError.message || String(mailError);
       }
 
       // If no custom SMTP user is configured or mail delivery failed, we can helper-expose the code for easy local visual copy-paste
-      const isSimulated = !smtpUser || !emailSentSuccessfully;
+      const isSimulated = !isEmailSystemConfigured() || !emailSentSuccessfully;
       
       res.json({ 
         success: true, 
@@ -2604,7 +2645,10 @@ async function startServer() {
     const host = req.headers.host;
     const currentOrigin = host ? `${protocol}://${host}` : '';
     const appUrl = process.env.APP_URL || currentOrigin;
-    const userEmail = (req.query.email || (req.session.user && req.session.user.email) || "ahsan.shabbir292@gmail.com") as string;
+    const userEmail = (req.query.email || (req.session.user && req.session.user.email) || "") as string;
+    if (!userEmail) {
+      return res.status(401).json({ error: "Unauthorized. Email parameter is required." });
+    }
     const workspaceId = (req.query.workspaceId || req.headers['x-workspace-id'] || "") as string;
     
     if (!appId || appId === "" || appId === "YOUR_FACEBOOK_APP_ID") {
@@ -2631,7 +2675,7 @@ async function startServer() {
 
   // Gorgeous Facebook Connection Simulator (Sandbox Mode)
   app.get("/auth/facebook/simulate", (req, res) => {
-    const userEmail = (req.query.email || "ahsan.shabbir292@gmail.com") as string;
+    const userEmail = (req.query.email || req.session?.user?.email || "sandbox_user@gmail.com") as string;
     const workspaceId = (req.query.workspaceId || "") as string;
     
     res.send(`
@@ -2886,7 +2930,7 @@ async function startServer() {
     const fbName = req.body.fb_name as string || "Ahsan Shabbir";
 
     if (!userEmail) {
-      userEmail = req.session?.user?.email || "ahsan.shabbir292@gmail.com";
+      userEmail = req.session?.user?.email || "sandbox_user@gmail.com";
     }
     
     // Read selected checkboxes
@@ -3168,19 +3212,23 @@ async function startServer() {
         console.warn("[FB] Error fetching profile /me details during callback:", err.response?.data || err.message);
       }
 
-      let userEmail = "ahsan.shabbir292@gmail.com";
+      let userEmail = "";
       let workspaceId = "";
       const stateStr = state ? (state as string) : "";
       if (stateStr.includes("||")) {
         const parts = stateStr.split("||");
-        userEmail = parts[0] || userEmail;
+        userEmail = parts[0] || "";
         workspaceId = parts[1] || "";
       } else if (stateStr) {
         userEmail = stateStr;
       }
 
       if (!userEmail || userEmail === "anonymous") {
-        userEmail = "ahsan.shabbir292@gmail.com";
+        userEmail = req.session?.user?.email || "";
+      }
+
+      if (!userEmail) {
+        return res.status(400).send("Authentication state expired or missing user context.");
       }
 
       // Check duplicates for real Facebook User ID
@@ -3192,16 +3240,16 @@ async function startServer() {
         }
       }
 
-      // 2. Get user's pages recursively to support up to 10000+ pages safely (limit=400 is perfectly supported and won't get silently truncated by FB, allowing large accounts to sync in 1 request)
+      // 2. Get user's pages recursively to support up to 10000+ pages safely (fields=name,id,access_token is supported globally and 100% reliable)
       let rawPages: any[] = [];
-      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,picture.type(large){url}&limit=400`;
+      let nextPageUrl = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token&limit=250`;
 
       let fbFetchIteration = 0;
-      while (nextPageUrl && fbFetchIteration < 30) {
+      while (nextPageUrl && fbFetchIteration < 40) {
         fbFetchIteration++;
         try {
           console.log(`[FB Page Fetch Loop] Chunk #${fbFetchIteration} request start...`);
-          const res: any = await axios.get(nextPageUrl, { timeout: 20000 });
+          const res: any = await axios.get(nextPageUrl, { timeout: 25000 });
           if (res.data && res.data.data) {
             rawPages = rawPages.concat(res.data.data);
             console.log(`[FB Page Fetch Loop] Chunk #${fbFetchIteration} successfully retrieved ${res.data.data.length} pages. Total flat list so far: ${rawPages.length} pages.`);
@@ -3224,8 +3272,8 @@ async function startServer() {
           const pagesResponse = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
             params: { 
               access_token: userAccessToken,
-              fields: "name,id,access_token,picture.type(large){url}",
-              limit: 400
+              fields: "name,id,access_token",
+              limit: 250
             },
             timeout: 15000
           });
@@ -3521,14 +3569,14 @@ async function startServer() {
       try {
         const resolvedUserEmail = await getResolvedUserEmail(req);
         let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
-        if (!workspaceId && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
+        if (!workspaceId && resolvedUserEmail && resolvedUserEmail !== "anonymous" && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
           const ownerDoc = await db.collection("users").doc(resolvedUserEmail).get();
           if (ownerDoc.exists) {
             workspaceId = ownerDoc.data()?.workspaceId;
           }
         }
         
-        if (resolvedUserEmail) {
+        if (resolvedUserEmail && resolvedUserEmail !== "anonymous") {
           const userDocRef = db.collection("users").doc(resolvedUserEmail);
           const userDoc = await userDocRef.get();
           if (userDoc.exists) {
@@ -3643,9 +3691,9 @@ async function startServer() {
       })
     );
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
     let credits = 5000.00;
@@ -3927,9 +3975,9 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
     try {
@@ -4007,9 +4055,9 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
     try {
@@ -4082,9 +4130,9 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
     try {
@@ -4141,9 +4189,9 @@ async function startServer() {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
+    const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
     try {

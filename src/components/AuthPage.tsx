@@ -148,6 +148,8 @@ export default function AuthPage({
           email: finalEmail,
           fullName: registeredUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
           workspaceId: registeredUser?.workspaceId,
+          workspaceName: registeredUser?.workspaceName || `${registeredUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User")}'s Workspace`,
+          workspaces: registeredUser?.workspaces || (registeredUser?.workspaceId ? [{ id: registeredUser.workspaceId, name: registeredUser?.workspaceName || "My Workspace" }] : []),
           role: registeredUser?.role || "admin"
         };
 
@@ -230,6 +232,8 @@ export default function AuthPage({
         email: finalEmail,
         fullName: loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
         workspaceId: loggedUser?.workspaceId,
+        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User")}'s Workspace`,
+        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
         role: loggedUser?.role || "admin"
       };
 
@@ -275,6 +279,8 @@ export default function AuthPage({
         email: loggedUser?.email || finalEmail,
         fullName: loggedUser?.fullName || facebookFullName,
         workspaceId: loggedUser?.workspaceId,
+        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || facebookFullName}'s Workspace`,
+        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
         role: loggedUser?.role || "admin"
       };
 
@@ -314,6 +320,8 @@ export default function AuthPage({
         email: finalEmail,
         fullName: loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
         workspaceId: loggedUser?.workspaceId,
+        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User")}'s Workspace`,
+        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
         role: loggedUser?.role || "admin"
       };
 
