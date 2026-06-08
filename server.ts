@@ -923,7 +923,7 @@ async function startServer() {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
-    transports: ["websocket", "polling"],
+    transports: ["polling", "websocket"],
     cors: {
       origin: (origin, callback) => {
         // Safe robust CORS policy supporting localhost, preview domains, and sandboxed iframe "null" origins
@@ -1015,9 +1015,19 @@ async function startServer() {
       return "ahsan.shabbir292@gmail.com";
     }
 
+    // 0. Super fast track: Check session user object directly
+    if (req.session?.user && req.session.user.email === userEmail) {
+      if (req.session.user.inviterEmail) {
+        return req.session.user.inviterEmail.toLowerCase().trim();
+      }
+      if (req.session.ownerEmail) {
+        return String(req.session.ownerEmail).toLowerCase().trim();
+      }
+    }
+
     // 1. Check if already resolved in session
     if (req.session?.user && req.session.user.email === userEmail && req.session.ownerEmail) {
-      return req.session.ownerEmail;
+      return String(req.session.ownerEmail).toLowerCase().trim();
     }
 
     try {
@@ -1031,11 +1041,13 @@ async function startServer() {
           if (req.session?.user && req.session.user.email === userEmail) {
             req.session.ownerEmail = uData.inviterEmail;
           }
-          return uData.inviterEmail;
+          return uData.inviterEmail.toLowerCase().trim();
         }
 
-        // If they are an owner or have no role, they are the owner
-        if (!uData?.role || uData.role === 'owner') {
+        // If they are explicitly 'owner', we treat them as owner.
+        // If they have role 'member', or have no role property populated, we DO NOT exit here.
+        // We let subsequent checks (invitations and roster scans) trace who their owner actually is first.
+        if (uData?.role === 'owner') {
           if (req.session?.user && req.session.user.email === userEmail) {
             req.session.ownerEmail = userEmail;
           }
@@ -1049,14 +1061,16 @@ async function startServer() {
         const inviteData = inviteDoc.data();
         if (inviteData?.inviterEmail) {
           // Auto-heal user document in DB
-          await db.collection("users").doc(userEmail).update({
-            inviterEmail: inviteData.inviterEmail,
-            workspaceId: inviteData.inviterWorkspaceId || "ws_default"
-          });
+          if (db) {
+            await db.collection("users").doc(userEmail).set({
+              inviterEmail: inviteData.inviterEmail,
+              workspaceId: inviteData.inviterWorkspaceId || "ws_default"
+            }, { merge: true });
+          }
           if (req.session?.user && req.session.user.email === userEmail) {
             req.session.ownerEmail = inviteData.inviterEmail;
           }
-          return inviteData.inviterEmail;
+          return inviteData.inviterEmail.toLowerCase().trim();
         }
       }
 
@@ -1070,15 +1084,17 @@ async function startServer() {
             const wsId = u.workspaceId || "ws_default";
             
             // Auto-heal
-            await db.collection("users").doc(userEmail).update({
-              inviterEmail: ownerEmail,
-              workspaceId: wsId
-            });
+            if (db) {
+              await db.collection("users").doc(userEmail).set({
+                inviterEmail: ownerEmail,
+                workspaceId: wsId
+              }, { merge: true });
+            }
 
             if (req.session?.user && req.session.user.email === userEmail) {
               req.session.ownerEmail = ownerEmail;
             }
-            return ownerEmail;
+            return ownerEmail.toLowerCase().trim();
           }
         }
       }
@@ -1108,24 +1124,42 @@ async function startServer() {
         }
       }
 
-      // If they are an invited user (have inviterEmail), load workspace properties from the inviter/owner
-      const targetEmail = userObj.inviterEmail || (userObj.role && userObj.role !== 'owner' ? await getWorkspaceOwnerEmail(req, db, emailLower) : null);
+      // Correctly load workspace properties from the inviter/owner if we can resolve one
+      const resolvedOwner = await getWorkspaceOwnerEmail(req, db, emailLower);
+      const targetEmail = userObj.inviterEmail || (resolvedOwner && resolvedOwner !== emailLower ? resolvedOwner : null);
       if (targetEmail && targetEmail !== emailLower) {
         const ownerDoc = await db.collection("users").doc(targetEmail).get();
         if (ownerDoc.exists) {
           const ownerData = ownerDoc.data();
           if (ownerData) {
             userObj.workspaceName = ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`;
+            
+            // Resolve owner's active workspace ID reliably
+            let ownerWsId = ownerData.workspaceId;
+            if (!ownerWsId || ownerWsId === "ws_default") {
+              if (ownerData.facebookWorkspaces && typeof ownerData.facebookWorkspaces === "object") {
+                const keys = Object.keys(ownerData.facebookWorkspaces);
+                if (keys.length > 0) {
+                  ownerWsId = keys[0];
+                }
+              }
+              ownerWsId = ownerWsId || "1";
+            }
+
             // Crucial: copy the owner's configured workspaces list to this team member's session so the UI matches perfectly!
             if (ownerData.workspaces && Array.isArray(ownerData.workspaces) && ownerData.workspaces.length > 0) {
               userObj.workspaces = ownerData.workspaces;
             } else {
               userObj.workspaces = [
-                { id: userObj.workspaceId || ownerData.workspaceId || '1', name: userObj.workspaceName }
+                { id: ownerWsId, name: userObj.workspaceName }
               ];
             }
-            // Double check: align active workspaceId
-            userObj.workspaceId = userObj.workspaceId || ownerData.workspaceId || "ws_default";
+            
+            // Align active workspaceId
+            userObj.workspaceId = ownerWsId;
+
+            // Auto-heal member's workspaceId to always point directly to the owner's resolved workspace key
+            await db.collection("users").doc(emailLower).set({ workspaceId: ownerWsId }, { merge: true });
           }
         }
       } else {
@@ -1135,14 +1169,29 @@ async function startServer() {
           const uCurrent = userDocCurrent.data();
           if (uCurrent) {
             userObj.workspaceName = uCurrent.workspaceName || `${uCurrent.fullName || emailLower}'s Workspace`;
+            
+            let activeWsId = uCurrent.workspaceId;
+            if (!activeWsId || activeWsId === "ws_default") {
+              if (uCurrent.facebookWorkspaces && typeof uCurrent.facebookWorkspaces === "object") {
+                const keys = Object.keys(uCurrent.facebookWorkspaces);
+                if (keys.length > 0) {
+                  activeWsId = keys[0];
+                }
+              }
+              activeWsId = activeWsId || "1";
+              
+              // Auto-heal the owner's document in the DB so that workspaceId is persistently set to this!
+              await db.collection("users").doc(emailLower).set({ workspaceId: activeWsId }, { merge: true });
+            }
+
             if (uCurrent.workspaces && Array.isArray(uCurrent.workspaces) && uCurrent.workspaces.length > 0) {
               userObj.workspaces = uCurrent.workspaces;
             } else {
               userObj.workspaces = [
-                { id: uCurrent.workspaceId || '1', name: userObj.workspaceName }
+                { id: activeWsId, name: userObj.workspaceName }
               ];
             }
-            userObj.workspaceId = uCurrent.workspaceId || "ws_default";
+            userObj.workspaceId = activeWsId;
           }
         }
       }
@@ -1184,7 +1233,17 @@ async function startServer() {
             // Load and rewrite workspace ID to owner's workspace ID
             const ownerDoc = await db.collection("users").doc(ownerEmail).get();
             if (ownerDoc.exists) {
-              const wsId = ownerDoc.data()?.workspaceId || "ws_default";
+              const ownerData = ownerDoc.data();
+              let wsId = ownerData?.workspaceId;
+              if (!wsId || wsId === "ws_default") {
+                if (ownerData?.facebookWorkspaces && typeof ownerData.facebookWorkspaces === "object") {
+                  const keys = Object.keys(ownerData.facebookWorkspaces);
+                  if (keys.length > 0) {
+                    wsId = keys[0];
+                  }
+                }
+                wsId = wsId || "1";
+              }
               req.headers['x-workspace-id'] = wsId;
               if (req.query.workspaceId) {
                 req.query.workspaceId = wsId;
@@ -1238,15 +1297,42 @@ async function startServer() {
 
     const resolvedUserEmail = await getResolvedUserEmail(req);
     
+    // Resolve requester's real email to find their registered workspace ID
+    const realUserEmail = req.session?.user?.email || req.headers['x-user-email'] || req.query?.email || req.body?.email;
+    
     // Check workspace-id
     let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
-    if (!workspaceId && resolvedUserEmail && resolvedUserEmail !== "anonymous" && resolvedUserEmail !== "ahsan.shabbir292@gmail.com") {
+    if (!workspaceId) {
+      workspaceId = req.session?.user?.workspaceId;
+    }
+    if ((!workspaceId || workspaceId === "ws_default") && realUserEmail && realUserEmail !== "anonymous") {
+      try {
+        const docSnap = await db.collection("users").doc(String(realUserEmail).toLowerCase().trim()).get();
+        if (docSnap.exists) {
+          const ud = docSnap.data();
+          workspaceId = ud?.workspaceId;
+          if ((!workspaceId || workspaceId === "ws_default") && ud?.facebookWorkspaces && typeof ud.facebookWorkspaces === "object") {
+            const keys = Object.keys(ud.facebookWorkspaces);
+            if (keys.length > 0) workspaceId = keys[0];
+          }
+        }
+      } catch (e) {}
+    }
+    if ((!workspaceId || workspaceId === "ws_default") && resolvedUserEmail && resolvedUserEmail !== "anonymous") {
       try {
         const ownerDoc = await db.collection("users").doc(resolvedUserEmail).get();
         if (ownerDoc.exists) {
-          workspaceId = ownerDoc.data()?.workspaceId;
+          const od = ownerDoc.data();
+          workspaceId = od?.workspaceId;
+          if ((!workspaceId || workspaceId === "ws_default") && od?.facebookWorkspaces && typeof od.facebookWorkspaces === "object") {
+            const keys = Object.keys(od.facebookWorkspaces);
+            if (keys.length > 0) workspaceId = keys[0];
+          }
         }
       } catch (e) {}
+    }
+    if (!workspaceId || workspaceId === "ws_default") {
+      workspaceId = "1";
     }
 
     const cacheKey = `${resolvedUserEmail || "anon"}_${workspaceId || "global"}`;
@@ -1256,7 +1342,8 @@ async function startServer() {
       return cached.data;
     }
 
-    let result = null;
+    let workspaceConfig: any = null;
+    let baseFbData: any = null;
 
     if (resolvedUserEmail && resolvedUserEmail !== "anonymous") {
       try {
@@ -1264,17 +1351,46 @@ async function startServer() {
         if (userDoc.exists) {
           const u = userDoc.data();
           if (u) {
-            // Check if workspace-specific FB connection exists
+            // 1. Resolve workspace-specific configuration (e.g. page selection lists)
             if (workspaceId && u.facebookWorkspaces && u.facebookWorkspaces[workspaceId]) {
-              console.log(`[Firebase] Loaded FB data from user document for workspace: ${workspaceId}`);
-              result = u.facebookWorkspaces[workspaceId];
+              workspaceConfig = u.facebookWorkspaces[workspaceId];
             } else if (workspaceId && u[`facebookWorkspaces.${workspaceId}`]) {
-              console.log(`[Firebase] Loaded FB data from flat legacy key for workspace: ${workspaceId}`);
-              result = u[`facebookWorkspaces.${workspaceId}`];
-            } else if (u.facebook) {
-              // Fallback to global facebook
-              console.log(`[Firebase] Loaded FB data from user document: ${resolvedUserEmail}`);
-              result = u.facebook;
+              workspaceConfig = u[`facebookWorkspaces.${workspaceId}`];
+            }
+
+            // 2. Resolve base Facebook pages & credentials from global/user doc
+            if (u.facebook && Array.isArray(u.facebook.pages) && u.facebook.pages.length > 0) {
+              baseFbData = u.facebook;
+            }
+
+            // 3. Robust dynamic scanning fallback: if still not loaded, scan owner's workspace dictionary for ANY connected FB pages
+            if ((!baseFbData || !baseFbData.pages || baseFbData.pages.length === 0) && (!workspaceConfig || !workspaceConfig.pages || workspaceConfig.pages.length === 0)) {
+              if (u.facebookWorkspaces && typeof u.facebookWorkspaces === "object") {
+                for (const key of Object.keys(u.facebookWorkspaces)) {
+                  const fbConfig = u.facebookWorkspaces[key];
+                  if (fbConfig && Array.isArray(fbConfig.pages) && fbConfig.pages.length > 0) {
+                    console.log(`[FB-Fallback] Found connected fb pages under workspace ID key: ${key}`);
+                    workspaceConfig = fbConfig;
+                    baseFbData = fbConfig;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // 4. Robust flat roots scan fallback
+            if ((!baseFbData || !baseFbData.pages || baseFbData.pages.length === 0) && (!workspaceConfig || !workspaceConfig.pages || workspaceConfig.pages.length === 0)) {
+              for (const key of Object.keys(u)) {
+                if (key.startsWith("facebookWorkspaces.")) {
+                  const fbConfig = u[key];
+                  if (fbConfig && Array.isArray(fbConfig.pages) && fbConfig.pages.length > 0) {
+                    console.log(`[FB-Fallback] Found connected fb pages under flat root key: ${key}`);
+                    workspaceConfig = fbConfig;
+                    baseFbData = fbConfig;
+                    break;
+                  }
+                }
+              }
             }
           }
         }
@@ -1283,20 +1399,33 @@ async function startServer() {
       }
     }
 
-    // 2. Fallback to session
-    if (!result) {
+    // 5. Fallback: Load base Facebook pages & credentials from sessions collection if not found in userDoc
+    if (!baseFbData || !baseFbData.pages || baseFbData.pages.length === 0) {
       const sessionId = req.session?.fbSessionId || (resolvedUserEmail ? `fb_${resolvedUserEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
       if (sessionId) {
         try {
           const sessionDoc = await db.collection("sessions").doc(sessionId).get();
           if (sessionDoc.exists) {
-            console.log(`[Firebase] Loaded FB data from sessions collection: ${sessionId}`);
-            result = sessionDoc.data();
+            console.log(`[Firebase] Loaded base FB data from sessions collection: ${sessionId}`);
+            baseFbData = sessionDoc.data();
           }
         } catch (e: any) {
           console.error(`[Firebase] Error fetching session doc for FB data: ${e.message}`);
         }
       }
+    }
+
+    // 6. Intelligently merge so active selected page configurations are retained without hiding connected pages array or tokens
+    let result = null;
+    if (baseFbData) {
+      result = {
+        ...baseFbData,
+        selectedPageIds: (workspaceConfig && Array.isArray(workspaceConfig.selectedPageIds) && workspaceConfig.selectedPageIds.length > 0)
+          ? workspaceConfig.selectedPageIds
+          : (baseFbData.selectedPageIds || [])
+      };
+    } else if (workspaceConfig) {
+      result = workspaceConfig;
     }
 
     if (result) {
@@ -3446,10 +3575,10 @@ async function startServer() {
       // 2. Get user's pages recursively, handling full pagination (cursors/offsets) to support fetching all pages regardless of total count
       let rawPages: any[] = [];
       let hasNext = true;
-      let nextUrl: string | null = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token&limit=250`;
+      let nextUrl: string | null = `https://graph.facebook.com/v19.0/me/accounts?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token&limit=100`;
       let afterCursor: string | null = null;
       let offset = 0;
-      const limit = 250;
+      const limit = 100;
       let fbFetchIteration = 0;
 
       while (hasNext && fbFetchIteration < 1500) { // High pagination limit to fetch all available pages safely
@@ -3544,6 +3673,70 @@ async function startServer() {
             }
           }
           hasNext = false; // Stop recursive search on subsequent failures
+        }
+      }
+
+      // Facebook Direct Page Fetch Fallback: Call debug_token to find ALL authorized Page IDs from granular_scopes
+      if (appId && appSecret) {
+        try {
+          console.log("[FB Pages Direct Fetch Fallback] Calling debug_token to resolve any missing pages authorized in OAuth popup...");
+          const debugRes = await axios.get(`https://graph.facebook.com/debug_token`, {
+            params: {
+              input_token: userAccessToken,
+              access_token: `${appId}|${appSecret}`
+            },
+            timeout: 15000
+          });
+          
+          const granularScopes = debugRes.data?.data?.granular_scopes || [];
+          const authorizedPageIds = new Set<string>();
+          
+          for (const s of granularScopes) {
+            if (s.scope === "pages_show_list" && Array.isArray(s.target_ids)) {
+              for (const id of s.target_ids) {
+                if (id) {
+                  authorizedPageIds.add(String(id));
+                }
+              }
+            }
+          }
+          
+          console.log(`[FB Pages Direct Fetch Fallback] Found ${authorizedPageIds.size} authorized Page IDs in token scopes.`);
+          
+          if (authorizedPageIds.size > 0) {
+            const rawPagesIds = new Set(rawPages.map((p: any) => String(p.id)));
+            const missingPageIds = Array.from(authorizedPageIds).filter(id => !rawPagesIds.has(id));
+            
+            if (missingPageIds.length > 0) {
+              console.log(`[FB Pages Direct Fetch Fallback] Found ${missingPageIds.length} missing page IDs. Fetching them directly...`);
+              
+              const directFetchPromises = missingPageIds.map(async (pageId) => {
+                try {
+                  const pageUrl = `https://graph.facebook.com/v19.0/${pageId}?access_token=${encodeURIComponent(userAccessToken)}&fields=name,id,access_token,category,is_published`;
+                  const pageRes = await axios.get(pageUrl, { timeout: 15000 });
+                  if (pageRes.data && pageRes.data.id) {
+                    console.log(`[FB Pages Direct Fetch Fallback] Successfully fetched missing page: ${pageRes.data.name} (${pageId})`);
+                    return pageRes.data;
+                  }
+                } catch (pageErr: any) {
+                  console.error(`[FB Pages Direct Fetch Fallback] Direct fetch failed for page ID ${pageId}:`, pageErr.response?.data || pageErr.message);
+                }
+                return null;
+              });
+              
+              const directFetchedPages = await Promise.all(directFetchPromises);
+              const validDirectPages = directFetchedPages.filter((p: any) => p !== null);
+              
+              if (validDirectPages.length > 0) {
+                console.log(`[FB Pages Direct Fetch Fallback] Retrieved ${validDirectPages.length} of ${missingPageIds.length} missing pages. Adding to collection.`);
+                rawPages = rawPages.concat(validDirectPages);
+              }
+            } else {
+              console.log("[FB Pages Direct Fetch Fallback] No missing pages identified. All authorized pages retrieved via me/accounts.");
+            }
+          }
+        } catch (debugErr: any) {
+          console.error("[FB Pages Direct Fetch Fallback] Error in debug_token fallback workflow:", debugErr.response?.data || debugErr.message);
         }
       }
 

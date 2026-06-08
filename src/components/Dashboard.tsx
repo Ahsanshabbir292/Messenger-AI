@@ -1189,6 +1189,53 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     }
   }, []);
 
+  const validateWorkspaceMembership = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/auth/me');
+      if (res.data && res.data.user) {
+        const freshUser = res.data.user;
+        
+        let freshWorkspaces: Workspace[] = [];
+        if (freshUser.workspaces && Array.isArray(freshUser.workspaces) && freshUser.workspaces.length > 0) {
+          freshWorkspaces = freshUser.workspaces;
+        } else if (freshUser.workspaceName) {
+          freshWorkspaces = [{ id: freshUser.workspaceId || '1', name: freshUser.workspaceName }];
+        }
+
+        if (freshWorkspaces.length > 0) {
+          setWorkspaces((prevWorkspaces) => {
+            const currentWSJson = JSON.stringify(prevWorkspaces);
+            const freshWSJson = JSON.stringify(freshWorkspaces);
+            if (currentWSJson !== freshWSJson) {
+              console.log("[Workspace Sync] Synchronizing workspace configuration with database server...");
+              return freshWorkspaces;
+            }
+            return prevWorkspaces;
+          });
+
+          setCurrentWorkspaceId((prevId) => {
+            if (freshUser.workspaceId && freshWorkspaces.some(w => w.id === freshUser.workspaceId)) {
+              if (prevId !== freshUser.workspaceId) {
+                console.log(`[Workspace Sync] Switch current workspace ID from '${prevId}' to matching verified '${freshUser.workspaceId}'`);
+                return freshUser.workspaceId;
+              }
+            } else if (freshWorkspaces.some(w => w.id === prevId)) {
+              return prevId;
+            } else if (prevId !== freshWorkspaces[0].id) {
+              console.log(`[Workspace Sync] Active selection invalid; defaulting to first available: '${freshWorkspaces[0].id}'`);
+              return freshWorkspaces[0].id;
+            }
+            return prevId;
+          });
+        }
+        
+        localStorage.setItem('current_app_user', JSON.stringify(freshUser));
+      }
+    } catch (err: any) {
+      console.error("[Workspace Sync] Failed to validate workspace membership:", err);
+    }
+  }, []);
+
   const getConversations = async (pageId: string, forceRefresh: boolean = false, showLoader: boolean = true) => {
     if (showLoader) setIsLoading(true);
     try {
@@ -1664,7 +1711,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     const socketUrl = (window as any).__BACKEND_URL__ || window.location.origin;
     const socketOpts = {
       path: '/socket.io',
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       withCredentials: false
     };
     const newSocket = io(socketUrl, socketOpts);
@@ -1675,7 +1722,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     });
 
     newSocket.on("connect_error", (error) => {
-      console.error("[Socket Realtime] Connection error:", error);
+      console.warn("[Socket Realtime] Connection warning (auto-falling back to resilient HTTPS polling...):", error.message || error);
     });
 
     newSocket.on("new_message", (data) => {
@@ -1740,11 +1787,13 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
     } else {
       delete axios.defaults.headers.common['x-workspace-id'];
     }
+    validateWorkspaceMembership();
     getPages();
     getUserProfile();
     
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'FB_AUTH_SUCCESS') {
+        validateWorkspaceMembership();
         getPages();
         getUserProfile();
       } else if (event.data?.type === 'FB_AUTH_ERROR') {
@@ -1758,6 +1807,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
           const data = JSON.parse(event.newValue);
           // Only trigger if it's recent (less than 15 seconds old) to avoid stale triggers
           if (data && Date.now() - data.timestamp < 15000) {
+            validateWorkspaceMembership();
             getPages();
             getUserProfile();
             // Clear the storage item so it won't trigger continuously 
@@ -1786,7 +1836,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [getPages, getUserProfile, currentWorkspaceId]);
+  }, [getPages, getUserProfile, validateWorkspaceMembership, currentWorkspaceId]);
 
   useEffect(() => {
     if (socket) {
