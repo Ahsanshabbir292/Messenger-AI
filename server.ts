@@ -1090,6 +1090,68 @@ async function startServer() {
     return userEmail;
   }
 
+  // Helper to dynamically enrich user objects with workspace configuration in the session
+  async function enrichUserWithWorkspace(db: any, userObj: any, req: any) {
+    if (!userObj || !db) return userObj;
+    try {
+      const emailLower = String(userObj.email).toLowerCase().trim();
+      
+      // Look up their true document to see if they have inviterEmail or workspaceId
+      const userDoc = await db.collection("users").doc(emailLower).get();
+      if (userDoc.exists) {
+        const uData = userDoc.data();
+        if (uData) {
+          userObj.workspaceId = uData.workspaceId || userObj.workspaceId || "ws_default";
+          userObj.inviterEmail = uData.inviterEmail || userObj.inviterEmail || null;
+          userObj.role = uData.role || userObj.role || "member";
+          userObj.assignedPages = uData.assignedPages || userObj.assignedPages || [];
+        }
+      }
+
+      // If they are an invited user (have inviterEmail), load workspace properties from the inviter/owner
+      const targetEmail = userObj.inviterEmail || (userObj.role && userObj.role !== 'owner' ? await getWorkspaceOwnerEmail(req, db, emailLower) : null);
+      if (targetEmail && targetEmail !== emailLower) {
+        const ownerDoc = await db.collection("users").doc(targetEmail).get();
+        if (ownerDoc.exists) {
+          const ownerData = ownerDoc.data();
+          if (ownerData) {
+            userObj.workspaceName = ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`;
+            // Crucial: copy the owner's configured workspaces list to this team member's session so the UI matches perfectly!
+            if (ownerData.workspaces && Array.isArray(ownerData.workspaces) && ownerData.workspaces.length > 0) {
+              userObj.workspaces = ownerData.workspaces;
+            } else {
+              userObj.workspaces = [
+                { id: userObj.workspaceId || ownerData.workspaceId || '1', name: userObj.workspaceName }
+              ];
+            }
+            // Double check: align active workspaceId
+            userObj.workspaceId = userObj.workspaceId || ownerData.workspaceId || "ws_default";
+          }
+        }
+      } else {
+        // This is the owner themselves or a standalone user. Let's make sure they have a cohesive workspaces array:
+        const userDocCurrent = await db.collection("users").doc(emailLower).get();
+        if (userDocCurrent.exists) {
+          const uCurrent = userDocCurrent.data();
+          if (uCurrent) {
+            userObj.workspaceName = uCurrent.workspaceName || `${uCurrent.fullName || emailLower}'s Workspace`;
+            if (uCurrent.workspaces && Array.isArray(uCurrent.workspaces) && uCurrent.workspaces.length > 0) {
+              userObj.workspaces = uCurrent.workspaces;
+            } else {
+              userObj.workspaces = [
+                { id: uCurrent.workspaceId || '1', name: userObj.workspaceName }
+              ];
+            }
+            userObj.workspaceId = uCurrent.workspaceId || "ws_default";
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error("[enrichUserWithWorkspace] Error:", e.message);
+    }
+    return userObj;
+  }
+
   // Middleware to auto-intercept and augment request context for team members/invited users
   app.use(async (req: any, res: any, next: any) => {
     // Exclude basic auth/registration endpoints
@@ -1689,6 +1751,9 @@ async function startServer() {
     }
 
     if (req.session.user) {
+      if (db) {
+        req.session.user = await enrichUserWithWorkspace(db, req.session.user, req);
+      }
       res.json({ user: req.session.user });
     } else {
       res.status(401).json({ error: "Not authenticated" });
@@ -1738,11 +1803,16 @@ async function startServer() {
       // Cleanup password from response
       const { password: _, ...userWithoutPassword } = user;
       
+      let enrichedUser = userWithoutPassword;
+      if (db) {
+        enrichedUser = await enrichUserWithWorkspace(db, enrichedUser, req);
+      }
+
       // Store in session
-      req.session.user = userWithoutPassword;
+      req.session.user = enrichedUser;
       
       console.log(`[AUTH] Signin successful for: ${emailLower}`);
-      res.json({ success: true, user: userWithoutPassword });
+      res.json({ success: true, user: enrichedUser });
     } catch (err: any) {
       console.error("[AUTH] Signin database error:", err);
       res.status(500).json({ error: formatDbError(err) });
@@ -1777,8 +1847,12 @@ async function startServer() {
       const updatedData = updatedDoc.data();
       if (updatedData) {
         const { password, ...userWithoutPassword } = updatedData;
-        req.session.user = userWithoutPassword;
-        return res.json({ success: true, user: userWithoutPassword });
+        let enrichedUser = userWithoutPassword;
+        if (db) {
+          enrichedUser = await enrichUserWithWorkspace(db, enrichedUser, req);
+        }
+        req.session.user = enrichedUser;
+        return res.json({ success: true, user: enrichedUser });
       }
       return res.json({ success: true });
     } catch (err: any) {
@@ -2024,9 +2098,13 @@ async function startServer() {
 
       // Login the user in session
       const { password: _, ...userWithoutPassword } = userData;
-      req.session.user = userWithoutPassword;
+      let enrichedUser = userWithoutPassword;
+      if (db) {
+        enrichedUser = await enrichUserWithWorkspace(db, enrichedUser, req);
+      }
+      req.session.user = enrichedUser;
 
-      res.json({ success: true, user: userWithoutPassword });
+      res.json({ success: true, user: enrichedUser });
     } catch (err: any) {
       console.error("[Verify and Register Error]:", err);
       res.status(500).json({ error: "Register process error: " + err.message });

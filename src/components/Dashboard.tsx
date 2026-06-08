@@ -323,7 +323,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       return appUser.workspaces;
     }
     if (appUser?.workspaceName) {
-      return [{ id: '1', name: appUser.workspaceName }];
+      return [{ id: appUser.workspaceId || '1', name: appUser.workspaceName }];
     }
     try {
       const saved = localStorage.getItem('current_app_user');
@@ -334,7 +334,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
             return parsed.workspaces;
           }
           if (parsed.workspaceName) {
-            return [{ id: '1', name: parsed.workspaceName }];
+            return [{ id: parsed.workspaceId || '1', name: parsed.workspaceName }];
           }
         }
       }
@@ -344,15 +344,25 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       { id: '2', name: 'Microphone Hub' },
     ];
   });
-  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(workspaces[0]?.id || '1');
+  const [currentWorkspaceId, setCurrentWorkspaceId] = useState(() => {
+    if (appUser?.workspaceId) return appUser.workspaceId;
+    return workspaces[0]?.id || '1';
+  });
 
   useEffect(() => {
     if (appUser?.workspaces && Array.isArray(appUser.workspaces) && appUser.workspaces.length > 0) {
       setWorkspaces(appUser.workspaces);
+      if (appUser.workspaceId && appUser.workspaces.some(w => w.id === appUser.workspaceId)) {
+        setCurrentWorkspaceId(appUser.workspaceId);
+      } else {
+        setCurrentWorkspaceId(appUser.workspaces[0].id);
+      }
     } else if (appUser?.workspaceName) {
-      setWorkspaces([{ id: '1', name: appUser.workspaceName }]);
+      const wId = appUser.workspaceId || '1';
+      setWorkspaces([{ id: wId, name: appUser.workspaceName }]);
+      setCurrentWorkspaceId(wId);
     }
-  }, [appUser?.workspaces, appUser?.workspaceName]);
+  }, [appUser?.workspaces, appUser?.workspaceName, appUser?.workspaceId]);
 
   useEffect(() => {
     setSelectedPage(null);
