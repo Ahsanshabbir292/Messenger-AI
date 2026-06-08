@@ -7,7 +7,7 @@ import {
   Send, User, Image as ImageIcon, File as FileIcon, Mic, Paperclip, X, Music, Download, Megaphone,
   CreditCard, History, Sparkles, Clock, Star, Shield, Zap, Users, UserPlus, Mail, ShieldAlert, Trash2, Lock, AlertTriangle, Info, ArrowLeft, ArrowRight, Radio,
   Search, Filter, CheckSquare, Layers, ToggleLeft as Toggle, Globe, Power, ChevronRight, MessageCircle, CircleDollarSign, Menu,
-  Pause, XCircle, Copy
+  Pause, XCircle, Copy, Sun, Moon
 } from 'lucide-react';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -292,6 +292,21 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
       navigateTo(`/${tab}`);
     }
   };
+
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = localStorage.getItem('dashboard_theme');
+    return (saved === 'dark' || saved === 'light') ? saved : 'light';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('dashboard_theme', theme);
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    // Cleanup if component unmounts if desired, but we want it persistent.
+  }, [theme]);
 
   // Switch to billing tab if payment parameter exists in the URL
   useEffect(() => {
@@ -832,6 +847,24 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   useEffect(() => {
     localStorage.setItem('team_members_v3', JSON.stringify(teamMembers));
   }, [teamMembers]);
+
+  // Fetch team members from database
+  const fetchTeamMembers = useCallback(async () => {
+    try {
+      const res = await axios.get('/api/team/members');
+      if (res.data && Array.isArray(res.data.teamMembers)) {
+        setTeamMembers(res.data.teamMembers);
+      }
+    } catch (err) {
+      console.error("Failed to load team roster from backend DB", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'team') {
+      fetchTeamMembers();
+    }
+  }, [activeTab, fetchTeamMembers]);
 
   // Keep the owner member in sync with the dynamically logged-in user profile/email
   useEffect(() => {
@@ -1828,7 +1861,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
   }).length;
 
   return (
-    <div className="min-h-screen bg-[#F0F2F5] flex font-sans overflow-x-hidden">
+    <div className={`min-h-screen bg-[#F0F2F5] flex font-sans overflow-x-hidden ${theme === 'dark' ? 'dark bg-[#0b0f19]' : ''}`}>
       {/* Mobile Sidebar Overlay */}
       {isMobileMenuOpen && (
         <div 
@@ -2012,6 +2045,18 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                 <option value="support">Support</option>
               </select>
             </div>
+
+            <button 
+              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+              className="w-10 h-10 bg-slate-100 rounded-2xl flex items-center justify-center hover:bg-indigo-50 transition-colors cursor-pointer group border-none outline-none"
+              title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            >
+              {theme === 'light' ? (
+                <Moon className="w-5 h-5 text-slate-400 group-hover:text-indigo-600 transition-all duration-300" />
+              ) : (
+                <Sun className="w-5 h-5 text-amber-500 group-hover:scale-110 transition-all duration-300" />
+              )}
+            </button>
 
             <button 
               onClick={() => setActiveTab('settings')}
@@ -5701,11 +5746,26 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
 
              <div className="flex flex-col gap-3 mt-8">
                 <button 
-                  onClick={() => {
-                    const updatedList = teamMembers.filter(m => m.id !== memberToRemove.id);
-                    setTeamMembers(updatedList);
-                    addToast(`Successfully removed ${memberToRemove.name} from the workspace`, 'success');
-                    setMemberToRemove(null);
+                  onClick={async () => {
+                    try {
+                      const res = await axios.post('/api/team/delete', { email: memberToRemove.email });
+                      if (res.data.success) {
+                        if (res.data.teamMembers) {
+                          setTeamMembers(res.data.teamMembers);
+                        } else {
+                          const updatedList = teamMembers.filter(m => m.email.toLowerCase() !== memberToRemove.email.toLowerCase());
+                          setTeamMembers(updatedList);
+                        }
+                        addToast(`Successfully removed ${memberToRemove.name} from the workspace`, 'success');
+                      } else {
+                        addToast(res.data.error || 'Failed to remove team member.', 'error');
+                      }
+                    } catch (err: any) {
+                      console.error("Delete team member error:", err);
+                      addToast(err.response?.data?.error || err.message || 'Failed to delete team member.', 'error');
+                    } finally {
+                      setMemberToRemove(null);
+                    }
                   }}
                   className="w-full py-4 bg-red-500 hover:bg-red-650 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-red-100 flex items-center justify-center gap-1.5 cursor-pointer border-none"
                 >

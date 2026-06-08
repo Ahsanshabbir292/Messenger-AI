@@ -1,5 +1,6 @@
-import React from 'react';
-import { UserPlus, Lock, Trash2, Info, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { UserPlus, Lock, Trash2, Info, AlertTriangle, Copy, Check, ExternalLink, Mail, Shield } from 'lucide-react';
+import axios from 'axios';
 import { SafeAvatar } from './SafeAvatar';
 
 interface TeamPageProps {
@@ -41,6 +42,19 @@ export const TeamPage: React.FC<TeamPageProps> = ({
   addToast,
   setMemberToRemove
 }) => {
+  const [isSending, setIsSending] = useState(false);
+  const [simulatedInvite, setSimulatedInvite] = useState<{ email: string; inviteLink: string; name: string; role: string } | null>(null);
+  const [copiedText, setCopiedText] = useState<string | null>(null);
+
+  const handleCopyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedText(id);
+      setTimeout(() => setCopiedText(null), 2000);
+    }).catch(err => {
+      console.error("Copy failed", err);
+    });
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20">
       {teamSubMode === 'list' ? (
@@ -113,6 +127,29 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                       </div>
 
                       <div className="flex items-center gap-3">
+                        {member.status === 'pending' && (
+                          <span className="px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-amber-500 text-white rounded-lg animate-pulse shrink-0">
+                            Pending Invite
+                          </span>
+                        )}
+
+                        {member.status === 'pending' && member.token && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const protocol = window.location.protocol;
+                              const host = window.location.host;
+                              const inviteLink = `${protocol}//${host}/?invite_token=${member.token}&email=${encodeURIComponent(member.email)}&name=${encodeURIComponent(member.name)}&role=${encodeURIComponent(member.role)}`;
+                              handleCopyText(inviteLink, member.id);
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all shrink-0 flex items-center gap-1 border-none cursor-pointer"
+                            title="Copy Invitation Link"
+                          >
+                            {copiedText === member.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                            {copiedText === member.id ? 'Copied Link' : 'Invite Link'}
+                          </button>
+                        )}
+
                         {/* Badge on Right Side */}
                         <span className={`px-3 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg border shrink-0 ${
                           member.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-100' :
@@ -203,7 +240,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
           </div>
 
           <form 
-            onSubmit={(e) => {
+            onSubmit={async (e) => {
               e.preventDefault();
               
               if (!addMemberEmail || !addMemberRole || !addMemberName) {
@@ -218,19 +255,66 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                 return;
               }
 
-              const createdMember = {
-                id: 'm_' + Date.now().toString(),
-                name: addMemberName.trim(),
-                email: addMemberEmail.trim().toLowerCase(),
-                role: addMemberRole,
-                avatar_url: null,
-                joined_at: new Date().toISOString(),
-                assigned_pages: addMemberRole === 'support' ? addMemberAssignedPages : []
-              };
+              setIsSending(true);
+              try {
+                const res = await axios.post('/api/team/invite', {
+                  email: addMemberEmail.trim().toLowerCase(),
+                  name: addMemberName.trim(),
+                  role: addMemberRole,
+                  assignedPages: addMemberRole === 'support' ? addMemberAssignedPages : []
+                });
 
-              setTeamMembers(prev => [...prev, createdMember]);
-              addToast(`Successfully added ${createdMember.name} as ${createdMember.role.toUpperCase()}`, 'success');
-              setTeamSubMode('list');
+                if (res.data.success) {
+                  // Handle potential simulated responses (e.g., Sandbox environment or SMTP disabled/failed)
+                  if (res.data.simulated) {
+                    setSimulatedInvite({
+                      email: addMemberEmail.trim().toLowerCase(),
+                      inviteLink: res.data.inviteLink,
+                      name: addMemberName.trim(),
+                      role: addMemberRole
+                    });
+                    addToast("Sandbox Mode: Join link compiled successfully!", 'success');
+                  } else {
+                    addToast(`Invitation email successfully sent to ${addMemberEmail.trim()}`, 'success');
+                  }
+
+                  // Update team roster state
+                  if (res.data.teamMembers) {
+                    setTeamMembers(res.data.teamMembers);
+                  } else {
+                    // Update locally with pending flag
+                    const createdMember = {
+                      id: 'm_' + Date.now().toString(),
+                      name: addMemberName.trim(),
+                      email: addMemberEmail.trim().toLowerCase(),
+                      role: addMemberRole,
+                      avatar_url: null,
+                      status: "pending",
+                      token: res.data.inviteLink ? new URL(res.data.inviteLink).searchParams.get('invite_token') : null,
+                      joined_at: new Date().toISOString(),
+                      assigned_pages: addMemberRole === 'support' ? addMemberAssignedPages : []
+                    };
+                    setTeamMembers(prev => {
+                      const idx = prev.findIndex(m => m.email.toLowerCase() === createdMember.email.toLowerCase());
+                      if (idx > -1) {
+                        const updated = [...prev];
+                        updated[idx] = createdMember;
+                        return updated;
+                      }
+                      return [...prev, createdMember];
+                    });
+                  }
+
+                  setTeamSubMode('list');
+                } else {
+                  addToast(res.data.error || "Failed to submit invitation.", 'err');
+                }
+              } catch (err: any) {
+                console.error("Invite submit error:", err);
+                addToast(err.response?.data?.error || err.message || "Failed to process database invitation.", 'err');
+              } finally {
+                setIsSending(false);
+              }
             }}
             className="space-y-6"
           >
@@ -330,19 +414,92 @@ export const TeamPage: React.FC<TeamPageProps> = ({
             <div className="flex gap-4 pt-4">
               <button 
                 type="button"
+                disabled={isSending}
                 onClick={() => setTeamSubMode('list')}
-                className="flex-1 py-4 bg-slate-0 shadow-lg hover:bg-slate-50 border border-slate-200/50 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest transition-all cursor-pointer"
+                className="flex-1 py-4 bg-slate-0 shadow-lg hover:bg-slate-50 border border-slate-200/50 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest transition-all cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
               <button 
                 type="submit"
-                className="flex-1 py-4 bg-indigo-600 hover:bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-1.5 cursor-pointer border-none"
+                disabled={isSending}
+                className="flex-1 py-4 bg-indigo-600 hover:bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-1.5 cursor-pointer border-none disabled:opacity-50"
               >
-                <UserPlus className="w-4 h-4" /> Add Team Member
+                {isSending ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin shrink-0"></span> Dispatched...
+                  </>
+                ) : (
+                  <>
+                    <UserPlus className="w-4 h-4" /> Send Email invitation
+                  </>
+                )}
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Simulated/Sandbox Mode Invitation Acceptance Tester Modal */}
+      {simulatedInvite && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 lg:p-10 animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setSimulatedInvite(null)}></div>
+          <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl relative z-10 p-8 sm:p-10 animate-in zoom-in-95 duration-200">
+             <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-indigo-600 shadow-sm">
+                   <Mail className="w-8 h-8 text-indigo-600" />
+                </div>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Sandbox Email Generated</h3>
+                <p className="text-slate-500 font-medium text-xs leading-relaxed max-w-md mx-auto mt-2">
+                   SMTP credentials are not active in this sandbox. We compiled and loaded the direct invitation registration URL below for offline acceptance!
+                </p>
+             </div>
+
+             <div className="space-y-4">
+                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-150 space-y-3 text-xs leading-relaxed">
+                   <div className="flex items-center gap-2">
+                      <span className="font-extrabold uppercase font-mono text-[10px] text-slate-400 shrink-0">Recipient:</span>
+                      <strong className="text-slate-800 truncate">{simulatedInvite.email}</strong>
+                   </div>
+                   <div className="flex items-center gap-2">
+                      <span className="font-extrabold uppercase font-mono text-[10px] text-slate-400 shrink-0">Authorization:</span>
+                      <span className="px-2 py-0.5 text-[9px] bg-indigo-50 text-indigo-700 font-black border border-indigo-150 rounded uppercase tracking-widest">{simulatedInvite.role}</span>
+                   </div>
+                   <div className="pt-3 border-t border-slate-200/60 flex flex-col gap-2">
+                      <span className="font-extrabold uppercase font-mono text-[10px] text-slate-400">Onboarding Registration Link:</span>
+                      <div className="flex items-center gap-2 bg-white px-3.5 py-3 rounded-xl border border-slate-100 min-w-0 shadow-sm">
+                         <span className="font-mono text-[11px] text-slate-500 truncate select-all flex-1">{simulatedInvite.inviteLink}</span>
+                         <button
+                            type="button"
+                            onClick={() => handleCopyText(simulatedInvite.inviteLink, 'modal_link')}
+                            className="p-1.5 border-none bg-slate-50 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-900 cursor-pointer transition-colors shrink-0"
+                            title="Copy onboarding link"
+                         >
+                            {copiedText === 'modal_link' ? <Check className="w-4 h-4 text-emerald-600 animate-in scale-in" /> : <Copy className="w-4 h-4" />}
+                         </button>
+                      </div>
+                   </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3 pt-4">
+                   <a
+                      href={simulatedInvite.inviteLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-4 bg-indigo-600 hover:bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 text-center flex items-center justify-center gap-1.5 border-none"
+                   >
+                      <ExternalLink className="w-4 h-4" /> Open In New Tab to Register
+                   </a>
+                   <button
+                      type="button"
+                      onClick={() => setSimulatedInvite(null)}
+                      className="flex-1 py-4 bg-slate-50 hover:bg-slate-105 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest transition-all border border-slate-200/50 cursor-pointer"
+                   >
+                      Close / Roster view
+                   </button>
+                </div>
+             </div>
+          </div>
         </div>
       )}
     </div>

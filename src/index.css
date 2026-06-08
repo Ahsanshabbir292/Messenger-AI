@@ -21,3 +21,158 @@ body {
   -moz-osx-font-smoothing: grayscale;
   color: #1e293b;
 }
+
+/* Dark theme overrides */
+html.dark, 
+html.dark body {
+  background-color: #0b0f19 !important;
+  color: #f8fafc !important;
+}
+
+/* Background overrides */
+html.dark .bg-\[\#F0F2F5\],
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/25,
+html.dark .bg-slate-50\/30,
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-slate-50\/30:hover,
+html.dark .group:hover,
+html.dark .bg-\[\#F9FAFB\]\/30 {
+  background-color: #0e1424 !important;
+}
+
+html.dark .bg-white {
+  background-color: #151c2d !important;
+}
+
+html.dark .bg-slate-100 {
+  background-color: #202b3e !important;
+}
+
+html.dark .bg-indigo-50 {
+  background-color: #1e1b4b !important;
+  color: #e0e7ff !important;
+}
+
+html.dark .bg-indigo-50\/50 {
+  background-color: rgba(30, 27, 75, 0.5) !important;
+}
+
+html.dark .bg-emerald-50 {
+  background-color: #064e3b !important;
+  color: #d1fae5 !important;
+}
+
+html.dark .bg-emerald-50\/50 {
+  background-color: rgba(6, 78, 59, 0.5) !important;
+}
+
+html.dark .bg-rose-50 {
+  background-color: #4b071a !important;
+  color: #ffe4e6 !important;
+}
+
+/* Sidebar overrides */
+html.dark aside {
+  background-color: #151c2d !important;
+  border-right-color: #202b3e !important;
+}
+
+/* Border overrides */
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-50,
+html.dark .border-slate-300\/40,
+html.dark .border-slate-100\/40,
+html.dark .border-indigo-100,
+html.dark .border-indigo-100\/40,
+html.dark .border-emerald-100,
+html.dark .border-gray-100,
+html.dark .border-gray-200,
+html.dark .border-slate-300,
+html.dark .border {
+  border-color: #202b3e !important;
+}
+
+html.dark .divide-slate-50 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #202b3e !important;
+}
+
+/* Header overrides */
+html.dark header {
+  background-color: rgba(21, 28, 45, 0.8) !important;
+  border-bottom-color: #202b3e !important;
+}
+
+/* Text overrides */
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-gray-900,
+html.dark .text-gray-800,
+html.dark h1,
+html.dark h2,
+html.dark h3,
+html.dark h4,
+html.dark h5,
+html.dark h6 {
+  color: #f8fafc !important;
+}
+
+html.dark .text-slate-700,
+html.dark .text-slate-600,
+html.dark .text-gray-700,
+html.dark .text-gray-600 {
+  color: #cbd5e1 !important;
+}
+
+html.dark .text-slate-500,
+html.dark .text-slate-400,
+html.dark .text-gray-500,
+html.dark .text-gray-400 {
+  color: #94a3b8 !important;
+}
+
+/* Inputs, texts, select options overrides */
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #0b0f19 !important;
+  color: #f8fafc !important;
+  border-color: #202b3e !important;
+}
+
+html.dark select option {
+  background-color: #151c2d !important;
+  color: #f8fafc !important;
+}
+
+/* Specific elements like active indicators or stats */
+html.dark .shadow-slate-100,
+html.dark .shadow-sm {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Recharts elements - Tooltips */
+html.dark .recharts-default-tooltip {
+  background-color: #151c2d !important;
+  border-color: #202b3e !important;
+  color: #f8fafc !important;
+}
+
+/* Active buttons, icons inside slate background buttons */
+html.dark .bg-slate-100 {
+  background-color: #202b3e !important;
+}
+
+html.dark .text-slate-400 {
+  color: #94a3b8 !important;
+}
+
+/* Hover for dropdown toggles */
+html.dark .hover\:bg-slate-50\/50:hover {
+  background-color: rgba(32, 43, 62, 0.5) !important;
+}
+
