@@ -120,7 +120,7 @@ export default function AuthPage({
         setSignupStep('verify');
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || String(err);
-        console.error("[Backend] Signup request code failed:", errMsg);
+        console.warn("[Backend] Signup request code failed:", errMsg);
         setError(errMsg);
       } finally {
         setLoading(false);
@@ -159,7 +159,7 @@ export default function AuthPage({
         onLoginSuccess();
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || String(err);
-        console.error("[Backend] Signup OTP registration failed:", errMsg);
+        console.warn("[Backend] Signup OTP registration failed:", errMsg);
         setError(errMsg);
       } finally {
         setLoading(false);
@@ -241,7 +241,7 @@ export default function AuthPage({
       axios.defaults.headers.common['x-user-email'] = finalEmail;
       onLoginSuccess();
     } catch (err: any) {
-      console.error("[Google Auth Error]:", err);
+      console.warn("[Google Auth Warning]:", err);
       const errCode = err.code || "";
       const errMessage = err.message || String(err);
       if (errCode === 'auth/popup-closed-by-user') {
@@ -294,7 +294,7 @@ export default function AuthPage({
       axios.defaults.headers.common['x-user-email'] = appUserObj.email;
       onLoginSuccess();
     } catch (err: any) {
-      console.error("[Facebook Auth Error]:", err);
+      console.warn("[Facebook Auth Warning]:", err);
       const errCode = err.code || "";
       const errMessage = err.message || String(err);
       if (errCode === 'auth/popup-closed-by-user') {
@@ -342,7 +342,7 @@ export default function AuthPage({
       onLoginSuccess();
     } catch (err: any) {
       const errMsg = err.response?.data?.error || err.message || String(err);
-      console.error("[Backend] Signin failed:", errMsg);
+      console.warn("[Backend] Signin failed:", errMsg);
       setError(errMsg);
     } finally {
       setLoading(false);
@@ -379,7 +379,7 @@ export default function AuthPage({
         setForgotStep('verify');
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || String(err);
-        console.error("[Backend] Forgot password request code failed:", errMsg);
+        console.warn("[Backend] Forgot password request code failed:", errMsg);
         setError(errMsg);
       } finally {
         setLoading(false);
@@ -422,7 +422,7 @@ export default function AuthPage({
         setMode('signin');
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || String(err);
-        console.error("[Backend] Forgot password reset failed:", errMsg);
+        console.warn("[Backend] Forgot password reset failed:", errMsg);
         setError(errMsg);
       } finally {
         setLoading(false);

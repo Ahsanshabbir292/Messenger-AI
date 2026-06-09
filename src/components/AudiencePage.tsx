@@ -155,7 +155,7 @@ export function AudiencePage({ onOpenChat, addToast }: AudiencePageProps) {
 
           {/* Pagination Info */}
           <div className="px-4 py-2 bg-slate-50 border border-slate-150 rounded-2xl text-xs font-bold text-slate-600 tracking-wider">
-            Page {currentPage} of {totalPages} · {users.length} shown
+            Page {currentPage} of {totalPages} · {total} total contacts
           </div>
 
           {/* Eligible Count Indicator */}
