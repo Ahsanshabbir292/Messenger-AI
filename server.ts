@@ -1015,8 +1015,17 @@ async function startServer() {
       return "ahsan.shabbir292@gmail.com";
     }
 
+    // 1. Check if caller explicitly requested their separate personal workspace
+    let reqWorkspaceId = req?.headers?.['x-workspace-id'] || req?.query?.workspaceId || req?.body?.workspaceId;
+    if (reqWorkspaceId === 'personal' || (typeof reqWorkspaceId === 'string' && reqWorkspaceId.startsWith('personal'))) {
+      return userEmail;
+    }
+
     // 0. Super fast track: Check session user object directly
     if (req.session?.user && req.session.user.email === userEmail) {
+      if (req.session.user.workspaceId === 'personal') {
+        return userEmail;
+      }
       if (req.session.user.inviterEmail) {
         return req.session.user.inviterEmail.toLowerCase().trim();
       }
@@ -1027,6 +1036,9 @@ async function startServer() {
 
     // 1. Check if already resolved in session
     if (req.session?.user && req.session.user.email === userEmail && req.session.ownerEmail) {
+      if (req.session.user.workspaceId === 'personal') {
+        return userEmail;
+      }
       return String(req.session.ownerEmail).toLowerCase().trim();
     }
 
@@ -1098,7 +1110,6 @@ async function startServer() {
           }
         }
       }
-
     } catch (err) {
       console.error("[getWorkspaceOwnerEmail] Error:", err);
     }
@@ -1114,9 +1125,11 @@ async function startServer() {
       
       // Look up their true document to see if they have inviterEmail or workspaceId
       const userDoc = await db.collection("users").doc(emailLower).get();
+      let dbUserData: any = {};
       if (userDoc.exists) {
         const uData = userDoc.data();
         if (uData) {
+          dbUserData = uData;
           userObj.workspaceId = uData.workspaceId || userObj.workspaceId || "ws_default";
           userObj.inviterEmail = uData.inviterEmail || userObj.inviterEmail || null;
           userObj.role = uData.role || userObj.role || "member";
@@ -1124,74 +1137,112 @@ async function startServer() {
         }
       }
 
-      // Correctly load workspace properties from the inviter/owner if we can resolve one
-      const resolvedOwner = await getWorkspaceOwnerEmail(req, db, emailLower);
-      const targetEmail = userObj.inviterEmail || (resolvedOwner && resolvedOwner !== emailLower ? resolvedOwner : null);
-      if (targetEmail && targetEmail !== emailLower) {
-        const ownerDoc = await db.collection("users").doc(targetEmail).get();
-        if (ownerDoc.exists) {
-          const ownerData = ownerDoc.data();
-          if (ownerData) {
-            userObj.workspaceName = ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`;
-            
-            // Resolve owner's active workspace ID reliably
-            let ownerWsId = ownerData.workspaceId;
-            if (!ownerWsId || ownerWsId === "ws_default") {
-              if (ownerData.facebookWorkspaces && typeof ownerData.facebookWorkspaces === "object") {
-                const keys = Object.keys(ownerData.facebookWorkspaces);
-                if (keys.length > 0) {
-                  ownerWsId = keys[0];
-                }
-              }
-              ownerWsId = ownerWsId || "1";
-            }
+      // Check current workspace selection
+      let selectedWsId = req?.headers?.['x-workspace-id'] || req?.query?.workspaceId || req?.body?.workspaceId || userObj.workspaceId;
 
-            // Crucial: copy the owner's configured workspaces list to this team member's session so the UI matches perfectly!
-            if (ownerData.workspaces && Array.isArray(ownerData.workspaces) && ownerData.workspaces.length > 0) {
-              userObj.workspaces = ownerData.workspaces;
-            } else {
-              userObj.workspaces = [
-                { id: ownerWsId, name: userObj.workspaceName }
-              ];
-            }
-            
-            // Align active workspaceId
-            userObj.workspaceId = ownerWsId;
+      if (selectedWsId === 'personal' || (typeof selectedWsId === 'string' && selectedWsId.startsWith('personal'))) {
+        userObj.workspaceName = "My Workspace"; 
+        userObj.workspaceId = "personal";
+        userObj.role = "owner"; // They are the owner of their own personal workspace!
 
-            // Auto-heal member's workspaceId to always point directly to the owner's resolved workspace key
-            await db.collection("users").doc(emailLower).set({ workspaceId: ownerWsId }, { merge: true });
+        const personalWorkspace = { id: "personal", name: "My Personal Workspace" };
+        const inviterEmailClean = String(dbUserData.inviterEmail || "").toLowerCase().trim();
+
+        if (inviterEmailClean && inviterEmailClean !== emailLower) {
+          const inviterDoc = await db.collection("users").doc(inviterEmailClean).get();
+          if (inviterDoc.exists) {
+            const inviterData = inviterDoc.data() || {};
+            const inviterName = inviterData.workspaceName || `${inviterData.fullName || inviterEmailClean}'s Workspace`;
+            const inviterWsId = inviterData.workspaceId || "1";
+            userObj.workspaces = [
+              personalWorkspace,
+              { id: inviterWsId, name: inviterName }
+            ];
+          } else {
+            userObj.workspaces = [personalWorkspace];
           }
+        } else {
+          userObj.workspaces = [personalWorkspace];
         }
       } else {
-        // This is the owner themselves or a standalone user. Let's make sure they have a cohesive workspaces array:
-        const userDocCurrent = await db.collection("users").doc(emailLower).get();
-        if (userDocCurrent.exists) {
-          const uCurrent = userDocCurrent.data();
-          if (uCurrent) {
-            userObj.workspaceName = uCurrent.workspaceName || `${uCurrent.fullName || emailLower}'s Workspace`;
-            
-            let activeWsId = uCurrent.workspaceId;
-            if (!activeWsId || activeWsId === "ws_default") {
-              if (uCurrent.facebookWorkspaces && typeof uCurrent.facebookWorkspaces === "object") {
-                const keys = Object.keys(uCurrent.facebookWorkspaces);
-                if (keys.length > 0) {
-                  activeWsId = keys[0];
-                }
-              }
-              activeWsId = activeWsId || "1";
+        // Correctly load workspace properties from the inviter/owner if we can resolve one
+        const resolvedOwner = await getWorkspaceOwnerEmail(req, db, emailLower);
+        const targetEmail = userObj.inviterEmail || (resolvedOwner && resolvedOwner !== emailLower ? resolvedOwner : null);
+        if (targetEmail && targetEmail !== emailLower) {
+          const ownerDoc = await db.collection("users").doc(targetEmail).get();
+          if (ownerDoc.exists) {
+            const ownerData = ownerDoc.data();
+            if (ownerData) {
+              userObj.workspaceName = ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`;
               
-              // Auto-heal the owner's document in the DB so that workspaceId is persistently set to this!
-              await db.collection("users").doc(emailLower).set({ workspaceId: activeWsId }, { merge: true });
-            }
+              // Resolve owner's active workspace ID reliably
+              let ownerWsId = ownerData.workspaceId;
+              if (!ownerWsId || ownerWsId === "ws_default") {
+                if (ownerData.facebookWorkspaces && typeof ownerData.facebookWorkspaces === "object") {
+                  const keys = Object.keys(ownerData.facebookWorkspaces);
+                  if (keys.length > 0) {
+                    ownerWsId = keys[0];
+                  }
+                }
+                ownerWsId = ownerWsId || "1";
+              }
 
-            if (uCurrent.workspaces && Array.isArray(uCurrent.workspaces) && uCurrent.workspaces.length > 0) {
-              userObj.workspaces = uCurrent.workspaces;
-            } else {
+              const personalWorkspace = { id: "personal", name: "My Personal Workspace" };
+              const inviterWorkspace = { id: ownerWsId, name: userObj.workspaceName };
+
+              // Crucial: copy the owner's configured workspaces list to this team member's session so the UI matches perfectly!
+              let ownerWSList: any[] = [];
+              if (ownerData.workspaces && Array.isArray(ownerData.workspaces) && ownerData.workspaces.length > 0) {
+                ownerWSList = ownerData.workspaces;
+              } else {
+                ownerWSList = [inviterWorkspace];
+              }
+
+              // Include B's personal workspace as well so B can switch easily!
               userObj.workspaces = [
-                { id: activeWsId, name: userObj.workspaceName }
+                personalWorkspace,
+                ...ownerWSList.filter((w: any) => w.id !== 'personal')
               ];
+              
+              // Align active workspaceId
+              userObj.workspaceId = ownerWsId;
+              userObj.role = dbUserData.role || "member"; // Maintain assigned role context
+
+              // Auto-heal member's workspaceId to always point directly to the owner's resolved workspace key
+              await db.collection("users").doc(emailLower).set({ workspaceId: ownerWsId }, { merge: true });
             }
-            userObj.workspaceId = activeWsId;
+          }
+        } else {
+          // This is the owner themselves or a standalone user. Let's make sure they have a cohesive workspaces array:
+          const userDocCurrent = await db.collection("users").doc(emailLower).get();
+          if (userDocCurrent.exists) {
+            const uCurrent = userDocCurrent.data();
+            if (uCurrent) {
+              userObj.workspaceName = uCurrent.workspaceName || `${uCurrent.fullName || emailLower}'s Workspace`;
+              
+              let activeWsId = uCurrent.workspaceId;
+              if (!activeWsId || activeWsId === "ws_default") {
+                if (uCurrent.facebookWorkspaces && typeof uCurrent.facebookWorkspaces === "object") {
+                  const keys = Object.keys(uCurrent.facebookWorkspaces);
+                  if (keys.length > 0) {
+                    activeWsId = keys[0];
+                  }
+                }
+                activeWsId = activeWsId || "1";
+                
+                // Auto-heal the owner's document in the DB so that workspaceId is persistently set to this!
+                await db.collection("users").doc(emailLower).set({ workspaceId: activeWsId }, { merge: true });
+              }
+
+              if (uCurrent.workspaces && Array.isArray(uCurrent.workspaces) && uCurrent.workspaces.length > 0) {
+                userObj.workspaces = uCurrent.workspaces;
+              } else {
+                userObj.workspaces = [
+                  { id: activeWsId, name: userObj.workspaceName }
+                ];
+              }
+              userObj.workspaceId = activeWsId;
+            }
           }
         }
       }
@@ -2267,6 +2318,15 @@ async function startServer() {
       // Also delete invitation
       try {
         await db.collection("invitations").doc(email.toLowerCase()).delete();
+      } catch (err) {}
+
+      // Reset the deleted team member's user document so they can have independent owner access
+      try {
+        await db.collection("users").doc(email.toLowerCase()).update({
+          inviterEmail: null,
+          role: "owner",
+          workspaceId: "personal"
+        });
       } catch (err) {}
 
       res.json({ success: true, teamMembers: updatedList });
