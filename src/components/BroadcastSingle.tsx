@@ -187,22 +187,16 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
               {pages.map((p) => {
                 const isSelected = p.id === pageId;
-                const hasNoContacts = (p.subscriberCount || 0) === 0;
+                const subCount = p.subscriberCount || 0;
 
                 return (
                   <div
                     key={p.id}
                     onClick={() => {
-                      if (hasNoContacts) {
-                        alert(`Page "${p.name}" has 0 subscribers in its chat inbox logs. Broadcasts can only be dispatched to pages with active message histories.`);
-                        return;
-                      }
                       setPageId(p.id);
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3 ${
-                      hasNoContacts
-                        ? 'opacity-65 bg-slate-50 border-slate-100 cursor-not-allowed'
-                        : isSelected 
+                      isSelected 
                         ? 'border-indigo-600 bg-indigo-50/10 shadow-sm' 
                         : 'border-slate-100 hover:border-slate-150 bg-slate-50'
                     }`}
@@ -216,6 +210,9 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
                     </div>
                     <div className="min-w-0 text-left">
                       <p className="text-xs font-black text-slate-800 truncate leading-tight">{p.name}</p>
+                      <p className="text-[10px] font-bold text-slate-400 mt-0.5 whitespace-nowrap">
+                        {subCount} {subCount === 1 ? 'subscriber' : 'subscribers'}
+                      </p>
                     </div>
                   </div>
                 );

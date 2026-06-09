@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { 
-  Bot, Mail, Lock, Github, CheckCircle2, ArrowLeft, Facebook, 
+  Mail, Lock, Github, CheckCircle2, ArrowLeft, Facebook, 
   Sparkles, User, ShieldCheck, Eye, EyeOff, Globe, CheckCircle, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -242,8 +242,14 @@ export default function AuthPage({
       onLoginSuccess();
     } catch (err: any) {
       console.error("[Google Auth Error]:", err);
-      if (err.code === 'auth/popup-closed-by-user') {
+      const errCode = err.code || "";
+      const errMessage = err.message || String(err);
+      if (errCode === 'auth/popup-closed-by-user') {
         setError('Google login popup was closed before completion.');
+      } else if (errCode === 'auth/popup-blocked' || errMessage.includes('popup-blocked')) {
+        setError('Google login popup was blocked by the browser inside the preview frame. If you are using an iframe preview, please allow popups or consider logging in/registering with email & password.');
+      } else if (errCode === 'auth/user-disabled' || errMessage.includes('user-disabled')) {
+        setError('Your Google account has been disabled or Google authentication is not enabled. Please log in or register with email & password.');
       } else {
         setError(err.response?.data?.error || err.message || String(err));
       }
@@ -289,9 +295,15 @@ export default function AuthPage({
       onLoginSuccess();
     } catch (err: any) {
       console.error("[Facebook Auth Error]:", err);
-      if (err.code === 'auth/popup-closed-by-user') {
+      const errCode = err.code || "";
+      const errMessage = err.message || String(err);
+      if (errCode === 'auth/popup-closed-by-user') {
         setError('Facebook login popup was closed before completion.');
-      } else if (err.code === 'auth/operation-not-allowed' || err.code === 'auth/configuration-not-found') {
+      } else if (errCode === 'auth/popup-blocked' || errMessage.includes('popup-blocked')) {
+        setError('Facebook login popup was blocked by the browser inside the preview frame. If you are using an iframe preview, please allow popups or consider logging in/registering with email & password.');
+      } else if (errCode === 'auth/user-disabled' || errMessage.includes('user-disabled')) {
+        setError('Your Facebook account has been disabled or Facebook authentication is not enabled. Please log in or register with email & password.');
+      } else if (errCode === 'auth/operation-not-allowed' || errCode === 'auth/configuration-not-found') {
         setError(
           "Facebook Login is not enabled in Firebase Console yet.\n" +
           "Please enable Facebook Auth and configure the correct Facebook App credentials in Firebase Console: Authentication -> Sign-in method -> Add provider -> Facebook."

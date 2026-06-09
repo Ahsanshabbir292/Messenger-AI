@@ -2293,10 +2293,7 @@ async function startServer() {
 
   app.post("/api/team/delete", async (req, res) => {
     const { email } = req.body;
-    let userEmail = req.session.user?.email || req.headers['x-user-email'] || req.query.email;
-    if (!userEmail || userEmail === "anonymous") {
-      userEmail = "ahsan.shabbir292@gmail.com";
-    }
+    const userEmail = await getResolvedUserEmail(req);
 
     if (!email) {
       return res.status(400).json({ error: "Email is required." });

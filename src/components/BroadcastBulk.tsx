@@ -78,11 +78,10 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
   };
 
   const selectAllPages = () => {
-    const validPages = pages.filter(p => (p.subscriberCount || 0) > 0);
-    if (selectedPageIds.length === validPages.length) {
+    if (selectedPageIds.length === pages.length) {
       setSelectedPageIds([]);
     } else {
-      setSelectedPageIds(validPages.map(p => p.id));
+      setSelectedPageIds(pages.map(p => p.id));
     }
   };
 
@@ -212,31 +211,24 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
               {pages.map((p) => {
                 const isSelected = selectedPageIds.includes(p.id);
                 const subCount = p.subscriberCount || 0;
-                const hasNoContacts = subCount === 0;
 
                 return (
                   <div
                     key={p.id}
                     onClick={() => {
-                      if (hasNoContacts) {
-                        alert(`Page "${p.name}" has 0 subscribers in its chat inbox logs. Broadcasts can only be dispatched to pages with active message histories.`);
-                        return;
-                      }
                       togglePageSelection(p.id);
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-center gap-3 ${
-                      hasNoContacts
-                        ? 'opacity-65 bg-slate-50 border-slate-100 cursor-not-allowed'
-                        : isSelected 
+                      isSelected 
                         ? 'border-indigo-600 bg-indigo-50/10 shadow-sm' 
                         : 'border-slate-100 hover:border-slate-150 bg-slate-50'
                     }`}
                   >
                     {/* Checkbox */}
                     <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center shrink-0 transition-all ${
-                      hasNoContacts ? 'border-slate-200 bg-slate-100' : isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
+                      isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white'
                     }`}>
-                      {!hasNoContacts && isSelected && <Check className="w-3.5 h-3.5 stroke-[4px]" />}
+                      {isSelected && <Check className="w-3.5 h-3.5 stroke-[4px]" />}
                     </div>
 
                     {/* Avatar */}
@@ -251,6 +243,9 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
                     {/* Page Name */}
                     <div className="min-w-0 text-left">
                       <p className="text-xs font-black text-slate-800 truncate leading-tight">{p.name}</p>
+                      <p className="text-[10px] font-bold text-slate-400 mt-0.5 whitespace-nowrap">
+                        {subCount} {subCount === 1 ? 'subscriber' : 'subscribers'}
+                      </p>
                     </div>
                   </div>
                 );

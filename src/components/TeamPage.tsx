@@ -133,6 +133,12 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                           </span>
                         )}
 
+                        {(member.status === 'active' || member.status === 'approved') && (
+                          <span className="px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-emerald-500 text-white rounded-lg shrink-0 flex items-center gap-1.5 font-sans">
+                            <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping shrink-0"></span> Active
+                          </span>
+                        )}
+
                         {member.status === 'pending' && member.token && (
                           <button
                             type="button"

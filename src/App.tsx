@@ -216,7 +216,7 @@ export default function App() {
       )}
 
       {view === 'dashboard' && (
-        <Dashboard onLogout={handleLogout} appUser={appUser} currentPath={currentPath} navigateTo={navigateTo} />
+        <Dashboard onLogout={handleLogout} appUser={appUser} currentPath={currentPath} navigateTo={navigateTo} onUserUpdate={setAppUser} />
       )}
 
       {view === 'privacy' && (

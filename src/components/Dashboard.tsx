@@ -258,7 +258,7 @@ const formatAxiosError = (err: any, fallbackMessage: string): string => {
   return err.message || String(err) || fallbackMessage;
 };
 
-export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }: { onLogout: () => void, appUser?: any, currentPath?: string, navigateTo?: (path: string) => void }) {
+export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, onUserUpdate }: { onLogout: () => void, appUser?: any, currentPath?: string, navigateTo?: (path: string) => void, onUserUpdate?: (user: any) => void }) {
   const getTabFromPath = (path?: string) => {
     if (!path) return 'overview';
     const cleanPath = path.replace(/^\//, '');
@@ -1230,6 +1230,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
         }
         
         localStorage.setItem('current_app_user', JSON.stringify(freshUser));
+        onUserUpdate?.(freshUser);
       }
     } catch (err: any) {
       console.error("[Workspace Sync] Failed to validate workspace membership:", err);
@@ -3046,6 +3047,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                               const res = await axios.post('/api/auth/update-settings', { workspaceName: newName });
                               if (res.data.user) {
                                 localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                                onUserUpdate?.(res.data.user);
                                 if (appUser) {
                                   appUser.workspaceName = newName;
                                 }
@@ -3123,6 +3125,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                               const res = await axios.post('/api/auth/update-settings', { fullName: newName });
                               if (res.data.user) {
                                 localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                                onUserUpdate?.(res.data.user);
                                 if (appUser) {
                                   appUser.fullName = newName;
                                 }
@@ -5886,6 +5889,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo }
                      
                      try {
                        const res = await axios.post('/api/auth/update-settings', { workspaces: updatedWorkspaces });
+                      if (res.data && res.data.user) { onUserUpdate?.(res.data.user); }
                        if (res.data.user) {
                          localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
                        }
