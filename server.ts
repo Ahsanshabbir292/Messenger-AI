@@ -3076,7 +3076,7 @@ async function startServer() {
     const host = req.headers.host;
     const currentOrigin = host ? `${protocol}://${host}` : '';
     const appUrl = process.env.APP_URL || currentOrigin;
-    const userEmail = (req.query.email || (req.session.user && req.session.user.email) || "") as string;
+    const userEmail = (req.query.email || req.headers['x-user-email'] || (req.session.user && req.session.user.email) || "") as string;
     if (!userEmail) {
       return res.status(401).json({ error: "Unauthorized. Email parameter is required." });
     }
@@ -5892,7 +5892,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
             // or 24-hour limit/policy block), we auto-resolve via our Smart Virtual Delivery Bridge.
             // This guarantees 100% success rate on the dashboard, and populates the CRM history perfectly
             // so the user can interact/reply with the automated engagement simulation.
-            if (!deliverySuccess) {
+            if (!deliverySuccess && isSimulated) {
               console.log(`[Broadcast Standby Bypass] Local virtual fallback check for recipient ${recipient.id}`);
               
               deliverySuccess = true;
@@ -6550,7 +6550,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
               }
             }
 
-            if (!deliverySuccess) {
+            if (!deliverySuccess && isSimulated) {
               console.log(`[Resend Standby Bypass] Local virtual fallback check for recipient ${recipient.id}`);
               
               deliverySuccess = true;
@@ -7145,7 +7145,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
               }
             }
 
-            if (!deliverySuccess) {
+            if (!deliverySuccess && isSimulated) {
               console.log(`[Scheduler Worker Standby Bypass] Local virtual fallback check for recipient ${recipient.id}`);
               
               deliverySuccess = true;
