@@ -58,6 +58,278 @@ interface ChatPageProps {
   loadMoreConversations?: () => void | Promise<void>;
 }
 
+const DEFAULT_MOCK_CONVERSATIONS = [
+  {
+    id: "padded_conv_1",
+    participants: {
+      data: [
+        { id: "agent_p1", name: "Agent" },
+        { id: "cust_p1", name: "Sarah Smith", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p1_1",
+          message: "I want to proceed with your services.",
+          created_time: new Date(Date.now() - 3600000).toISOString(),
+          from: { id: "cust_p1", name: "Sarah Smith" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 3600000).toISOString(),
+    unread_count: 1,
+    unread: true
+  },
+  {
+    id: "padded_conv_2",
+    participants: {
+      data: [
+        { id: "agent_p2", name: "Agent" },
+        { id: "cust_p2", name: "John Carter", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p2_1",
+          message: "Do you need Google ads service? Let me know.",
+          created_time: new Date(Date.now() - 10800000).toISOString(),
+          from: { id: "cust_p2", name: "John Carter" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 10800000).toISOString(),
+    unread_count: 0,
+    unread: false
+  },
+  {
+    id: "padded_conv_3",
+    participants: {
+      data: [
+        { id: "agent_p3", name: "Agent" },
+        { id: "cust_p3", name: "Amelie Dupont", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p3_1",
+          message: "What are your business hours?",
+          created_time: new Date(Date.now() - 18000000).toISOString(),
+          from: { id: "cust_p3", name: "Amelie Dupont" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 18000000).toISOString(),
+    unread_count: 0,
+    unread: false
+  },
+  {
+    id: "padded_conv_4",
+    participants: {
+      data: [
+        { id: "agent_p4", name: "Agent" },
+        { id: "cust_p4", name: "Muhammad Arslan", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p4_1",
+          message: "Can you help me set up a broadcast campaign?",
+          created_time: new Date(Date.now() - 25200000).toISOString(),
+          from: { id: "cust_p4", name: "Muhammad Arslan" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 25200000).toISOString(),
+    unread_count: 0,
+    unread: false
+  },
+  {
+    id: "padded_conv_5",
+    participants: {
+      data: [
+        { id: "agent_p5", name: "Agent" },
+        { id: "cust_p5", name: "Elena Rostova", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p5_1",
+          message: "Perfect, thank you so much for the quick setup!",
+          created_time: new Date(Date.now() - 32400000).toISOString(),
+          from: { id: "cust_p5", name: "Elena Rostova" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 32400000).toISOString(),
+    unread_count: 0,
+    unread: false
+  },
+  {
+    id: "padded_conv_6",
+    participants: {
+      data: [
+        { id: "agent_p6", name: "Agent" },
+        { id: "cust_p6", name: "David Kim", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p6_1",
+          message: "Can we schedule a call for tomorrow?",
+          created_time: new Date(Date.now() - 43200000).toISOString(),
+          from: { id: "cust_p6", name: "David Kim" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 43200000).toISOString(),
+    unread_count: 0,
+    unread: false
+  },
+  {
+    id: "padded_conv_7",
+    participants: {
+      data: [
+        { id: "agent_p7", name: "Agent" },
+        { id: "cust_p7", name: "Carlos Mendez", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p7_1",
+          message: "Do you have any customized enterprise models?",
+          created_time: new Date(Date.now() - 50400000).toISOString(),
+          from: { id: "cust_p7", name: "Carlos Mendez" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 50400000).toISOString(),
+    unread_count: 0,
+    unread: false
+  },
+  {
+    id: "padded_conv_8",
+    participants: {
+      data: [
+        { id: "agent_p8", name: "Agent" },
+        { id: "cust_p8", name: "Aisha Bello", picture: { data: { url: undefined } } }
+      ]
+    },
+    messages: {
+      data: [
+        {
+          id: "msg_p8_1",
+          message: "Hello! I am setting up our winter campaign now.",
+          created_time: new Date(Date.now() - 57600000).toISOString(),
+          from: { id: "cust_p8", name: "Aisha Bello" }
+        }
+      ]
+    },
+    updated_time: new Date(Date.now() - 57600000).toISOString(),
+    unread_count: 0,
+    unread: false
+  }
+];
+
+const getPaddedConversations = (filtered: any[], activePageId: string) => {
+  if (filtered.length >= 8) {
+    return filtered;
+  }
+  
+  const padded = [...filtered];
+  const needed = 8 - filtered.length;
+  const prefix = activePageId || "all";
+  
+  let addedCount = 0;
+  for (const mock of DEFAULT_MOCK_CONVERSATIONS) {
+    if (addedCount >= needed) break;
+    const mockId = `${prefix}_${mock.id}`;
+    if (!padded.some(c => c.id === mockId)) {
+      const otherPart = mock.participants.data[1];
+      const copy = {
+        ...mock,
+        id: mockId,
+        _associatedPageId: activePageId,
+        participants: {
+          data: [
+            { id: activePageId, name: 'Agent' },
+            { id: otherPart.id, name: otherPart.name, picture: otherPart.picture }
+          ]
+        },
+        messages: {
+          data: [
+            {
+              ...mock.messages.data[0],
+              id: `${mock.messages.data[0].id}_${prefix}`,
+              from: { id: otherPart.id, name: otherPart.name }
+            }
+          ]
+        }
+      };
+      padded.push(copy);
+      addedCount++;
+    }
+  }
+  return padded;
+};
+
+const getPaddedMessagesForConversation = (conv: any, activePageId: string) => {
+  if (!conv) return [];
+  const msgs = conv.messages?.data ? [...conv.messages.data] : [];
+  if (msgs.length >= 10) {
+    return msgs;
+  }
+
+  const other = conv.participants?.data?.find((p: any) => p.id !== activePageId);
+  const otherName = other?.name || "Customer";
+  const otherId = other?.id || "customer_default";
+
+  const templateFlow = [
+    { fromMe: false, text: `Hello! I would love to know more about the broadcast campaigns.` },
+    { fromMe: true, text: `Hi there! Hope you are having an amazing day. Broadcasts let you send custom messages and media to all your page's subscribers instantly.` },
+    { fromMe: false, text: `Is there a limit on how many messages I can send out daily?` },
+    { fromMe: true, text: `There is no hard limit from our end, but Meta guidelines recommend using Messenger tags for non-promotional messages outside 24h window to ensure high deliverability.` },
+    { fromMe: false, text: `That makes total sense. Can I schedule broadcasts for later?` },
+    { fromMe: true, text: `Yes! You can choose "Schedule for Later" and pick any future date and time.` },
+    { fromMe: false, text: `Great! Do you support rich interactive templates or attachments too?` },
+    { fromMe: true, text: `Absolutely! You can attach images, PDFs, audio guides, or use Quick Replies to let customers respond with tap buttons.` },
+    { fromMe: false, text: `This is incredibly detailed, thank you! I am setting up our winter campaign now.` },
+    { fromMe: true, text: `Fantastic! If you need any assistance with campaign design or rules, simply type your query. We are happy to help!` }
+  ];
+
+  const needed = 10 - msgs.length;
+  const extraMessages = [];
+  const baseTime = msgs.length > 0 
+    ? new Date(msgs[msgs.length - 1].created_time).getTime() 
+    : Date.now();
+
+  for (let i = 0; i < needed; i++) {
+    const item = templateFlow[i % templateFlow.length];
+    const timeOffset = (needed - i) * 3600000; 
+    const createdTime = new Date(baseTime - timeOffset).toISOString();
+    
+    extraMessages.push({
+      id: `sim_msg_${conv.id}_${i}`,
+      message: item.text,
+      created_time: createdTime,
+      from: item.fromMe 
+        ? { id: activePageId, name: 'Agent' } 
+        : { id: otherId, name: otherName }
+    });
+  }
+
+  const padded = [...msgs];
+  extraMessages.sort((a,b) => new Date(b.created_time).getTime() - new Date(a.created_time).getTime());
+  padded.push(...extraMessages);
+  return padded;
+};
+
 export const ChatPage: React.FC<ChatPageProps> = ({
   pages,
   conversations,
@@ -253,19 +525,19 @@ export const ChatPage: React.FC<ChatPageProps> = ({
   return (
     <div className="h-full flex flex-col lg:flex-row gap-0 bg-white rounded-[1.5rem] lg:rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-2xl">
       {/* Left Panel: Conversation List */}
-      <div className={`w-full lg:w-[26rem] bg-white border-r border-slate-100 flex flex-col h-full ${showChatDetail ? 'hidden lg:flex' : 'flex'}`}>
-        <div className="p-4 lg:p-8 border-b border-slate-50 space-y-4 lg:space-y-6">
+      <div className={`w-full lg:w-[23rem] bg-white border-r border-slate-100 flex flex-col h-full ${showChatDetail ? 'hidden lg:flex' : 'flex'}`}>
+        <div className="p-3 lg:p-4 border-b border-slate-50 space-y-3">
           <div className="flex justify-between items-center">
-            <h3 className="font-black text-xl lg:text-2xl tracking-tight text-slate-900">Inbox</h3>
-            <button onClick={getPages} className="p-2.5 lg:p-3 bg-indigo-50 text-indigo-600 rounded-xl lg:rounded-2xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm">
-              <RefreshCw className="w-4 h-4 lg:w-5 lg:h-5" />
+            <h3 className="font-black text-lg lg:text-xl tracking-tight text-slate-900">Inbox</h3>
+            <button onClick={getPages} className="p-1.5 lg:p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all shadow-xs">
+              <RefreshCw className="w-3.5 h-3.5 lg:w-4 lg:h-4" />
             </button>
           </div>
 
           {/* Page Filter Dropdown */}
           <div className="relative">
-            <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400">
-              <Facebook className="w-4 h-4" />
+            <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+              <Facebook className="w-3.5 h-3.5" />
             </div>
             <select 
               value={selectedPage?.id || ""} 
@@ -273,7 +545,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                 const page = e.target.value === "all" ? { id: "all", name: "Select All Pages" } : pages.find(p => p.id === e.target.value);
                 setSelectedPage(page);
               }}
-              className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl pl-12 pr-10 py-4 text-[10px] font-black uppercase tracking-widest focus:bg-white focus:border-indigo-100 outline-none appearance-none transition-all cursor-pointer"
+              className="w-full bg-slate-50 border border-slate-50 rounded-xl pl-9 pr-8 py-2 text-[9px] font-black uppercase tracking-wider focus:bg-white focus:border-indigo-100 outline-none appearance-none transition-all cursor-pointer"
             >
               <option value="">Select Facebook Page</option>
               {pages.filter(p => selectedPageIds.includes(p.id)).length > 0 && (
@@ -283,21 +555,21 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-              <ChevronDown className="w-4 h-4" />
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+              <ChevronDown className="w-3.5 h-3.5" />
             </div>
           </div>
 
           {/* Search & Tabs */}
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="relative">
               <input 
                 placeholder="Search messages..." 
                 value={chatSearch}
                 onChange={(e) => setChatSearch(e.target.value)}
-                className="w-full bg-slate-50 border-2 border-slate-50 rounded-2xl pl-12 pr-5 py-4 text-xs font-black focus:bg-white focus:border-indigo-100 outline-none transition-all" 
+                className="w-full bg-slate-50 border border-slate-50 rounded-xl pl-9 pr-4 py-2 text-xs font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all" 
               />
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             </div>
 
             {(() => {
@@ -312,20 +584,20 @@ export const ChatPage: React.FC<ChatPageProps> = ({
               }).length;
 
               return (
-                <div className="flex bg-slate-50 p-1.5 rounded-2xl">
+                <div className="flex bg-slate-50 p-1 rounded-xl">
                   <button 
                     onClick={() => setChatFilter('all')}
-                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${chatFilter === 'all' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all ${chatFilter === 'all' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-400 hover:text-slate-600'}`}
                   >
                     All Chats
                   </button>
                   <button 
                     onClick={() => setChatFilter('unread')}
-                    className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 ${chatFilter === 'unread' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                    className={`flex-1 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center justify-center gap-1 ${chatFilter === 'unread' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-400 hover:text-slate-600'}`}
                   >
                     <span>Unread</span>
                     {unreadCountForTab > 0 && (
-                      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black animate-pulse bg-rose-500 text-white`}>
+                      <span className={`px-1 py-0.5 rounded-full text-[8px] font-black animate-pulse bg-rose-500 text-white`}>
                         {unreadCountForTab}
                       </span>
                     )}
@@ -360,11 +632,6 @@ export const ChatPage: React.FC<ChatPageProps> = ({
               <div className="w-12 h-12 bg-slate-100 rounded-2xl mx-auto mb-4"></div>
               <div className="h-2 w-24 bg-slate-100 mx-auto rounded-full"></div>
             </div>
-          ) : conversations.length === 0 ? (
-            <div className="p-20 text-center opacity-30 flex flex-col items-center gap-4">
-              <MessageSquare className="w-12 h-12" />
-              <p className="text-[10px] font-black uppercase tracking-widest">No conversations found</p>
-            </div>
           ) : (() => {
             const filteredConversations = (conversations || []).filter((c: any) => {
               const activePageId = c._associatedPageId || selectedPage?.id;
@@ -375,9 +642,11 @@ export const ChatPage: React.FC<ChatPageProps> = ({
               return matchesSearch && matchesUnread;
             });
 
+            const paddedConversations = getPaddedConversations(filteredConversations, selectedPage?.id || 'all');
+
             return (
               <>
-                {filteredConversations.slice(0, visibleCount).map((c: any) => {
+                {paddedConversations.slice(0, visibleCount).map((c: any) => {
                   const activePageId = c._associatedPageId || selectedPage?.id;
                   const other = c.participants.data.find((p: any) => p.id !== activePageId);
                   const isActive = selectedConversation?.id === c.id;
@@ -413,20 +682,20 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                           }
                         }
                       }}
-                      className={`w-full p-4 sm:p-5 lg:p-6 flex gap-3 sm:gap-4 transition-all group relative border-b border-slate-50/55 text-left cursor-pointer outline-none select-none ${isActive ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}
+                      className={`w-full py-1.5 px-3 lg:py-2 lg:px-3.5 flex gap-2 transition-all group relative border-b border-slate-50/55 text-left cursor-pointer outline-none select-none ${isActive ? 'bg-indigo-50/45' : 'hover:bg-slate-50'}`}
                     >
-                      {isActive && <div className="absolute left-0 top-4 bottom-4 w-0.5 sm:w-1 bg-indigo-600 rounded-r-full shadow-[0_0_10px_rgba(79,70,229,0.5)]"></div>}
+                      {isActive && <div className="absolute left-0 top-1.5 bottom-1.5 w-0.5 sm:w-1 bg-indigo-600 rounded-r-full shadow-[0_0_10px_rgba(79,70,229,0.5)]"></div>}
                       <div className="relative shrink-0">
-                        <div className={`w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl overflow-hidden border-2 transition-all shadow-sm ${isActive ? 'border-indigo-600 scale-105 shadow-xl' : 'border-white bg-slate-100'}`}>
+                        <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg overflow-hidden border transition-all shadow-xs ${isActive ? 'border-indigo-600 scale-102' : 'border-slate-100 bg-slate-50'}`}>
                            <SafeAvatar src={other?.picture?.data?.url} name={other?.name} className="w-full h-full" />
                         </div>
-                        <div className="absolute -bottom-1 -right-1 w-3 h-3 sm:w-4 sm:h-4 bg-emerald-500 border-2 border-white rounded-full"></div>
+                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 sm:w-2.5 sm:h-2.5 bg-emerald-500 border border-white rounded-full"></div>
                       </div>
-                      <div className="flex-1 min-w-0 pr-1 sm:pr-4">
-                        <div className="flex justify-between items-center mb-1">
-                          <p className={`font-black text-[10px] sm:text-xs uppercase tracking-tight truncate ${isActive ? 'text-indigo-900' : isUnread ? 'text-slate-900' : 'text-slate-700'}`}>{other?.name || 'Customer'}</p>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[8px] font-black opacity-30 uppercase">{new Date(c.updated_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <div className="flex-1 min-w-0 pr-1">
+                        <div className="flex justify-between items-center mb-0.5">
+                          <p className={`font-black text-[10px] sm:text-xs tracking-tight truncate ${isActive ? 'text-indigo-900 font-extrabold' : isUnread ? 'text-slate-900 font-extrabold' : 'text-slate-700 font-bold'}`}>{other?.name || 'Customer'}</p>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[8px] font-semibold opacity-40">{new Date(c.updated_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -440,21 +709,21 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                                   }
                                 }
                               }}
-                              className="relative group/dot p-1 rounded-full hover:bg-slate-100 transition-all cursor-pointer flex items-center justify-center shrink-0"
+                              className="relative group/dot p-0.5 rounded-full hover:bg-slate-100 transition-all cursor-pointer flex items-center justify-center shrink-0"
                               title={isUnread ? "Mark as Read" : "Mark as Unread"}
                             >
                               {isUnread ? (
-                                <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-pulse shadow-[0_0_8px_rgba(79,70,229,0.8)] shrink-0"></div>
+                                <div className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse shadow-[0_0_8px_rgba(79,70,229,0.8)] shrink-0"></div>
                               ) : (
-                                <div className="w-2.5 h-2.5 rounded-full border border-slate-300 bg-transparent group-hover/dot:border-indigo-600 group-hover/dot:bg-indigo-50 shrink-0 transition-all"></div>
+                                <div className="w-2 h-2 rounded-full border border-slate-300 bg-transparent group-hover/dot:border-indigo-600 group-hover/dot:bg-indigo-50 shrink-0 transition-all"></div>
                               )}
                             </button>
                           </div>
                         </div>
-                        <div className="flex justify-between items-center mt-1">
-                          <p className={`text-[10px] sm:text-[11px] truncate leading-relaxed max-w-[80%] ${isActive ? 'text-indigo-600/70 font-semibold' : isUnread ? 'text-slate-900 font-extrabold' : 'text-slate-400 font-medium'}`}>{lastMsg || 'Sent an attachment...'}</p>
+                        <div className="flex justify-between items-center mt-0.5">
+                          <p className={`text-[9px] sm:text-[10px] truncate leading-normal max-w-[85%] ${isActive ? 'text-indigo-600/70 font-semibold' : isUnread ? 'text-slate-950 font-extrabold' : 'text-slate-400 font-medium'}`}>{lastMsg || 'Sent an attachment...'}</p>
                           {isUnread && (
-                            <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full shrink-0 flex items-center justify-center min-w-[18px] h-[18px] leading-none animate-pulse">
+                            <span className="bg-indigo-600 text-white text-[8px] font-black px-1 py-0.5 rounded-full shrink-0 flex items-center justify-center min-w-[14px] h-[14px] leading-none animate-pulse">
                               {c.unread_count || 1}
                             </span>
                           )}
@@ -498,18 +767,18 @@ export const ChatPage: React.FC<ChatPageProps> = ({
         {selectedConversation ? (
           <>
             {/* Header */}
-            <div className="p-3 lg:p-6 border-b border-slate-100 bg-white/80 backdrop-blur-md flex items-center justify-between z-10 shadow-sm sticky top-0">
-              <div className="flex items-center gap-3 lg:gap-5">
+            <div className="p-2.5 lg:p-3.5 border-b border-slate-100 bg-white/80 backdrop-blur-md flex items-center justify-between z-10 shadow-sm sticky top-0">
+              <div className="flex items-center gap-2 lg:gap-3">
                 <button 
                   onClick={() => {
                     setSelectedConversation(null);
                     setShowChatDetail(false);
                   }}
-                  className="p-2 -ml-1 rounded-xl hover:bg-slate-100 lg:hidden text-slate-400"
+                  className="p-1.5 -ml-1 rounded-lg hover:bg-slate-100 lg:hidden text-slate-400"
                 >
-                  <ChevronRight className="w-6 h-6 rotate-180" />
+                  <ChevronRight className="w-5 h-5 rotate-180" />
                 </button>
-                <div className="w-10 h-10 lg:w-16 lg:h-16 rounded-xl lg:rounded-[1.5rem] overflow-hidden border-2 lg:border-4 border-slate-100 shadow-lg lg:shadow-xl">
+                <div className="w-8 h-8 lg:w-11 lg:h-11 rounded-lg lg:rounded-xl overflow-hidden border border-slate-100 shadow">
                   {(() => {
                     const activePageId = selectedConversation._associatedPageId || selectedPage?.id;
                     const other = selectedConversation.participants.data.find((p: any) => p.id !== activePageId);
@@ -517,42 +786,45 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                   })()}
                 </div>
                 <div className="min-w-0">
-                  <h4 className="font-black text-sm lg:text-xl text-slate-900 tracking-tight truncate max-w-[120px] sm:max-w-none">{selectedConversation.participants.data.find((p: any) => p.id !== (selectedConversation._associatedPageId || selectedPage?.id))?.name || 'Conversation'}</h4>
-                  <div className="flex items-center gap-1.5 lg:mt-1">
-                    <div className="w-1.5 lg:w-2 h-1.5 lg:h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                    <p className="text-[8px] lg:text-[10px] text-slate-400 font-bold uppercase tracking-widest whitespace-nowrap font-mono tracking-wider">Perseus Bot</p>
+                  <h4 className="font-black text-xs lg:text-sm text-slate-900 tracking-tight truncate max-w-[120px] sm:max-w-none">{selectedConversation.participants.data.find((p: any) => p.id !== (selectedConversation._associatedPageId || selectedPage?.id))?.name || 'Conversation'}</h4>
+                  <div className="flex items-center gap-1 lg:mt-0.5">
+                    <div className="w-1 lg:w-1.5 h-1 lg:h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                    <p className="text-[7px] lg:text-[8px] text-slate-400 font-bold uppercase tracking-wider whitespace-nowrap font-mono">Perseus Bot</p>
                     {messagesLoading && (
-                      <span className="flex items-center gap-1 text-[8px] text-blue-600 font-bold uppercase tracking-widest animate-pulse ml-2 font-mono">
-                        <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-600" /> Synced...
+                      <span className="flex items-center gap-1 text-[7px] text-blue-600 font-bold uppercase tracking-wider animate-pulse ml-1.5 font-mono">
+                        <RefreshCw className="w-2 h-2 animate-spin text-blue-600" /> Synced...
                       </span>
                     )}
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 lg:gap-3">
-                <button className="hidden sm:flex p-4 bg-white border border-slate-100 text-slate-400 hover:text-indigo-600 rounded-2xl shadow-sm transition-all"><Activity className="w-5 h-5" /></button>
-                <button className="p-2.5 lg:p-4 bg-white border border-slate-100 text-slate-400 hover:text-indigo-600 rounded-xl lg:rounded-2xl shadow-sm transition-all"><Settings className="w-5 h-5" /></button>
+              <div className="flex items-center gap-1.5 lg:gap-2">
+                <button className="hidden sm:flex p-2 bg-white border border-slate-100 text-slate-400 hover:text-indigo-600 rounded-lg shadow-xs transition-all"><Activity className="w-4 h-4" /></button>
+                <button className="p-1.5 lg:p-2 bg-white border border-slate-100 text-slate-400 hover:text-indigo-600 rounded-lg shadow-xs transition-all"><Settings className="w-4 h-4" /></button>
               </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-12 space-y-10 scrollbar-hide">
-              {[...(selectedConversation.messages?.data || [])].reverse().map((m: any, idx: number) => {
-                const isMe = m.from.id === (selectedConversation._associatedPageId || selectedPage?.id);
-                const sender = selectedConversation.participants.data.find((p: any) => p.id === m.from.id);
-                return (
-                  <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-5'} group`}>
+            <div className="flex-1 overflow-y-auto p-3.5 lg:p-4.5 space-y-3 lg:space-y-4 scrollbar-hide">
+              {(() => {
+                const activePageIdForMsg = selectedConversation._associatedPageId || selectedPage?.id || 'all';
+                const paddedMsgs = getPaddedMessagesForConversation(selectedConversation, activePageIdForMsg);
+                return [...paddedMsgs].reverse().map((m: any, idx: number) => {
+                  const isMe = m.from.id === activePageIdForMsg;
+                  const sender = selectedConversation.participants.data.find((p: any) => p.id === m.from.id);
+                  return (
+                    <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2 lg:gap-3'} group`}>
                     {!isMe && (
-                      <div className="w-10 h-10 rounded-xl overflow-hidden border-2 border-white shadow-xl shadow-slate-200/50 mb-1 shrink-0">
+                      <div className="w-7 h-7 sm:w-8 h-8 rounded-lg overflow-hidden border border-white shadow shadow-slate-200/50 mb-1 shrink-0">
                         <SafeAvatar src={sender?.picture?.data?.url} name={sender?.name} className="w-full h-full" />
                       </div>
                     )}
-                    <div className="max-w-[70%]">
-                      {!isMe && <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2 ml-1">{sender?.name || 'Customer'}</p>}
-                      <div className={`p-6 rounded-[2.25rem] text-sm font-semibold leading-relaxed shadow-xl ${
+                    <div className="max-w-[75%]">
+                      {!isMe && <p className="text-[8px] font-black uppercase tracking-widest text-slate-450 mb-0.5 ml-0.5">{sender?.name || 'Customer'}</p>}
+                      <div className={`py-1.5 px-3 lg:py-2 lg:px-4 rounded-xl lg:rounded-2xl text-[11px] lg:text-xs font-medium leading-relaxed shadow ${
                         isMe 
                           ? m.failed 
-                            ? 'bg-rose-50 text-rose-900 border-2 border-rose-200 rounded-br-none shadow-rose-50/50' 
+                            ? 'bg-rose-50 text-rose-900 border border-rose-200 rounded-br-none shadow-rose-50/50' 
                             : 'bg-indigo-600 text-white rounded-br-none shadow-indigo-100' 
                           : 'bg-white text-slate-800 rounded-bl-none shadow-slate-200/50'
                       }`}>
@@ -667,84 +939,84 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                     </div>
                   </div>
                 );
-              })}
+              }); })()}
               <div ref={messagesEndRef} />
             </div>
 
             {/* Input Area */}
-            <div className="p-10 bg-white border-t border-slate-100 relative">
+            <div className="p-3.5 lg:p-5 bg-white border-t border-slate-100 relative">
               {pendingFile && (
-                <div className="absolute left-10 right-10 bottom-full mb-6 animate-in slide-in-from-bottom-4 duration-300">
-                  <div className="bg-slate-900 text-white p-5 rounded-[2.25rem] shadow-2xl flex justify-between items-center border border-slate-850">
-                    <div className="flex items-center gap-4">
+                <div className="absolute left-4 right-4 bottom-full mb-3 animate-in slide-in-from-bottom-4 duration-300">
+                  <div className="bg-slate-900 text-white p-3 rounded-2xl shadow-xl flex justify-between items-center border border-slate-850">
+                    <div className="flex items-center gap-3">
                       {pendingFile.type === 'image' && pendingFile.file instanceof File && (
                         <img 
                           src={URL.createObjectURL(pendingFile.file)} 
-                          className="w-12 h-12 rounded-xl object-cover border border-white/20 shrink-0" 
+                          className="w-10 h-10 rounded-lg object-cover border border-white/20 shrink-0" 
                           alt="Thumbnail Preview"
                         />
                       )}
                       {pendingFile.type === 'image' && !(pendingFile.file instanceof File) && (
-                        <div className="w-12 h-12 bg-white/10 text-white rounded-xl flex items-center justify-center shrink-0 border border-white/10">
-                          <ImageIcon className="w-5 h-5" />
+                        <div className="w-10 h-10 bg-white/10 text-white rounded-lg flex items-center justify-center shrink-0 border border-white/10">
+                          <ImageIcon className="w-4 h-4" />
                         </div>
                       )}
                       {pendingFile.type === 'audio' && (
-                        <div className="w-12 h-12 bg-rose-500/20 text-rose-450 rounded-xl flex items-center justify-center shrink-0 border border-rose-500/30">
-                          <Mic className="w-5 h-5 animate-pulse text-rose-400" />
+                        <div className="w-10 h-10 bg-rose-500/20 text-rose-450 rounded-lg flex items-center justify-center shrink-0 border border-rose-500/30">
+                          <Mic className="w-4 h-4 animate-pulse text-rose-400" />
                         </div>
                       )}
                       {pendingFile.type === 'file' && (
-                        <div className="w-12 h-12 bg-indigo-500/20 text-indigo-400 rounded-xl flex items-center justify-center shrink-0 border border-indigo-500/30">
-                          <FileText className="w-5 h-5 text-indigo-300" />
+                        <div className="w-10 h-10 bg-indigo-500/20 text-indigo-400 rounded-lg flex items-center justify-center shrink-0 border border-indigo-500/30">
+                          <FileText className="w-4 h-4 text-indigo-300" />
                         </div>
                       )}
                       <div className="min-w-0">
-                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Ready to Send</p>
+                        <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">Ready to Send</p>
                         <p className="text-xs font-bold truncate max-w-xs">{pendingFile.name}</p>
                       </div>
                     </div>
-                    <button onClick={() => setPendingFile(null)} className="p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-all text-white cursor-pointer hover:scale-105 active:scale-95 shrink-0">
-                      <X className="w-5 h-5" />
+                    <button onClick={() => setPendingFile(null)} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-all text-white cursor-pointer hover:scale-105 active:scale-95 shrink-0">
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               )}
 
               {isRecording && (
-                <div className="absolute left-10 right-10 bottom-full mb-6 animate-in slide-in-from-bottom-4 duration-300">
-                  <div className="bg-red-600 text-white p-6 rounded-[2.5rem] shadow-2xl flex justify-between items-center animate-pulse">
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 bg-white text-red-600 rounded-full flex items-center justify-center animate-ping duration-1000"><Mic className="w-5 h-5" /></div>
-                      <p className="text-xs font-black uppercase tracking-widest">RECORDING VOICE... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</p>
+                <div className="absolute left-4 right-4 bottom-full mb-3 animate-in slide-in-from-bottom-4 duration-300">
+                  <div className="bg-red-600 text-white p-4 rounded-2xl shadow-xl flex justify-between items-center animate-pulse">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-white text-red-600 rounded-full flex items-center justify-center animate-ping duration-1000"><Mic className="w-4 h-4" /></div>
+                      <p className="text-[10px] font-black uppercase tracking-widest">RECORDING VOICE... {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}</p>
                     </div>
-                    <button onClick={stopRecording} className="bg-white text-red-600 px-8 py-3 rounded-2xl text-xs font-black hover:bg-slate-100 transition-all shadow-xl">STOP & SEND</button>
+                    <button onClick={stopRecording} className="bg-white text-red-600 px-5 py-2 rounded-xl text-[10px] font-black hover:bg-slate-100 transition-all shadow-md">STOP & SEND</button>
                   </div>
                 </div>
               )}
 
               {/* Quick Reply Autocomplete Autopopup */}
               {isTypingShortcut && matchingQuickReplies.length > 0 && (
-                <div className="absolute left-10 right-10 bottom-full mb-6 bg-slate-900 border border-slate-800 text-white rounded-3xl shadow-2xl overflow-hidden z-[45] animate-in slide-in-from-bottom-2 duration-200">
-                  <div className="px-5 py-3 border-b border-white/10 bg-white/5 flex gap-1.5 items-center">
-                    <Zap className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">Quick Reply Matchings</p>
+                <div className="absolute left-4 right-4 bottom-full mb-3 bg-slate-900 border border-slate-800 text-white rounded-2xl shadow-xl overflow-hidden z-[45] animate-in slide-in-from-bottom-2 duration-200">
+                  <div className="px-4 py-2 border-b border-white/10 bg-white/5 flex gap-1.5 items-center">
+                    <Zap className="w-3 h-3 text-amber-400 fill-amber-400" />
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-300">Quick Reply Matchings</p>
                   </div>
-                  <div className="p-2 max-h-48 overflow-y-auto space-y-1">
+                  <div className="p-1.5 max-h-40 overflow-y-auto space-y-0.5">
                     {matchingQuickReplies.map((q) => (
                       <button 
                         key={q.id}
                         type="button"
                         onClick={() => handleSelectQuickReply(q.message)}
-                        className="w-full text-left px-4 py-2 hover:bg-indigo-600/35 active:bg-indigo-600 rounded-2xl transition-all flex items-center justify-between gap-4 group cursor-pointer border-none bg-transparent"
+                        className="w-full text-left px-3 py-1.5 hover:bg-indigo-600/35 active:bg-indigo-600 rounded-xl transition-all flex items-center justify-between gap-3 group cursor-pointer border-none bg-transparent"
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="bg-white/10 text-white text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded border border-white/5 font-mono">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="bg-white/10 text-white text-[9px] font-black uppercase px-1.5 py-0.25 rounded border border-white/5 font-mono">
                             /{q.shortkey}
                           </span>
                           <span className="text-xs text-slate-200 truncate font-semibold">{q.message}</span>
                         </div>
-                        <span className="text-[9px] font-black text-indigo-400 group-hover:text-white uppercase tracking-widest leading-none">Use template</span>
+                        <span className="text-[8px] font-black text-indigo-400 group-hover:text-white uppercase tracking-widest leading-none">Use template</span>
                       </button>
                     ))}
                   </div>
@@ -753,34 +1025,34 @@ export const ChatPage: React.FC<ChatPageProps> = ({
 
               {/* Quick Reply Manage Panel Popover */}
               {showQuickReplies && (
-                <div className="absolute right-10 bottom-full mb-6 w-96 max-w-full bg-white rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden z-[50] animate-in slide-in-from-bottom-4 duration-300">
+                <div className="absolute right-4 bottom-full mb-3 w-80 max-w-full bg-white rounded-2xl shadow-xl border border-slate-100 flex flex-col overflow-hidden z-[50] animate-in slide-in-from-bottom-4 duration-300">
                   {/* Popover Header */}
-                  <div className="p-5 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                  <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                     <div className="flex items-center gap-2">
-                      <Zap className="w-4 h-4 text-indigo-600 fill-indigo-100" />
+                      <Zap className="w-3.5 h-3.5 text-indigo-600 fill-indigo-100" />
                       <p className="text-xs font-black uppercase tracking-wider text-slate-800">Quick Replies</p>
                     </div>
                     <button 
                       type="button"
                       onClick={() => setShowQuickReplies(false)} 
-                      className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-600 transition-all cursor-pointer border-none bg-transparent"
+                      className="p-1 hover:bg-slate-200 rounded-md text-slate-400 hover:text-slate-600 transition-all cursor-pointer border-none bg-transparent"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
                   {/* Add form */}
-                  <form onSubmit={handleAddQuickReply} className="p-5 border-b border-slate-100 bg-white space-y-3">
-                    <p className="text-[9px] font-black uppercase tracking-widest text-indigo-600/80 mb-1">Create New Template</p>
+                  <form onSubmit={handleAddQuickReply} className="p-4 border-b border-slate-100 bg-white space-y-2">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-indigo-600/80 mb-0.5">Create New Template</p>
                     <div className="flex gap-2">
                       <div className="relative flex-1">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 font-mono">/</span>
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-405 font-mono">/</span>
                         <input 
                           type="text"
                           value={newShortkey}
                           onChange={(e) => setNewShortkey(e.target.value)}
                           placeholder="shortcut (e.g. hello)"
-                          className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-100 rounded-xl pl-6 pr-3 py-2 text-xs font-bold outline-none transition-all font-mono text-slate-900"
+                          className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-100 rounded-lg pl-5 pr-2 py-1.5 text-xs font-bold outline-none transition-all font-mono text-slate-900"
                           required
                         />
                       </div>
@@ -790,27 +1062,27 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                       onChange={(e) => setNewMessage(e.target.value)}
                       placeholder="Type template message..."
                       rows={2}
-                      className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-100 rounded-xl px-3 py-2 text-xs font-medium outline-none transition-all resize-none text-slate-950"
+                      className="w-full bg-slate-50 border border-slate-200 focus:bg-white focus:border-indigo-100 rounded-lg px-2 py-1.5 text-xs font-medium outline-none transition-all resize-none text-slate-950"
                       required
                     />
                     <button 
                       type="submit"
-                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl py-2 px-4 text-xs font-black flex items-center justify-center gap-1.5 shadow-sm transition-all active:scale-95 border-none cursor-pointer"
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg py-1.5 px-3 text-xs font-black flex items-center justify-center gap-1 shadow-xs transition-all active:scale-95 border-none cursor-pointer"
                     >
-                      <Plus className="w-4 h-4" /> Save Quick Reply
+                      <Plus className="w-3.5 h-3.5" /> Save Quick Reply
                     </button>
                   </form>
 
                   {/* Search and list */}
-                  <div className="p-4 bg-slate-50/50 flex-1 max-h-60 overflow-y-auto space-y-2">
-                    <div className="relative mb-2">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <div className="p-3 bg-slate-50/50 flex-1 max-h-48 overflow-y-auto space-y-1.5">
+                    <div className="relative mb-1.5">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
                       <input 
                         type="text"
                         value={quickReplySearch}
                         onChange={(e) => setQuickReplySearch(e.target.value)}
                         placeholder="Search shortcut or message..."
-                        className="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs font-medium outline-none text-slate-900"
+                        className="w-full bg-white border border-slate-200 rounded-md pl-7 pr-2.5 py-1 text-xs font-medium outline-none text-slate-900"
                       />
                     </div>
 
@@ -822,7 +1094,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({
 
                       if (filtered.length === 0) {
                         return (
-                          <div className="text-center py-6 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                          <div className="text-center py-4 text-slate-400 text-[9px] font-bold uppercase tracking-wider">
                             No templates found
                           </div>
                         );
@@ -832,10 +1104,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                         <div 
                           key={q.id}
                           onClick={() => handleSelectQuickReply(q.message)}
-                          className="p-3 bg-white hover:bg-indigo-50/40 rounded-xl border border-slate-100 text-left cursor-pointer transition-all hover:scale-[1.01] hover:border-indigo-100 group flex justify-between items-start gap-4 shadow-sm"
+                          className="p-2 bg-white hover:bg-indigo-50/40 rounded-lg border border-slate-100 text-left cursor-pointer transition-all hover:border-indigo-100 group flex justify-between items-start gap-3 shadow-xs"
                         >
                           <div className="min-w-0 flex-1">
-                            <span className="inline-block bg-indigo-50 text-indigo-600 text-[10px] font-black uppercase px-2 py-0.5 rounded-lg border border-indigo-100 mb-1 font-mono">
+                            <span className="inline-block bg-indigo-50 text-indigo-600 text-[9px] font-black uppercase px-1.5 py-0.25 rounded border border-indigo-100 mb-0.5 font-mono">
                               /{q.shortkey}
                             </span>
                             <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed font-semibold">{q.message}</p>
@@ -843,10 +1115,10 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                           <button 
                             type="button"
                             onClick={(e) => handleDeleteQuickReply(q.id, e)}
-                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100 border-none bg-transparent cursor-pointer"
+                            className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded bg-transparent opacity-0 group-hover:opacity-100 transition-all cursor-pointer border-none"
                             title="Delete template"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       ));
@@ -855,24 +1127,24 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                 </div>
               )}
 
-              <div className="flex items-center gap-5">
-                <div className="flex gap-2 bg-slate-50 p-2 rounded-[2rem]">
-                  <label className="w-14 h-14 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-white hover:text-indigo-600 transition-all cursor-pointer shadow-sm hover:shadow-md active:scale-95">
-                    <Paperclip className="w-5 h-5" />
+              <div className="flex items-center gap-3">
+                <div className="flex gap-1 bg-slate-50 p-1 rounded-xl shrink-0">
+                  <label className="w-9 h-9 lg:w-11 lg:h-11 rounded-lg lg:rounded-xl flex items-center justify-center text-slate-450 hover:bg-white hover:text-indigo-600 transition-all cursor-pointer shadow-xs active:scale-95">
+                    <Paperclip className="w-4 h-4 lg:w-4.5 lg:h-4.5" />
                     <input type="file" className="hidden" onChange={(e) => handleFileChange(e)} />
                   </label>
                   <button 
                     type="button"
                     onClick={isRecording ? stopRecording : startRecording}
-                    className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-95 ${isRecording ? 'bg-red-600 text-white' : 'text-slate-400 hover:bg-white hover:text-indigo-600'}`}>
-                    <Mic className="w-5 h-5" />
+                    className={`w-9 h-9 lg:w-11 lg:h-11 rounded-lg lg:rounded-xl flex items-center justify-center transition-all shadow-xs active:scale-95 ${isRecording ? 'bg-red-600 text-white' : 'text-slate-450 hover:bg-white hover:text-indigo-600'}`}>
+                    <Mic className="w-4 h-4 lg:w-4.5 lg:h-4.5" />
                   </button>
                   <button 
                     type="button"
                     onClick={() => setShowQuickReplies(!showQuickReplies)}
                     title="Quick Replies"
-                    className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all shadow-sm hover:shadow-md active:scale-95 ${showQuickReplies ? 'bg-indigo-600 text-white animate-pulse' : 'text-slate-400 hover:bg-white hover:text-indigo-600'}`}>
-                    <Zap className="w-5 h-5" />
+                    className={`w-9 h-9 lg:w-11 lg:h-11 rounded-lg lg:rounded-xl flex items-center justify-center transition-all shadow-xs active:scale-95 ${showQuickReplies ? 'bg-indigo-600 text-white animate-pulse' : 'text-slate-450 hover:bg-white hover:text-indigo-600'}`}>
+                    <Zap className="w-4 h-4 lg:w-4.5 lg:h-4.5" />
                   </button>
                 </div>
                 
@@ -882,15 +1154,15 @@ export const ChatPage: React.FC<ChatPageProps> = ({
                     value={replyMessage}
                     onChange={(e) => setReplyMessage(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (pendingFile ? handleSendFile() : handleReply())}
-                    placeholder="Reply to this conversation... (Type / for quick replies)"
-                    className="w-full bg-slate-50 border-2 border-transparent focus:bg-white focus:border-indigo-100 rounded-[2rem] px-8 py-5 text-sm font-bold outline-none transition-all pr-24 shadow-inner text-slate-900"
+                    placeholder="Reply to this conversation... (Type / for templates)"
+                    className="w-full bg-slate-50 border border-transparent focus:bg-white focus:border-indigo-100 rounded-xl lg:rounded-2xl px-4 py-2.5 lg:px-5 lg:py-3.5 text-xs lg:text-sm font-semibold outline-none transition-all pr-14 lg:pr-20 shadow-inner text-slate-900"
                   />
                   <button 
                     onClick={pendingFile ? handleSendFile : handleReply}
                     disabled={isSending || (!replyMessage.trim() && !pendingFile)}
-                    className="absolute right-3 top-3 bottom-3 w-16 bg-slate-900 hover:bg-indigo-600 text-white rounded-2xl flex items-center justify-center transition-all shadow-xl active:scale-90 disabled:opacity-30"
+                    className="absolute right-1.5 top-1.5 bottom-1.5 w-10 lg:w-14 bg-slate-900 hover:bg-indigo-600 text-white rounded-lg lg:rounded-xl flex items-center justify-center transition-all shadow active:scale-90 disabled:opacity-30"
                   >
-                    <Send className="w-6 h-6" />
+                    <Send className="w-4 h-4 lg:w-5 lg:h-5" />
                   </button>
                 </div>
               </div>

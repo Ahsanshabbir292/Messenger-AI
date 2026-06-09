@@ -1428,6 +1428,31 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
 
     setReplyMessage("");
 
+    if (selectedConversation.id && selectedConversation.id.includes('padded_conv_')) {
+      setIsSending(false);
+      setTimeout(() => {
+        const replyMsg = {
+          id: `reply_sim_${Date.now()}`,
+          message: `Thanks for your message! This is a secure preview simulation of Perseus Bot. If this was a production page, your subscriber would receive: "${textToSend}"`,
+          created_time: new Date().toISOString(),
+          from: { id: recipientId, name: selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.name || 'Customer' }
+        };
+        setSelectedConversation(prev => {
+          if (!prev || prev.id !== selectedConversation.id) return prev;
+          const currentMsgs = prev.messages?.data || [];
+          return {
+            ...prev,
+            updated_time: replyMsg.created_time,
+            messages: {
+              ...prev.messages,
+              data: [replyMsg, ...currentMsgs]
+            }
+          };
+        });
+      }, 1000);
+      return;
+    }
+
     try {
       await axios.post('/api/facebook/reply', {
         pageId: activePageId,
@@ -1537,6 +1562,31 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     });
 
     setPendingFile(null);
+
+    if (selectedConversation.id && selectedConversation.id.includes('padded_conv_')) {
+      setIsSending(false);
+      setTimeout(() => {
+        const replyMsg = {
+          id: `reply_sim_${Date.now()}`,
+          message: `Received your attachment! This is a secure preview simulation of Perseus Bot. If this was a production page, your subscriber would receive the file.`,
+          created_time: new Date().toISOString(),
+          from: { id: recipientId, name: selectedConversation.participants.data.find((p: any) => p.id !== activePageId)?.name || 'Customer' }
+        };
+        setSelectedConversation(prev => {
+          if (!prev || prev.id !== selectedConversation.id) return prev;
+          const currentMsgs = prev.messages?.data || [];
+          return {
+            ...prev,
+            updated_time: replyMsg.created_time,
+            messages: {
+              ...prev.messages,
+              data: [replyMsg, ...currentMsgs]
+            }
+          };
+        });
+      }, 1000);
+      return;
+    }
 
     try {
       const formData = new FormData();
@@ -2128,7 +2178,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 lg:p-8 pb-24 lg:pb-8 scroll-smooth h-full">
+        <div className={`flex-1 scroll-smooth h-full ${
+          activeTab === 'chat'
+            ? 'overflow-hidden p-1.5 lg:p-3 pb-[72px] lg:pb-3'
+            : 'overflow-y-auto p-4 lg:p-8 pb-24 lg:pb-8'
+        }`}>
           {!isCurrentTabAllowed ? (
             <div className="max-w-md mx-auto my-12 bg-white rounded-[2.5rem] border border-slate-100 shadow-2xl p-10 text-center animate-in fade-in slide-in-from-bottom-4">
               <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-[1.5rem] flex items-center justify-center mx-auto mb-6 text-red-500 shadow-md">
