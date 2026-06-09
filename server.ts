@@ -799,6 +799,12 @@ class MemoryFirestore {
     return new MemoryCollectionReference(col);
   }
 
+  collectionGroup(colId: string) {
+    return {
+      get: async () => ({ docs: [] })
+    };
+  }
+
   async runTransaction(updateFn: (transaction: any) => Promise<any>) {
     const tx = new MemoryTransaction();
     return updateFn(tx);
@@ -809,106 +815,338 @@ const FieldValue = {
   serverTimestamp: () => ({ _sv: true })
 };
 
+function toFirestoreValue(val: any): any {
+  if (val === null || val === undefined) return { nullValue: null };
+  if (typeof val === "boolean") return { booleanValue: val };
+  if (typeof val === "number") {
+    if (Number.isInteger(val)) {
+      return { integerValue: String(val) };
+    }
+    return { doubleValue: val };
+  }
+  if (typeof val === "string") {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(val)) {
+      return { timestampValue: val };
+    }
+    return { stringValue: val };
+  }
+  if (val instanceof Date) {
+    return { timestampValue: val.toISOString() };
+  }
+  if (Array.isArray(val)) {
+    return { arrayValue: { values: val.map(v => toFirestoreValue(v)) } };
+  }
+  if (typeof val === "object") {
+    if (val._sv) {
+      return { timestampValue: new Date().toISOString() };
+    }
+    const fields: any = {};
+    for (const k of Object.keys(val)) {
+      fields[k] = toFirestoreValue(val[k]);
+    }
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(val) };
+}
+
+function fromFirestoreValue(fVal: any): any {
+  if (!fVal) return null;
+  if ("nullValue" in fVal) return null;
+  if ("booleanValue" in fVal) return fVal.booleanValue;
+  if ("integerValue" in fVal) return parseInt(fVal.integerValue, 10);
+  if ("doubleValue" in fVal) return parseFloat(fVal.doubleValue);
+  if ("stringValue" in fVal) return fVal.stringValue;
+  if ("timestampValue" in fVal) return fVal.timestampValue;
+  if ("arrayValue" in fVal) {
+    const values = fVal.arrayValue.values || [];
+    return values.map((v: any) => fromFirestoreValue(v));
+  }
+  if ("mapValue" in fVal) {
+    const fields = fVal.mapValue.fields || {};
+    const obj: any = {};
+    for (const k of Object.keys(fields)) {
+      obj[k] = fromFirestoreValue(fields[k]);
+    }
+    return obj;
+  }
+  return fVal;
+}
+
+function toFirestoreFields(obj: any) {
+  const fields: any = {};
+  for (const k of Object.keys(obj)) {
+    fields[k] = toFirestoreValue(obj[k]);
+  }
+  return { fields };
+}
+
+function fromFirestoreFields(fields: any) {
+  const obj: any = {};
+  if (!fields) return obj;
+  for (const k of Object.keys(fields)) {
+    obj[k] = fromFirestoreValue(fields[k]);
+  }
+  return obj;
+}
+
+const restQueryCache = new Map<string, { timestamp: number; data: any }>();
+const CACHE_TTL_MS = 6000; // 6 seconds cache of Firestore REST queries to prevent 429 requests.
+
+function clearRestQueryCache() {
+  restQueryCache.clear();
+}
+
+async function getCachedRestQuery(key: string, fetchFn: () => Promise<any>): Promise<any> {
+  const cached = restQueryCache.get(key);
+  const now = Date.now();
+  if (cached && (now - cached.timestamp < CACHE_TTL_MS)) {
+    return cached.data;
+  }
+  const result = await fetchFn();
+  restQueryCache.set(key, { timestamp: now, data: result });
+  return result;
+}
+
+class RestCollectionReference {
+  constructor(private path: string) {}
+
+  doc(id: string) {
+    return new RestDocumentReference(this.path, id);
+  }
+
+  async get() {
+    const cacheKey = `col:${this.path}`;
+    return getCachedRestQuery(cacheKey, async () => {
+      const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+      const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+      const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
+      
+      const parts = this.path.split("/");
+      const collectionId = parts[parts.length - 1];
+      const parentPath = parts.slice(0, -1).join("/");
+
+      const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
+      const url = parentPath 
+        ? `${BASE_URL}/${parentPath}:runQuery?key=${key}`
+        : `${BASE_URL}:runQuery?key=${key}`;
+
+      try {
+        const res = await axios.post(url, {
+          structuredQuery: {
+            from: [{ collectionId, allDescendants: false }]
+          }
+        });
+
+        const docs: any[] = [];
+        const results = Array.isArray(res.data) ? res.data : [];
+        for (const item of results) {
+          if (item.document) {
+            const doc = item.document;
+            const docParts = doc.name.split("/");
+            const id = docParts[docParts.length - 1];
+            const dataObj = fromFirestoreFields(doc.fields);
+            docs.push({
+              id,
+              data: () => dataObj,
+              exists: true
+            });
+          }
+        }
+        return { docs };
+      } catch (err: any) {
+        if (err.response && err.response.status === 404) {
+          return { docs: [] };
+        }
+        console.error(`[RestDB] Error querying collection ${this.path}:`, err.message);
+        return { docs: [] };
+      }
+    });
+  }
+}
+
+class RestDocumentReference {
+  constructor(private parentPath: string, private id: string) {}
+
+  private get path() {
+    return `${this.parentPath}/${this.id}`;
+  }
+
+  collection(subCol: string) {
+    return new RestCollectionReference(`${this.path}/${subCol}`);
+  }
+
+  async get() {
+    const cacheKey = `doc:${this.parentPath}/${this.id}`;
+    return getCachedRestQuery(cacheKey, async () => {
+      const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+      const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+      const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
+      const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
+      const url = `${BASE_URL}/${this.path}?key=${key}`;
+      try {
+        const res = await axios.get(url);
+        const dataObj = fromFirestoreFields(res.data.fields);
+        return {
+          exists: true,
+          data: () => dataObj,
+          id: this.id
+        };
+      } catch (err: any) {
+        if (err.response && err.response.status === 404) {
+          return {
+            exists: false,
+            data: () => null,
+            id: this.id
+          };
+        }
+        console.error(`[RestDB] Error get document ${this.path}:`, err.message);
+        return {
+          exists: false,
+          data: () => null,
+          id: this.id
+        };
+      }
+    });
+  }
+
+  async set(data: any) {
+    clearRestQueryCache();
+    const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+    const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+    const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
+    const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
+    const url = `${BASE_URL}/${this.path}?key=${key}`;
+    const payload = toFirestoreFields(data);
+    try {
+      await axios.patch(url, payload);
+    } catch (err: any) {
+      console.error(`[RestDB] Error set document ${this.path}:`, err.response?.data || err.message);
+      throw err;
+    }
+  }
+
+  async update(data: any) {
+    clearRestQueryCache();
+    const keys = Object.keys(data);
+    if (keys.length === 0) return;
+    const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+    const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+    const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
+    const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
+    const queryParams = keys.map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join("&");
+    const url = `${BASE_URL}/${this.path}?key=${key}&${queryParams}`;
+    const payload = toFirestoreFields(data);
+    try {
+      await axios.patch(url, payload);
+    } catch (err: any) {
+      console.error(`[RestDB] Error update document ${this.path}:`, err.response?.data || err.message);
+      throw err;
+    }
+  }
+
+  async delete() {
+    clearRestQueryCache();
+    const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+    const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+    const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
+    const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
+    const url = `${BASE_URL}/${this.path}?key=${key}`;
+    try {
+      await axios.delete(url);
+    } catch (err: any) {
+      console.error(`[RestDB] Error delete document ${this.path}:`, err.response?.data || err.message);
+      throw err;
+    }
+  }
+}
+
+class RestTransaction {
+  async get(docRef: any) {
+    return docRef.get();
+  }
+  update(docRef: any, data: any) {
+    docRef.update(data);
+    return this;
+  }
+  set(docRef: any, data: any) {
+    docRef.set(data);
+    return this;
+  }
+  delete(docRef: any) {
+    docRef.delete();
+    return this;
+  }
+}
+
+class RestCollectionGroupReference {
+  constructor(private collectionId: string) {}
+
+  async get() {
+    const cacheKey = `colgroup:${this.collectionId}`;
+    return getCachedRestQuery(cacheKey, async () => {
+      const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+      const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+      const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
+      const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
+      const url = `${BASE_URL}:runQuery?key=${key}`;
+
+      try {
+        const res = await axios.post(url, {
+          structuredQuery: {
+            from: [{ collectionId: this.collectionId, allDescendants: true }]
+          }
+        });
+
+        const docs: any[] = [];
+        const results = Array.isArray(res.data) ? res.data : [];
+        for (const item of results) {
+          if (item.document) {
+            const doc = item.document;
+            const docParts = doc.name.split("/");
+            const id = docParts[docParts.length - 1];
+            const dataObj = fromFirestoreFields(doc.fields);
+            const relativePath = doc.name.split("/documents/")[1] || "";
+            docs.push({
+              id,
+              data: () => dataObj,
+              exists: true,
+              ref: {
+                path: relativePath
+              }
+            });
+          }
+        }
+        return { docs };
+      } catch (err: any) {
+        console.error(`[RestDB] Error querying collectionGroup ${this.collectionId}:`, err.message);
+        return { docs: [] };
+      }
+    });
+  }
+}
+
+class RestFirestore {
+  collection(col: string) {
+    return new RestCollectionReference(col);
+  }
+  collectionGroup(colId: string) {
+    return new RestCollectionGroupReference(colId);
+  }
+  async runTransaction(updateFn: (transaction: any) => Promise<any>) {
+    const tx = new RestTransaction();
+    return updateFn(tx);
+  }
+}
+
 let isDbInitializing = false;
 
 async function getDb(): Promise<any> {
   if (db) return db;
-  
-  // High-availability check: if the database previously hit quota/exhaustion issues, directly return local DB
-  if (fs.existsSync(path.join(appDir, ".firestore_fallback_active"))) {
-    console.log("[Firebase-Fallback] Persistent fallback flag active. Instantly loaded local high-availability memory database!");
-    db = new MemoryFirestore();
-    return db;
-  }
-
-  if (isDbInitializing) {
-    for (let i = 0; i < 10; i++) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      if (db) return db;
-    }
-  }
-  
   isDbInitializing = true;
-  console.log(`[Firebase] Initializing Web SDK. Project: ${firebaseConfig.projectId}`);
-
-  try {
-    const app = initializeApp(firebaseConfig);
-    const dbId = firebaseConfig.firestoreDatabaseId;
-    let webDb = dbId && dbId !== "(default)" ? getWebFirestore(app, dbId) : getWebFirestore(app);
-    
-    // Connectivity check on startup to verify setup
-    try {
-      const pingDocRef = doc(webDb, "_connectivity_test", "ping");
-      
-      // Wrapped in highly resilient timeout to prevent Node gRPC connection hang and maintain server uptime
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Connection check timed out after 3000ms")), 3000)
-      );
-      await Promise.race([getDoc(pingDocRef), timeoutPromise]);
-      
-      console.log(`[Firebase] Web SDK Connectivity check passed successfully!`);
-      db = new CompatFirestore(webDb);
-    } catch (err: any) {
-      console.error(`[Firebase] Web SDK Connectivity check failed with key "${dbId}":`, err.message);
-      
-      // Clean up the failed Firestore instance to prevent background gRPC stream retries
-      try {
-        await disableNetwork(webDb);
-        await terminate(webDb);
-      } catch (termErr) {
-        console.warn("[Firebase] Failed to cleanly terminate webDb instance:", termErr);
-      }
-      
-      const isNotFoundErr = err.message?.includes("NOT_FOUND") || 
-                            err.message?.includes("not-found") || 
-                            err.message?.includes("5") ||
-                            err.message?.includes("timed out") ||
-                            err.code === "not-found";
-                            
-      if (dbId && dbId !== "(default)" && isNotFoundErr) {
-        console.log("[Firebase] Retrying connection with standard '(default)' database ID...");
-        let fallbackDb: any = null;
-        try {
-          fallbackDb = getWebFirestore(app);
-          const pingDocRef = doc(fallbackDb, "_connectivity_test", "ping");
-          
-          const fallbackTimeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error("Fallback connection check timed out after 3000ms")), 3000)
-          );
-          await Promise.race([getDoc(pingDocRef), fallbackTimeoutPromise]);
-          
-          console.log(`[Firebase] Web SDK Connectivity check passed successfully with '(default)' database!`);
-          webDb = fallbackDb;
-          db = new CompatFirestore(webDb);
-          isDbInitializing = false;
-          return db;
-        } catch (fallbackErr: any) {
-          console.error("[Firebase] Fallback connectivity check failed with '(default)' database ID as well:", fallbackErr.message);
-          if (fallbackDb) {
-            try {
-              await disableNetwork(fallbackDb);
-              await terminate(fallbackDb);
-            } catch (termErr) {
-              console.warn("[Firebase] Failed to cleanly terminate fallbackDb instance:", termErr);
-            }
-          }
-        }
-      }
-      
-      console.log("[Firebase] WARNING: Firebase is not reachable or your Firestore Native Database is not created/found in the console yet.");
-      console.log("[Firebase] Entering high-availability mode: fallback to local JSON database ('db-fallback.json') active!");
-      db = new MemoryFirestore();
-    }
-    
-    isDbInitializing = false;
-    return db;
-  } catch (err: any) {
-    console.error(`[Firebase] Fatal error during Firestore Web SDK initialization:`, err.message);
-    console.log("[Firebase] Falling back to local JSON database ('db-fallback.json') due to initialization failure.");
-    db = new MemoryFirestore();
-    isDbInitializing = false;
-    return db;
-  }
+  console.log(`[Firebase] Initializing ultra-stable REST-based Firestore database client!`);
+  db = new RestFirestore();
+  isDbInitializing = false;
+  return db;
 }
 
 const upload = multer({ storage: multer.memoryStorage() });
@@ -1973,6 +2211,10 @@ async function startServer() {
     }
 
     if (req.session.user) {
+      if (req.session.user.suspended === true || req.session.user.suspended === "true") {
+        req.session.destroy(() => {});
+        return res.status(403).json({ error: "Account Suspended: Your account has been suspended by an administrator." });
+      }
       if (db) {
         req.session.user = await enrichUserWithWorkspace(db, req.session.user, req);
       }
@@ -2012,6 +2254,9 @@ async function startServer() {
       }
       
       const user = userDoc.data() as any;
+      if (user.suspended === true || user.suspended === "true") {
+        return res.status(403).json({ error: "Account Suspended: Your account has been suspended by an administrator." });
+      }
       
       // Password check
       const isMatch = await bcrypt.compare(password, user.password || "");
@@ -2570,6 +2815,8 @@ async function startServer() {
         workspaceId: "ws_" + Math.random().toString(36).substring(7),
         workspaceName: workspaceName || `${fullName || email.split('@')[0]}'s Workspace`,
         ip: clientIp, 
+        credits: 5000.00,
+        trialCredits: 100.00,
         createdAt: FieldValue.serverTimestamp() 
       };
       
@@ -4249,16 +4496,24 @@ async function startServer() {
       return res.status(401).json({ error: "Unauthorized. Please log in first." });
     }
 
-    let credits = 5000.00;
+     let credits = 5000.00;
+    let trialCredits = 100.00;
     try {
       const userRef = db.collection("users").doc(userEmail);
       const userDoc = await userRef.get();
       if (userDoc.exists) {
         const uVal = userDoc.data();
-        if (uVal && typeof uVal.credits === "number") {
-          credits = uVal.credits;
-        } else {
-          await userRef.set({ credits: 5000.00 }, { merge: true });
+        if (uVal) {
+          if (typeof uVal.credits === "number") {
+            credits = uVal.credits;
+          } else {
+            await userRef.set({ credits: 5000.00 }, { merge: true });
+          }
+          if (typeof uVal.trialCredits === "number") {
+            trialCredits = uVal.trialCredits;
+          } else {
+            await userRef.set({ trialCredits: 100.00 }, { merge: true });
+          }
         }
       }
     } catch (err: any) {
@@ -4270,6 +4525,7 @@ async function startServer() {
       selectedPageIds,
       trialLocked: !!data.trialLocked,
       credits,
+      trialCredits,
       lastSyncedContacts: data.lastSyncedContacts || null
     });
   });
@@ -6068,15 +6324,31 @@ Write a realistic, short and natural response expressing your reaction, query, o
         total: recipients.length
       });
 
-      // Deduct credits based on actual recipient count
+      // Deduct credits based on actual recipient count (prioritize trial credits)
       try {
         const userRef = db.collection("users").doc(userEmail);
         await db.runTransaction(async (transaction) => {
           const uDoc = await transaction.get(userRef);
           if (uDoc.exists) {
             const curCredits = uDoc.data()?.credits ?? 5000;
-            const newCredits = Math.max(0, curCredits - recipients.length);
-            transaction.update(userRef, { credits: newCredits });
+            const curTrialCredits = uDoc.data()?.trialCredits ?? 100;
+            const cost = recipients.length;
+
+            let newTrialCredits = curTrialCredits;
+            let newCredits = curCredits;
+
+            if (curTrialCredits >= cost) {
+              newTrialCredits = curTrialCredits - cost;
+            } else {
+              const remainingCost = cost - curTrialCredits;
+              newTrialCredits = 0;
+              newCredits = Math.max(0, curCredits - remainingCost);
+            }
+
+            transaction.update(userRef, { 
+              credits: newCredits,
+              trialCredits: newTrialCredits
+            });
           }
         });
       } catch (err: any) {
@@ -7440,6 +7712,571 @@ Write a realistic, short and natural response expressing your reaction, query, o
       console.error("[Scheduler Engine Error]", err.message);
     }
   }, 15000);
+
+  // ==========================================
+  // ADMIN PANEL CONTROLLER ENDPOINTS /api/admin/*
+  // ==========================================
+
+  async function verifyAdminMiddleware(req: any, res: any, next: any) {
+    const email = (req.session?.user?.email || req.headers['x-user-email'] || req.query.email || "") as string;
+    if (email.toLowerCase().trim() === "ahsan.shabbir292@gmail.com") {
+      return next();
+    }
+    return res.status(403).json({ error: "Access Denied: Admin privileges required." });
+  }
+
+  // Verification
+  app.post("/api/admin/verify", verifyAdminMiddleware, (req, res) => {
+    res.json({ success: true, email: "ahsan.shabbir292@gmail.com" });
+  });
+
+  // Admin Dashboard Statistics
+  app.get("/api/admin/stats", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const usersSnap = await db.collection("users").get();
+      const users = usersSnap.docs.map((d: any) => d.data());
+      const totalUsers = users.length;
+      let totalCredits = 0;
+      let activeSubs = 0;
+      let revenue = 0;
+      let usersToday = 0;
+      let usersWeek = 0;
+      const now = Date.now();
+      const oneDay = 24 * 60 * 60 * 1000;
+      const sevenDays = 7 * oneDay;
+
+      const allOrders: any[] = [];
+      users.forEach((u: any) => {
+        if (typeof u.credits === "number") {
+          totalCredits += u.credits;
+        }
+        
+        let joinTime = 0;
+        if (u.createdAt) {
+          joinTime = typeof u.createdAt === "string" ? new Date(u.createdAt).getTime() : 0;
+          if (joinTime > 0) {
+            if (now - joinTime < oneDay) usersToday++;
+            if (now - joinTime < sevenDays) usersWeek++;
+          }
+        }
+
+        if (u.billing) {
+          if (u.billing.subscriptions) {
+            Object.keys(u.billing.subscriptions).forEach((pageId: string) => {
+              const sub = u.billing.subscriptions[pageId];
+              if (sub.status === "Active" || sub.status === "Active Subscription" || (sub.subscription_ends_at && new Date(sub.subscription_ends_at).getTime() > now)) {
+                activeSubs++;
+              }
+            });
+          }
+          if (Array.isArray(u.billing.orders)) {
+            u.billing.orders.forEach((o: any) => {
+              allOrders.push(o);
+              if (o.status === "Paid") {
+                revenue += (o.amount || 0);
+              }
+            });
+          }
+        }
+      });
+
+      res.json({
+        totalUsers,
+        totalCredits,
+        activeSubs,
+        revenue,
+        usersToday,
+        usersWeek,
+        orders: allOrders
+      });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to fetch stats:", err.message);
+      res.status(500).json({ error: "Failed to get admin stats", details: err.message });
+    }
+  });
+
+  // Users Management - List
+  app.get("/api/admin/users", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const usersSnap = await db.collection("users").get();
+      const users = usersSnap.docs.map((d: any) => {
+        const data = d.data();
+        const { password, ...userWithoutPassword } = data;
+        return userWithoutPassword;
+      });
+      res.json({ users });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to fetch users list:", err.message);
+      res.status(500).json({ error: "Failed to fetch users", details: err.message });
+    }
+  });
+
+  // Users Management - Single Get
+  app.get("/api/admin/users/:email", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    try {
+      const userDoc = await db.collection("users").doc(emailLower).get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+      const { password, ...userWithoutPassword } = userDoc.data();
+      res.json({ user: userWithoutPassword });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to fetch user details:", err.message);
+      res.status(500).json({ error: "Failed to fetch user details", details: err.message });
+    }
+  });
+
+  // Users Management - Remove Lifetime Client
+  app.delete("/api/admin/users/:email", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    try {
+      await db.collection("users").doc(emailLower).delete();
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to delete user:", err.message);
+      res.status(500).json({ error: "Failed to delete user", details: err.message });
+    }
+  });
+
+  // Users Management - Mutate balance (and Bulk adjustments)
+  app.post("/api/admin/users/:email/credits", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { email } = req.params;
+    const { mode, amount, bulk } = req.body;
+
+    try {
+      if (bulk) {
+        const usersSnap = await db.collection("users").get();
+        for (const d of usersSnap.docs) {
+          const u = d.data();
+          const currentCredits = u.credits || 0;
+          await db.collection("users").doc(d.id).update({
+            credits: currentCredits + Number(amount)
+          });
+        }
+        return res.json({ success: true, message: `Bulk added ${amount} credits to all users` });
+      }
+
+      const emailLower = email.toLowerCase().trim();
+      const userDoc = await db.collection("users").doc(emailLower).get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const u = userDoc.data();
+      const currentCredits = u.credits || 0;
+      let newCredits = currentCredits;
+
+      if (mode === "set") {
+        newCredits = Number(amount);
+      } else if (mode === "add") {
+        newCredits = currentCredits + Number(amount);
+      } else if (mode === "deduct") {
+        newCredits = Math.max(0, currentCredits - Number(amount));
+      }
+
+      await db.collection("users").doc(emailLower).update({ credits: newCredits });
+      res.json({ success: true, email: emailLower, credits: newCredits });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to update user credits:", err.message);
+      res.status(505).json({ error: "Failed to update user credits", details: err.message });
+    }
+  });
+
+  // Users Management - Mutate trial credits
+  app.post("/api/admin/users/:email/trial-credits", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { email } = req.params;
+    const { mode, amount } = req.body;
+
+    try {
+      const emailLower = email.toLowerCase().trim();
+      const userDoc = await db.collection("users").doc(emailLower).get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const u = userDoc.data();
+      const currentTrialCredits = typeof u.trialCredits === 'number' ? u.trialCredits : 100;
+      let newTrialCredits = currentTrialCredits;
+
+      if (mode === "set") {
+        newTrialCredits = Number(amount);
+      } else if (mode === "add") {
+        newTrialCredits = currentTrialCredits + Number(amount);
+      } else if (mode === "deduct") {
+        newTrialCredits = Math.max(0, currentTrialCredits - Number(amount));
+      }
+
+      await db.collection("users").doc(emailLower).update({ trialCredits: newTrialCredits });
+      res.json({ success: true, email: emailLower, trialCredits: newTrialCredits });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to update user trial credits:", err.message);
+      res.status(500).json({ error: "Failed to update user trial credits", details: err.message });
+    }
+  });
+
+  // Users Management - Reactivate Trial
+  app.post("/api/admin/users/:email/reactivate-trial", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { email } = req.params;
+
+    try {
+      const emailLower = email.toLowerCase().trim();
+      const userRef = db.collection("users").doc(emailLower);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const u = userDoc.data();
+      const updates: any = {};
+
+      // A. Reactivate trialLocked flags
+      if (u.facebook) {
+        updates.facebook = {
+          ...u.facebook,
+          trialLocked: false
+        };
+      }
+
+      if (u.facebookWorkspaces && typeof u.facebookWorkspaces === "object") {
+        const updatedWorkspaces = { ...u.facebookWorkspaces };
+        for (const wsId of Object.keys(updatedWorkspaces)) {
+          if (updatedWorkspaces[wsId]) {
+            updatedWorkspaces[wsId] = {
+              ...updatedWorkspaces[wsId],
+              trialLocked: false
+            };
+          }
+        }
+        updates.facebookWorkspaces = updatedWorkspaces;
+      }
+
+      for (const key of Object.keys(u)) {
+        if (key.startsWith("facebookWorkspaces.")) {
+          const part = u[key];
+          if (part && typeof part === "object") {
+            updates[key] = {
+              ...part,
+              trialLocked: false
+            };
+          }
+        }
+      }
+
+      // B. Restore page subscriptions to active Trial status
+      if (u.billing) {
+        const updatedBilling = { ...u.billing };
+        if (updatedBilling.subscriptions && typeof updatedBilling.subscriptions === "object") {
+          const updatedSubs = { ...updatedBilling.subscriptions };
+          const extendedTrialEnds = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+          for (const subId of Object.keys(updatedSubs)) {
+            if (updatedSubs[subId]) {
+              updatedSubs[subId] = {
+                ...updatedSubs[subId],
+                status: "Trial",
+                trial_ends_at: extendedTrialEnds,
+                subscription_ends_at: null
+              };
+            }
+          }
+          updatedBilling.subscriptions = updatedSubs;
+        }
+        updates.billing = updatedBilling;
+      }
+
+      // Restore trial credits to at least 100
+      const currentTrialCredits = typeof u.trialCredits === 'number' ? u.trialCredits : 100;
+      updates.trialCredits = Math.max(100, currentTrialCredits);
+
+      await userRef.update(updates);
+
+      // C. Update session trialLocked in sessions collection if exists
+      const sessionId = `fb_${emailLower.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      try {
+        const sessionRef = db.collection("sessions").doc(sessionId);
+        const sessionDoc = await sessionRef.get();
+        if (sessionDoc.exists) {
+          await sessionRef.update({ trialLocked: false });
+        }
+      } catch (e: any) {
+        console.warn("[Admin API] Failed to update session trialLocked:", e.message);
+      }
+
+      res.json({ success: true, message: "Trial successfully reactivated, and trial credits loaded." });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to reactivate trial:", err.message);
+      res.status(500).json({ error: "Failed to reactivate trial", details: err.message });
+    }
+  });
+
+  // Users Management - Disconnect Facebook Account
+  app.post("/api/admin/users/:email/disconnect-facebook", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { email } = req.params;
+
+    try {
+      const emailLower = email.toLowerCase().trim();
+      const userRef = db.collection("users").doc(emailLower);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const u = userDoc.data();
+      const updates: any = {
+        facebook: null,
+        facebookWorkspaces: {}
+      };
+
+      // Also clean up any flat root keys like facebookWorkspaces.xxx
+      for (const key of Object.keys(u)) {
+        if (key.startsWith("facebookWorkspaces.")) {
+          updates[key] = null;
+        }
+      }
+
+      await userRef.update(updates);
+
+      // Also delete the sessions document fb_${email.replace(/[^a-zA-Z0-9]/g, '_')}
+      const sessionId = `fb_${emailLower.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      try {
+        await db.collection("sessions").doc(sessionId).delete();
+      } catch (e: any) {
+        console.warn("[Admin API] Failed to delete connection session:", e.message);
+      }
+
+      res.json({ success: true, message: "Facebook connection disconnected successfully." });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to disconnect Facebook:", err.message);
+      res.status(500).json({ error: "Failed to disconnect Facebook", details: err.message });
+    }
+  });
+
+  // Users Management - Suspend Account
+  app.post("/api/admin/users/:email/suspend", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    try {
+      await db.collection("users").doc(emailLower).update({ suspended: true });
+      res.json({ success: true, email: emailLower, suspended: true });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to suspend user:", err.message);
+      res.status(500).json({ error: "Failed to suspend user", details: err.message });
+    }
+  });
+
+  // Users Management - Activate Account / Unsuspend
+  app.post("/api/admin/users/:email/unsuspend", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    try {
+      await db.collection("users").doc(emailLower).update({ suspended: false });
+      res.json({ success: true, email: emailLower, suspended: false });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to unsuspend user:", err.message);
+      res.status(500).json({ error: "Failed to unsuspend user", details: err.message });
+    }
+  });
+
+  // Users Subcollections - Fetch Specific Broadcasts
+  app.get("/api/admin/users/:email/broadcasts", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    try {
+      const snap = await db.collection("users").doc(emailLower).collection("broadcasts").get();
+      const broadcasts = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      res.json({ broadcasts });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to fetch user broadcasts:", err.message);
+      res.status(500).json({ error: "Failed to fetch user broadcasts", details: err.message });
+    }
+  });
+
+  // Subscriptions - Manage Limits and Overrides
+  app.post("/api/admin/users/:email/subscription", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    const { pageId, action, days } = req.body;
+
+    try {
+      const userDoc = await db.collection("users").doc(emailLower).get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const u = userDoc.data();
+      const billing = u.billing || { subscriptions: {}, orders: [] };
+      if (!billing.subscriptions) billing.subscriptions = {};
+
+      const sub = billing.subscriptions[pageId] || {
+        page_id: pageId,
+        name: `Page ${pageId}`,
+        status: "Trial",
+        trial_ends_at: null,
+        subscription_ends_at: null
+      };
+
+      if (action === "activate") {
+        sub.status = "Active";
+        sub.subscription_ends_at = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      } else if (action === "expire") {
+        sub.status = "Expired";
+        sub.subscription_ends_at = new Date(0).toISOString();
+      } else if (action === "extend") {
+        const currentEnd = sub.subscription_ends_at ? new Date(sub.subscription_ends_at).getTime() : Date.now();
+        sub.subscription_ends_at = new Date(currentEnd + (days || 30) * 24 * 60 * 60 * 1000).toISOString();
+        sub.status = "Active";
+      } else if (action === "cancel") {
+        sub.status = "Disabled";
+        sub.subscription_ends_at = null;
+      }
+
+      billing.subscriptions[pageId] = sub;
+      await db.collection("users").doc(emailLower).update({ billing });
+      res.json({ success: true, billing });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to update subscription:", err.message);
+      res.status(500).json({ error: "Failed to update subscription", details: err.message });
+    }
+  });
+
+  // Lists connected pages across clients
+  app.get("/api/admin/pages", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const usersSnap = await db.collection("users").get();
+      const pages: any[] = [];
+      usersSnap.docs.forEach((d: any) => {
+        const u = d.data();
+        const email = d.id;
+        const pageMap = new Map();
+        
+        if (u.facebookWorkspaces) {
+          Object.keys(u.facebookWorkspaces).forEach((wsId: string) => {
+            const ws = u.facebookWorkspaces[wsId];
+            if (Array.isArray(ws.pages)) {
+              ws.pages.forEach((p: any) => {
+                pageMap.set(p.id, {
+                  id: p.id,
+                  name: p.name,
+                  pictureUrl: p.pictureUrl || null,
+                  ownerEmail: email,
+                  subscribersCount: p.subscribersCount || 0,
+                  lastSyncTime: p.lastSyncTime || null,
+                  status: u.billing?.subscriptions?.[p.id]?.status || "Trial"
+                });
+              });
+            }
+          });
+        }
+
+        if (u.billing?.subscriptions) {
+          Object.keys(u.billing.subscriptions).forEach((pageId: string) => {
+            const sub = u.billing.subscriptions[pageId];
+            if (!pageMap.has(pageId)) {
+              pageMap.set(pageId, {
+                id: pageId,
+                name: sub.name || `Page ${pageId}`,
+                ownerEmail: email,
+                subscribersCount: 0,
+                lastSyncTime: null,
+                status: sub.status || "Trial"
+              });
+            }
+          });
+        }
+
+        pageMap.forEach((v) => pages.push(v));
+      });
+      res.json({ pages });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to list connected pages:", err.message);
+      res.status(500).json({ error: "Failed to fetch pages", details: err.message });
+    }
+  });
+
+  // Get all active / archived campaigns (Collection Group)
+  app.get("/api/admin/broadcasts", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      let broadcasts: any[] = [];
+      try {
+        const broadcastsSnap = await db.collectionGroup("broadcasts").get();
+        broadcastsSnap.docs.forEach((b: any) => {
+          const parts = b.ref.path.split("/");
+          const ownerEmail = parts[parts.indexOf("users") + 1] || "system";
+          broadcasts.push({
+            id: b.id,
+            ownerEmail,
+            ...b.data()
+          });
+        });
+      } catch (e: any) {
+        console.warn("[Admin API] Admin SDK collectionGroup failed, executing looping scan fallback", e.message);
+        const usersSnap = await db.collection("users").get();
+        for (const d of usersSnap.docs) {
+          const email = d.id;
+          const bcastSnap = await db.collection("users").doc(email).collection("broadcasts").get();
+          bcastSnap.docs.forEach((b: any) => {
+            broadcasts.push({
+              id: b.id,
+              ownerEmail: email,
+              ...b.data()
+            });
+          });
+        }
+      }
+      
+      res.json({ broadcasts });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to aggregate broadcasts:", err.message);
+      res.status(500).json({ error: "Failed to fetch broadcasts", details: err.message });
+    }
+  });
+
+  // Announcements publication details
+  app.post("/api/admin/announce", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { title, content } = req.body;
+    const annId = `ANN-${Math.floor(100000 + Math.random() * 900000)}`;
+    const announcement = {
+      id: annId,
+      title,
+      content,
+      createdAt: new Date().toISOString()
+    };
+    try {
+      await db.collection("announcements").doc(annId).set(announcement);
+      res.json({ success: true, announcement });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to publish announcement:", err.message);
+      res.status(500).json({ error: "Failed to publish announcement", details: err.message });
+    }
+  });
+
+  // Retrieve Announcements for any logged-in user
+  app.get("/api/announcements", async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const snap = await db.collection("announcements").get();
+      const announcements = snap.docs.map((d: any) => d.data());
+      announcements.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      res.json({ announcements: announcements.slice(0, 10) });
+    } catch (err: any) {
+      res.json({ announcements: [] });
+    }
+  });
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {

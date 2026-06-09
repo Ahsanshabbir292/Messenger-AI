@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
+import { initializeFirestore, doc, getDoc } from 'firebase/firestore';
 import fs from 'fs';
 
 const configPath = "./firebase-applet-config.json";
@@ -9,7 +9,9 @@ firebaseConfig.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || "ai-s
 async function run() {
   console.log(`[Diagnostic] Initializing app ${firebaseConfig.projectId}, database: ${firebaseConfig.firestoreDatabaseId}`);
   const app = initializeApp(firebaseConfig);
-  const webDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+  const webDb = initializeFirestore(app, {
+    experimentalForceLongPolling: true,
+  }, firebaseConfig.firestoreDatabaseId);
 
   const email = "ahsan.shabbir292@gmail.com";
   const userDocRef = doc(webDb, "users", email);

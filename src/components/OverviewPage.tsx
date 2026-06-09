@@ -1,4 +1,5 @@
 import React from 'react';
+import axios from 'axios';
 import { 
   Layers, MessageSquare, MessageCircle, CircleDollarSign, 
   Megaphone, Sparkles, Zap, Clock, ChevronRight, Facebook, 
@@ -48,8 +49,41 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
   // Compute true messages exchanged this month (inbox logs + broadcast transmissions)
   const totalMessagesExchanged = conversations.reduce((acc: number, curr: any) => acc + (curr.messages?.data?.length || 0), 0);
 
+  const [announcements, setAnnouncements] = React.useState<any[]>([]);
+  React.useEffect(() => {
+    axios.get('/api/announcements')
+      .then(res => {
+        if (res.data && res.data.announcements) {
+          setAnnouncements(res.data.announcements);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
+      
+      {/* System Announcement Banner */}
+      {announcements.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-100/70 p-5 rounded-3xl relative overflow-hidden shadow-sm animate-in fade-in duration-300">
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-10 pointer-events-none">
+            <Megaphone className="w-24 h-24 text-indigo-600" />
+          </div>
+          <div className="flex items-start gap-4">
+            <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shrink-0 mt-0.5">
+              <Megaphone className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="text-[10px] text-indigo-500 font-extrabold uppercase tracking-wider font-mono">
+                Official System Announcement
+              </span>
+              <h4 className="text-sm font-black text-slate-900 mt-1">{announcements[0].title}</h4>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed whitespace-pre-wrap">{announcements[0].content}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 sm:gap-6">
         {/* Active Pages */}

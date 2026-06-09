@@ -15,8 +15,10 @@ import DeletionPage from './components/DeletionPage';
 import SupportFAQPage from './components/SupportFAQPage';
 import AboutPage from './components/AboutPage';
 import ContactPage from './components/ContactPage';
+import AdminPage from './components/AdminPage';
+import { ShieldAlert } from 'lucide-react';
 
-type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support' | 'about' | 'contact';
+type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support' | 'about' | 'contact' | 'admin';
 
 const DASHBOARD_TABS = ['overview', 'pages', 'chat', 'audience', 'broadcast', 'analytics', 'team', 'billing', 'settings'];
 
@@ -117,7 +119,7 @@ export default function App() {
         }
 
         // If trying to access protected dashboard, redirect to signin
-        if (isDashboardRoute(currentPath)) {
+        if (isDashboardRoute(currentPath) || currentPath === '/admin') {
           navigateTo('/signin');
         }
       } finally {
@@ -167,7 +169,9 @@ export default function App() {
 
   // Derive active view mode from pathname
   let view: ViewMode = 'landing';
-  if (currentPath === '/signin') {
+  if (currentPath === '/admin') {
+    view = 'admin';
+  } else if (currentPath === '/signin') {
     view = 'signin';
   } else if (currentPath === '/signup') {
     view = 'signup';
@@ -250,7 +254,36 @@ export default function App() {
         />
       )}
 
-      {view !== 'dashboard' && <ChatWidget />}
+      {view === 'admin' && (
+        !appUser ? (
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-indigo-500"></div>
+          </div>
+        ) : appUser.email !== 'ahsan.shabbir292@gmail.com' ? (
+          <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white p-6">
+            <div className="bg-slate-900 border border-red-500/30 p-8 rounded-3xl max-w-sm text-center shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-red-500 to-rose-600"></div>
+              <div className="w-16 h-16 bg-red-500/10 rounded-2xl flex items-center justify-center mx-auto mb-6 border border-red-500/20 text-red-500">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+              <h1 className="text-xl font-black tracking-tight mb-2">Access Denied</h1>
+              <p className="text-slate-400 text-xs mb-6 leading-relaxed">
+                You do not have administrative privileges to access this control portal.
+              </p>
+              <button 
+                onClick={() => navigateTo('/overview')}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-2xl transition-all shadow-lg shadow-indigo-500/20 w-full cursor-pointer"
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        ) : (
+          <AdminPage appUser={appUser} onLogout={handleLogout} navigateTo={navigateTo} />
+        )
+      )}
+
+      {view !== 'dashboard' && view !== 'admin' && <ChatWidget />}
     </>
   );
 }
