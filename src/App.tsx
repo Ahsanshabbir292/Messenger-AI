@@ -57,6 +57,73 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // Professional Dynamic Title & Meta Description Synchronization (optimized routing SEO)
+  React.useEffect(() => {
+    const metaDescriptions: Record<string, { title: string; desc: string }> = {
+      '/': {
+        title: 'Perseus Bot | Enterprise Facebook Messenger Automation',
+        desc: 'Perseus Bot is an enterprise-grade platform for Facebook Messenger automation, dynamic broadcasting, real-time customer chat engagement, and analytics.'
+      },
+      '/signin': {
+        title: 'Sign In | Perseus Bot',
+        desc: 'Log in to your Perseus Bot admin panel to manage connected Facebook pages, trigger broadcasts, review chats, and optimize your customer outreach.'
+      },
+      '/signup': {
+        title: 'Sign Up & Register | Perseus Bot',
+        desc: 'Create a new Perseus Bot account today to unlock powerful bulk Messenger broadcasting, live customer support channels, and interactive flow automations.'
+      },
+      '/privacy': {
+        title: 'Privacy Policy | Perseus Bot',
+        desc: 'Read the Perseus Bot Privacy Policy. Our commitment to securing data, privacy, and compliant Facebook Messenger messaging interactions.'
+      },
+      '/terms': {
+        title: 'Terms of Service | Perseus Bot',
+        desc: 'Review Perseus Bot\'s Terms of Service for administrative accounts, billing policies, user codes of conduct, and automated messenger compliance.'
+      },
+      '/deletion': {
+        title: 'Data Deletion Request | Perseus Bot',
+        desc: 'Submit a request to delete system data, Facebook authorization tokens, and personal administrative accounts in accordance with GDPR and CCPA policies.'
+      },
+      '/faq-support': {
+        title: 'Support & FAQs | Perseus Bot',
+        desc: 'Get support for Perseus Bot, answer FAQs about broadcasting limitations, and manage tickets or help guidelines.'
+      },
+      '/about': {
+        title: 'About Us | Perseus Bot',
+        desc: 'Learn about the mission, features, security protocols, and enterprise reliability behind Perseus Bot\'s automation framework.'
+      },
+      '/contact': {
+        title: 'Contact Us | Perseus Bot',
+        desc: 'Reach out to the Perseus Bot team for custom enterprise plans, integrations, technical help, or sales inquiries.'
+      },
+      '/admin': {
+        title: 'Super Admin Portal | Perseus Bot',
+        desc: 'Access the Perseus Bot administrative management console to oversee system logs, manage active directories, and set system broadcasts.'
+      }
+    };
+
+    let matched = metaDescriptions[currentPath];
+    if (!matched && isDashboardRoute(currentPath)) {
+      const segment = currentPath.replace(/^\//, '').split('/')[0];
+      const capitalized = segment.charAt(0).toUpperCase() + segment.slice(1);
+      matched = {
+        title: `${capitalized} Dashboard | Perseus Bot`,
+        desc: `Manage your workspace ${segment} functions, review real-time connected Facebook pages, page subscribers, and active campaigns in our high-speed panel.`
+      };
+    }
+
+    const info = matched || metaDescriptions['/'];
+    document.title = info.title;
+
+    let metaDescTag = document.querySelector('meta[name="description"]');
+    if (!metaDescTag) {
+      metaDescTag = document.createElement('meta');
+      metaDescTag.setAttribute('name', 'description');
+      document.head.appendChild(metaDescTag);
+    }
+    metaDescTag.setAttribute('content', info.desc);
+  }, [currentPath]);
+
   const navigateTo = (path: string) => {
     window.history.pushState({}, '', path);
     setCurrentPath(path);
@@ -127,7 +194,15 @@ export default function App() {
       }
     };
     checkSession();
-  }, [appUser?.email, currentPath]);
+  }, [appUser?.email]);
+
+  React.useEffect(() => {
+    if (!loading) {
+      if (!appUser && (isDashboardRoute(currentPath) || currentPath === '/admin')) {
+        navigateTo('/signin');
+      }
+    }
+  }, [currentPath, appUser, loading]);
 
   const goToLanding = () => navigateTo('/');
   const goToSignIn = () => navigateTo('/signin');

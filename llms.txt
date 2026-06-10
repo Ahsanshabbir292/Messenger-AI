@@ -1,0 +1,30 @@
+# Perseus Bot
+
+Enterprise Facebook Messenger Automation and Core Broadcasting Framework.
+
+## System Overview
+Perseus Bot is a high-speed, secure, enterprise-grade multi-tenant platform constructed in React, Vite, Tailwind CSS, Express, and restDB. It allows organizations to connect Facebook Pages, manage rich live chats, build custom broadcast criteria, and execute bulk message blasts to customers compliant with Meta guidelines.
+
+## Primary Public Pages & Paths
+- **Home (/)**: Elegant landing screen with visual bento grids, value propositions, and trust parameters.
+- **About (/about)**: Mission declaration, technical architecture, and reliability metrics.
+- **Contact (/contact)**: High-fidelity contact form and custom plan inquiries.
+- **FAQ & Support (/faq-support)**: Operational tips, broadcasting thresholds, and automated ticketing.
+- **Privacy Policy (/privacy)**: Meta-partner compliant English privacy disclosures (GDPR/CCPA compliant).
+- **Terms of Service (/terms)**: Interactive administrative terms, guidelines, and billing parameters.
+- **Data Deletion (/deletion)**: One-click system profile and authorization token revocation mechanism.
+
+## Workspace Core Modules
+Once authenticated, administrators navigate within high-performance modules:
+- **/overview**: Analytics dashboards, system status metrics, and recent activity streams.
+- **/pages**: Direct Facebook Page links, credentials management, and synchronization controls.
+- **/chat**: Integrated dual-panel active customer messaging layout with pre-saved template injectors.
+- **/audience**: Fully searchable subscriber contacts directory, tags management, and sync audits.
+- **/broadcast**: Modular campaign creator (Single recipient blasts, bulk cohorts, custom message tags).
+- **/analytics**: High-fidelity chart visualizations for broadcast delivery, subscriber growth, and Page performance.
+- **/team**: Granular role-based workspace member invites and security levels.
+- **/billing**: Tier management, subscription history audits, and dynamic invoice views.
+- **/settings**: Complete enterprise personalization console and system keys configurations.
+
+## Administrative Portal (/admin)
+Super-administrative console restricted to permitted accounts to oversee system activity, update globally published announcements, monitor account directories, and manage database queries.

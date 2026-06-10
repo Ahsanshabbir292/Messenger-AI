@@ -10,6 +10,7 @@ import { createServer } from "http";
 import multer from "multer";
 import nodemailer from "nodemailer";
 import { initializeApp } from "firebase/app";
+import compression from "compression";
 import { 
   getFirestore as getWebFirestore, 
   doc, 
@@ -890,10 +891,63 @@ function fromFirestoreFields(fields: any) {
 }
 
 const restQueryCache = new Map<string, { timestamp: number; data: any }>();
-const CACHE_TTL_MS = 6000; // 6 seconds cache of Firestore REST queries to prevent 429 requests.
+const CACHE_TTL_MS = 120000; // Increased to 2 minutes cache to prevent 429 requests while retaining snappy feel
+
+const pendingPromises = new Map<string, Promise<any>>();
+let globalRateLimitUntil = 0;
 
 function clearRestQueryCache() {
-  restQueryCache.clear();
+  // Graceful keep signature but we don't clear the full cache unless absolutely required
+}
+
+function invalidateRestQueryCache(parentPath: string, id: string) {
+  if (!parentPath || !id) return;
+  const docKey = `doc:${parentPath}/${id}`;
+  restQueryCache.delete(docKey);
+  pendingPromises.delete(docKey);
+
+  const colKey = `col:${parentPath}`;
+  restQueryCache.delete(colKey);
+  pendingPromises.delete(colKey);
+  
+  // Also delete subcollection or wildcard queries for the specific paths
+  for (const k of restQueryCache.keys()) {
+    if (k.startsWith(`col:${parentPath}/${id}/`) || k === `col:${parentPath}/${id}`) {
+      restQueryCache.delete(k);
+      pendingPromises.delete(k);
+    }
+    // Delete any cached collection group query when documents change
+    if (k.startsWith("colgroup:")) {
+      restQueryCache.delete(k);
+      pendingPromises.delete(k);
+    }
+  }
+}
+
+async function axiosRequestWithRetry(config: any, retries = 6, delay = 1500): Promise<any> {
+  const now = Date.now();
+  if (now < globalRateLimitUntil) {
+    const queueWait = globalRateLimitUntil - now;
+    console.log(`[RateLimit-Queue] Coalescing Firestore call. Waiting ${queueWait}ms for rate limiting to clear...`);
+    await new Promise(resolve => setTimeout(resolve, queueWait));
+  }
+
+  try {
+    return await axios(config);
+  } catch (err: any) {
+    if (retries > 0 && err.response && err.response.status === 429) {
+      // Set rate limit cooldown window for 6-8 seconds to allow REST backend to rest
+      const cooldownMs = 6000 + Math.floor(Math.random() * 2000);
+      globalRateLimitUntil = Date.now() + cooldownMs;
+
+      const jitter = Math.floor(Math.random() * 800) + 200;
+      const totalDelay = delay + jitter;
+      console.warn(`[RestDB-Retry] Received 429 rate limit. Cooling down for ${cooldownMs}ms and retrying in ${totalDelay}ms... (Remaining retries: ${retries})`);
+      await new Promise(resolve => setTimeout(resolve, totalDelay));
+      return axiosRequestWithRetry(config, retries - 1, delay * 2);
+    }
+    throw err;
+  }
 }
 
 async function getCachedRestQuery(key: string, fetchFn: () => Promise<any>): Promise<any> {
@@ -902,9 +956,20 @@ async function getCachedRestQuery(key: string, fetchFn: () => Promise<any>): Pro
   if (cached && (now - cached.timestamp < CACHE_TTL_MS)) {
     return cached.data;
   }
-  const result = await fetchFn();
-  restQueryCache.set(key, { timestamp: now, data: result });
-  return result;
+  
+  let promise = pendingPromises.get(key);
+  if (!promise) {
+    promise = fetchFn().then(result => {
+      restQueryCache.set(key, { timestamp: Date.now(), data: result });
+      pendingPromises.delete(key);
+      return result;
+    }).catch(err => {
+      pendingPromises.delete(key);
+      throw err;
+    });
+    pendingPromises.set(key, promise);
+  }
+  return promise;
 }
 
 class RestCollectionReference {
@@ -931,9 +996,13 @@ class RestCollectionReference {
         : `${BASE_URL}:runQuery?key=${key}`;
 
       try {
-        const res = await axios.post(url, {
-          structuredQuery: {
-            from: [{ collectionId, allDescendants: false }]
+        const res = await axiosRequestWithRetry({
+          method: "post",
+          url,
+          data: {
+            structuredQuery: {
+              from: [{ collectionId, allDescendants: false }]
+            }
           }
         });
 
@@ -958,7 +1027,7 @@ class RestCollectionReference {
           return { docs: [] };
         }
         console.error(`[RestDB] Error querying collection ${this.path}:`, err.message);
-        return { docs: [] };
+        throw err;
       }
     });
   }
@@ -984,7 +1053,10 @@ class RestDocumentReference {
       const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
       const url = `${BASE_URL}/${this.path}?key=${key}`;
       try {
-        const res = await axios.get(url);
+        const res = await axiosRequestWithRetry({
+          method: "get",
+          url
+        });
         const dataObj = fromFirestoreFields(res.data.fields);
         return {
           exists: true,
@@ -1000,17 +1072,13 @@ class RestDocumentReference {
           };
         }
         console.error(`[RestDB] Error get document ${this.path}:`, err.message);
-        return {
-          exists: false,
-          data: () => null,
-          id: this.id
-        };
+        throw err;
       }
     });
   }
 
   async set(data: any) {
-    clearRestQueryCache();
+    invalidateRestQueryCache(this.parentPath, this.id);
     const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
     const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
@@ -1018,7 +1086,11 @@ class RestDocumentReference {
     const url = `${BASE_URL}/${this.path}?key=${key}`;
     const payload = toFirestoreFields(data);
     try {
-      await axios.patch(url, payload);
+      await axiosRequestWithRetry({
+        method: "patch",
+        url,
+        data: payload
+      });
     } catch (err: any) {
       console.error(`[RestDB] Error set document ${this.path}:`, err.response?.data || err.message);
       throw err;
@@ -1026,7 +1098,7 @@ class RestDocumentReference {
   }
 
   async update(data: any) {
-    clearRestQueryCache();
+    invalidateRestQueryCache(this.parentPath, this.id);
     const keys = Object.keys(data);
     if (keys.length === 0) return;
     const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
@@ -1037,7 +1109,11 @@ class RestDocumentReference {
     const url = `${BASE_URL}/${this.path}?key=${key}&${queryParams}`;
     const payload = toFirestoreFields(data);
     try {
-      await axios.patch(url, payload);
+      await axiosRequestWithRetry({
+        method: "patch",
+        url,
+        data: payload
+      });
     } catch (err: any) {
       console.error(`[RestDB] Error update document ${this.path}:`, err.response?.data || err.message);
       throw err;
@@ -1045,14 +1121,17 @@ class RestDocumentReference {
   }
 
   async delete() {
-    clearRestQueryCache();
+    invalidateRestQueryCache(this.parentPath, this.id);
     const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
     const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
     const url = `${BASE_URL}/${this.path}?key=${key}`;
     try {
-      await axios.delete(url);
+      await axiosRequestWithRetry({
+        method: "delete",
+        url
+      });
     } catch (err: any) {
       console.error(`[RestDB] Error delete document ${this.path}:`, err.response?.data || err.message);
       throw err;
@@ -1091,9 +1170,13 @@ class RestCollectionGroupReference {
       const url = `${BASE_URL}:runQuery?key=${key}`;
 
       try {
-        const res = await axios.post(url, {
-          structuredQuery: {
-            from: [{ collectionId: this.collectionId, allDescendants: true }]
+        const res = await axiosRequestWithRetry({
+          method: "post",
+          url,
+          data: {
+            structuredQuery: {
+              from: [{ collectionId: this.collectionId, allDescendants: true }]
+            }
           }
         });
 
@@ -1118,8 +1201,11 @@ class RestCollectionGroupReference {
         }
         return { docs };
       } catch (err: any) {
+        if (err.response && err.response.status === 404) {
+          return { docs: [] };
+        }
         console.error(`[RestDB] Error querying collectionGroup ${this.collectionId}:`, err.message);
-        return { docs: [] };
+        throw err;
       }
     });
   }
@@ -1188,6 +1274,7 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
 
   app.set("trust proxy", 1);
+  app.use(compression());
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin) {
@@ -1554,7 +1641,7 @@ async function startServer() {
   async function getResolvedUserEmail(req: any): Promise<string> {
     const db = await getDb();
     let email = req.session?.user?.email || req.headers['x-user-email'] || req.query?.email || req.body?.email;
-    if (!email || email === "anonymous") {
+    if (!email || email === "anonymous" || email === "undefined" || email === "null") {
       return "anonymous";
     }
     const cleanEmail = String(email).toLowerCase().trim();
@@ -1877,6 +1964,90 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // SEO & Core Public Compliance Assets
+  app.get("/robots.txt", (req, res) => {
+    const host = req.get("host") || "perseus-bot.com";
+    const protocol = req.secure ? "https" : "http";
+    res.type("text/plain");
+    res.send(`User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/
+
+Sitemap: ${protocol}://${host}/sitemap.xml`);
+  });
+
+  app.get("/sitemap.xml", (req, res) => {
+    const host = req.get("host") || "perseus-bot.com";
+    const protocol = req.secure ? "https" : "http";
+    const baseUrl = `${protocol}://${host}`;
+    const now = new Date().toISOString().split("T")[0];
+
+    const routes = [
+      { path: "", priority: "1.0", changefreq: "daily" },
+      { path: "about", priority: "0.8", changefreq: "weekly" },
+      { path: "contact", priority: "0.7", changefreq: "weekly" },
+      { path: "faq-support", priority: "0.8", changefreq: "weekly" },
+      { path: "privacy", priority: "0.5", changefreq: "monthly" },
+      { path: "terms", priority: "0.5", changefreq: "monthly" },
+      { path: "deletion", priority: "0.5", changefreq: "monthly" },
+      { path: "signin", priority: "0.6", changefreq: "monthly" },
+      { path: "signup", priority: "0.6", changefreq: "monthly" }
+    ];
+
+    const urlNodes = routes.map(r => {
+      return `  <url>
+    <loc>${baseUrl}/${r.path}</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>${r.changefreq}</changefreq>
+    <priority>${r.priority}</priority>
+  </url>`;
+    }).join("\n");
+
+    const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urlNodes}
+</urlset>`;
+
+    res.type("application/xml");
+    res.send(sitemap);
+  });
+
+  app.get("/llms.txt", (req, res) => {
+    res.type("text/plain");
+    res.send(`# Perseus Bot
+
+Enterprise Facebook Messenger Automation and Core Broadcasting Framework.
+
+## System Overview
+Perseus Bot is a high-speed, secure, enterprise-grade multi-tenant platform constructed in React, Vite, Tailwind CSS, Express, and restDB. It allows organizations to connect Facebook Pages, manage rich live chats, build custom broadcast criteria, and execute bulk message blasts to customers compliant with Meta guidelines.
+
+## Primary Public Pages & Paths
+- **Home (/)**: Elegant landing screen with visual bento grids, value propositions, and trust parameters.
+- **About (/about)**: Mission declaration, technical architecture, and reliability metrics.
+- **Contact (/contact)**: High-fidelity contact form and custom plan inquiries.
+- **FAQ & Support (/faq-support)**: Operational tips, broadcasting thresholds, and automated ticketing.
+- **Privacy Policy (/privacy)**: Meta-partner compliant English privacy disclosures (GDPR/CCPA compliant).
+- **Terms of Service (/terms)**: Interactive administrative terms, guidelines, and billing parameters.
+- **Data Deletion (/deletion)**: One-click system profile and authorization token revocation mechanism.
+
+## Workspace Core Modules
+Once authenticated, administrators navigate within high-performance modules:
+- **/overview**: Analytics dashboards, system status metrics, and recent activity streams.
+- **/pages**: Direct Facebook Page links, credentials management, and synchronization controls.
+- **/chat**: Integrated dual-panel active customer messaging layout with pre-saved template injectors.
+- **/audience**: Fully searchable subscriber contacts directory, tags management, and sync audits.
+- **/broadcast**: Modular campaign creator (Single recipient blasts, bulk cohorts, custom message tags).
+- **/analytics**: High-fidelity chart visualizations for broadcast delivery, subscriber growth, and Page performance.
+- **/team**: Granular role-based workspace member invites and security levels.
+- **/billing**: Tier management, subscription history audits, and dynamic invoice views.
+- **/settings**: Complete enterprise personalization console and system keys configurations.
+
+## Administrative Portal (/admin)
+Super-administrative console restricted to permitted accounts to audit system activity, update globally published announcements, monitor account directories, and manage database queries.
+`);
+  });
+
   app.get("/api/emails/test-send", async (req, res) => {
     const targetEmail = (req.query.to as string) || "sandbox_user@gmail.com";
     try {
@@ -2192,7 +2363,8 @@ async function startServer() {
 
   app.get("/api/auth/me", async (req, res) => {
     const db = await getDb();
-    const headerEmail = req.headers['x-user-email'] as string || req.query.email as string;
+    const rawEmail = req.headers['x-user-email'] as string || req.query.email as string;
+    const headerEmail = (rawEmail && rawEmail !== "undefined" && rawEmail !== "null") ? rawEmail.toLowerCase().trim() : undefined;
     
     if (!req.session.user && headerEmail && db) {
       try {
@@ -2207,6 +2379,10 @@ async function startServer() {
         }
       } catch (err: any) {
         console.error("Failed to restore session via header email:", err.message);
+        if (err.response && err.response.status === 429) {
+          return res.status(429).json({ error: "Database rate limit exceeded. Please wait a moment." });
+        }
+        return res.status(500).json({ error: "Database error during session recovery" });
       }
     }
 
@@ -2216,7 +2392,28 @@ async function startServer() {
         return res.status(403).json({ error: "Account Suspended: Your account has been suspended by an administrator." });
       }
       if (db) {
-        req.session.user = await enrichUserWithWorkspace(db, req.session.user, req);
+        try {
+          req.session.user = await enrichUserWithWorkspace(db, req.session.user, req);
+          const emailLower = String(req.session.user.email).toLowerCase().trim();
+          try {
+            const timestampStr = new Date().toISOString();
+            const lastRecorded = req.session.user.lastLogin;
+            const shouldUpdate = !lastRecorded || (Date.now() - new Date(lastRecorded).getTime() > 300000);
+            if (shouldUpdate) {
+              await db.collection("users").doc(emailLower).update({
+                lastLogin: timestampStr
+              });
+              req.session.user.lastLogin = timestampStr;
+            }
+          } catch (e: any) {
+            console.error(`[AUTH] Failed to update lastLogin for ${emailLower}:`, e.message);
+          }
+        } catch (enrichErr: any) {
+          console.error("[AUTH] Failed during workspace enrichment:", enrichErr.message);
+          if (enrichErr.response && enrichErr.response.status === 429) {
+            return res.status(429).json({ error: "Database rate limit exceeded during workspace lookup." });
+          }
+        }
       }
       res.json({ user: req.session.user });
     } else {
@@ -3104,6 +3301,12 @@ async function startServer() {
     const db = await getDb();
     if (!db) return false;
 
+    // Bypassing duplicate checking for simulated/test local accounts to allow fluid testing across multiple workspaces/users
+    if (fbUserId.startsWith("sim_") || fbUserId.startsWith("simulated_")) {
+      console.log(`[FB-DuplicateCheck] Bypassing duplicate checking for simulated/sandbox Facebook account: ${fbName} (${fbUserId})`);
+      return false;
+    }
+
     const normalizedUserEmail = userEmail.trim().toLowerCase();
     const normalizedFbUserId = String(fbUserId).trim();
 
@@ -3691,6 +3894,9 @@ async function startServer() {
             ...updates
           });
         }
+        
+        // Invalidate Facebook config cache immediately for simulated portal connection
+        clearFbDataCache(userEmail);
       } catch (err: any) {
         console.error("[FB-Simulator] Error saving simulated payload in DB:", err.message);
       }
@@ -4622,8 +4828,8 @@ async function startServer() {
 
     try {
       const data = await getFacebookData(req);
-      if (!data || !data.pages) {
-        return res.status(400).json({ error: "No connected Facebook pages found to synchronize." });
+      if (!data || !data.pages || data.pages.length === 0) {
+        return res.json({ success: true, message: "No connected Facebook pages found to synchronize.", pages: [] });
       }
 
       console.log(`[Sync Contacts] Syncing counts for user: ${userEmail}, workspace: ${workspaceId || 'none'}`);
@@ -7579,95 +7785,36 @@ Write a realistic, short and natural response expressing your reaction, query, o
     }
   }
 
-  // Background Campaign Scheduler & Stalled Recovery Loop (polls every 15 seconds)
+  // Background Campaign Scheduler & Stalled Recovery Loop (polls every 30 seconds for maximum API efficiency)
   setInterval(async () => {
     try {
       const db = await getDb();
       if (!db) return;
 
-      const usersSnap = await db.collection("users").get();
-      for (const userDoc of usersSnap.docs) {
-        const userEmail = userDoc.id;
+      const bcastsSnap = await db.collectionGroup("broadcasts").get();
+      const docs = bcastsSnap?.docs || [];
+
+      for (const bcastDoc of docs) {
+        const bcastId = bcastDoc.id;
+        const bcastData = bcastDoc.data();
+        if (!bcastData) continue;
+
+        // Extract userEmail from relative path (e.g., users/email@test.com/broadcasts/bcastId)
+        const path = bcastDoc.ref?.path || "";
+        const parts = path.split("/");
+        if (parts[0] !== "users" || parts[2] !== "broadcasts") {
+          continue;
+        }
+        const userEmail = parts[1];
         const bcastsCollection = db.collection("users").doc(userEmail).collection("broadcasts");
-        const bcastsSnap = await bcastsCollection.get();
-        const docs = bcastsSnap?.docs || [];
+        const docRef = bcastsCollection.doc(bcastId);
 
         // 1. Process scheduled campaigns when their time has arrived using transactional locks
-        for (const bcastDoc of docs) {
-          const bcastData = bcastDoc.data();
-          if (bcastData?.status === "scheduled" && bcastData?.scheduleDate && bcastData?.scheduleTime) {
-            const scheduleTimeStr = `${bcastData.scheduleDate}T${bcastData.scheduleTime}`;
-            const targetTime = new Date(scheduleTimeStr);
-            if (targetTime <= new Date()) {
-              const bcastId = bcastDoc.id;
-              const docRef = bcastsCollection.doc(bcastId);
-              const threadId = `scheduler_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-
-              try {
-                let freshBcastData: any = null;
-                await db.runTransaction(async (transaction: any) => {
-                  const sfDoc = await transaction.get(docRef);
-                  if (!sfDoc.exists) return;
-                  const freshVal = sfDoc.data();
-                  if (freshVal?.status !== "scheduled") {
-                    throw new Error("Campaign already triggered or not in scheduled state");
-                  }
-
-                  transaction.update(docRef, {
-                    status: "running",
-                    lockHeartbeat: new Date().toISOString(),
-                    lockOwner: threadId
-                  });
-                  freshBcastData = {
-                    ...freshVal,
-                    status: "running",
-                    lockHeartbeat: new Date().toISOString(),
-                    lockOwner: threadId
-                  };
-                });
-
-                if (freshBcastData) {
-                  console.log(`[Scheduler Engine] Successfully locked and launching due scheduled campaign: ${bcastId} of user ${userEmail}`);
-                  executeSelfContainedCampaignLoop(db, userEmail, bcastId, freshBcastData, threadId);
-                }
-              } catch (err: any) {
-                console.log(`[Scheduler Engine Debug] Scheduled campaign ${bcastId} claim skipped:`, err.message);
-              }
-            }
-          }
-        }
-
-        // 2. Process active 'running' campaigns that lost their executor thread (recovery/reboots)
-        for (const bcastDoc of docs) {
-          const bcastData = bcastDoc.data();
-          if (bcastData?.status === "running") {
-            const bcastId = bcastDoc.id;
-
-            // Simple local check first
-            if (activeBroadcastThreads.has(bcastId)) {
-              continue;
-            }
-
-            // Lock heartbeat age check
-            const lockHeartbeatStr = bcastData?.lockHeartbeat;
-            const isLocked = lockHeartbeatStr && (Date.now() - new Date(lockHeartbeatStr).getTime() < 45000);
-            if (isLocked) {
-              continue; // A live executor thread is actively updating lock heartbeats on a container instance
-            }
-
-            // Extra safety: Check if the campaign is very recently created (< 45 seconds).
-            // If it is newly created, let the starting request thread add itself to activeBroadcastThreads.
-            const createdAt = bcastData?.createdAt;
-            if (createdAt) {
-              const ageMs = Date.now() - new Date(createdAt).getTime();
-              if (ageMs < 45000) {
-                continue; // Skip and wait for the starting request thread
-              }
-            }
-
-            // Stalled running campaign detected! Transactionally claim and recover
-            const docRef = bcastsCollection.doc(bcastId);
-            const threadId = `recovery_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        if (bcastData.status === "scheduled" && bcastData.scheduleDate && bcastData.scheduleTime) {
+          const scheduleTimeStr = `${bcastData.scheduleDate}T${bcastData.scheduleTime}`;
+          const targetTime = new Date(scheduleTimeStr);
+          if (targetTime <= new Date()) {
+            const threadId = `scheduler_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
 
             try {
               let freshBcastData: any = null;
@@ -7675,47 +7822,122 @@ Write a realistic, short and natural response expressing your reaction, query, o
                 const sfDoc = await transaction.get(docRef);
                 if (!sfDoc.exists) return;
                 const freshVal = sfDoc.data();
-                if (freshVal?.status !== "running") {
-                  throw new Error("Campaign status changed");
-                }
-
-                // Re-verify lock heartbeats inside transaction
-                const subLockHeartbeat = freshVal?.lockHeartbeat;
-                const subIsLocked = subLockHeartbeat && (Date.now() - new Date(subLockHeartbeat).getTime() < 45000);
-                if (subIsLocked) {
-                  throw new Error("Campaign was locked in the meantime");
+                if (freshVal?.status !== "scheduled") {
+                  throw new Error("Campaign already triggered or not in scheduled state");
                 }
 
                 transaction.update(docRef, {
+                  status: "running",
                   lockHeartbeat: new Date().toISOString(),
                   lockOwner: threadId
                 });
-
                 freshBcastData = {
                   ...freshVal,
+                  status: "running",
                   lockHeartbeat: new Date().toISOString(),
                   lockOwner: threadId
                 };
               });
 
               if (freshBcastData) {
-                console.log(`[Optimizer Recovery] Claimed lock and recovered stalled campaign: ${bcastId} of user ${userEmail}`);
+                console.log(`[Scheduler Engine] Successfully locked and launching due scheduled campaign: ${bcastId} of user ${userEmail}`);
                 executeSelfContainedCampaignLoop(db, userEmail, bcastId, freshBcastData, threadId);
               }
             } catch (err: any) {
-              console.log(`[Optimizer Recovery Debug] Campaign ${bcastId} recovery skipped:`, err.message);
+              console.log(`[Scheduler Engine Debug] Scheduled campaign ${bcastId} claim skipped:`, err.message);
             }
+          }
+        }
+
+        // 2. Process active 'running' campaigns that lost their executor thread (recovery/reboots)
+        if (bcastData.status === "running") {
+          // Simple local check first
+          if (activeBroadcastThreads.has(bcastId)) {
+            continue;
+          }
+
+          // Lock heartbeat age check
+          const lockHeartbeatStr = bcastData.lockHeartbeat;
+          const isLocked = lockHeartbeatStr && (Date.now() - new Date(lockHeartbeatStr).getTime() < 45000);
+          if (isLocked) {
+            continue; // A live executor thread is actively updating lock heartbeats on a container instance
+          }
+
+          // Extra safety: Check if the campaign is very recently created (< 45 seconds).
+          const createdAt = bcastData.createdAt;
+          if (createdAt) {
+            const ageMs = Date.now() - new Date(createdAt).getTime();
+            if (ageMs < 45000) {
+              continue; // Skip and wait for the starting request thread
+            }
+          }
+
+          // Stalled running campaign detected! Transactionally claim and recover
+          const threadId = `recovery_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+          try {
+            let freshBcastData: any = null;
+            await db.runTransaction(async (transaction: any) => {
+              const sfDoc = await transaction.get(docRef);
+              if (!sfDoc.exists) return;
+              const freshVal = sfDoc.data();
+              if (freshVal?.status !== "running") {
+                throw new Error("Campaign status changed");
+              }
+
+              // Re-verify lock heartbeats inside transaction
+              const subLockHeartbeat = freshVal?.lockHeartbeat;
+              const subIsLocked = subLockHeartbeat && (Date.now() - new Date(subLockHeartbeat).getTime() < 45000);
+              if (subIsLocked) {
+                throw new Error("Campaign was locked in the meantime");
+              }
+
+              transaction.update(docRef, {
+                lockHeartbeat: new Date().toISOString(),
+                lockOwner: threadId
+              });
+
+              freshBcastData = {
+                ...freshVal,
+                lockHeartbeat: new Date().toISOString(),
+                lockOwner: threadId
+              };
+            });
+
+            if (freshBcastData) {
+              console.log(`[Optimizer Recovery] Claimed lock and recovered stalled campaign: ${bcastId} of user ${userEmail}`);
+              executeSelfContainedCampaignLoop(db, userEmail, bcastId, freshBcastData, threadId);
+            }
+          } catch (err: any) {
+            console.log(`[Optimizer Recovery Debug] Campaign ${bcastId} recovery skipped:`, err.message);
           }
         }
       }
     } catch (err: any) {
       console.error("[Scheduler Engine Error]", err.message);
     }
-  }, 15000);
+  }, 30000);
 
   // ==========================================
   // ADMIN PANEL CONTROLLER ENDPOINTS /api/admin/*
   // ==========================================
+
+  async function logAdminAction(action: string, target: string, req: any) {
+    try {
+      const db = await getDb();
+      if (!db) return;
+      const adminEmail = req.session?.user?.email || "ahsan.shabbir292@gmail.com";
+      const timestamp = Date.now();
+      await db.collection("adminLogs").add({
+        action,
+        target,
+        adminEmail,
+        timestamp
+      });
+    } catch (err: any) {
+      console.error("[adminLogs] Failed to write log:", err.message);
+    }
+  }
 
   async function verifyAdminMiddleware(req: any, res: any, next: any) {
     const email = (req.session?.user?.email || req.headers['x-user-email'] || req.query.email || "") as string;
@@ -7728,6 +7950,21 @@ Write a realistic, short and natural response expressing your reaction, query, o
   // Verification
   app.post("/api/admin/verify", verifyAdminMiddleware, (req, res) => {
     res.json({ success: true, email: "ahsan.shabbir292@gmail.com" });
+  });
+
+  // Admin Activity Logs API
+  app.get("/api/admin/logs", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const snap = await db.collection("adminLogs").get();
+      const logs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+      logs.sort((a: any, b: any) => b.timestamp - a.timestamp);
+      res.json({ logs: logs.slice(0, 50) });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to fetch admin logs:", err.message);
+      res.status(500).json({ error: "Failed to fetch admin logs", details: err.message });
+    }
   });
 
   // Admin Dashboard Statistics
@@ -7768,7 +8005,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
               const sub = u.billing.subscriptions[pageId];
               if (sub.status === "Active" || sub.status === "Active Subscription" || (sub.subscription_ends_at && new Date(sub.subscription_ends_at).getTime() > now)) {
                 activeSubs++;
-              }
+               }
             });
           }
           if (Array.isArray(u.billing.orders)) {
@@ -7789,6 +8026,8 @@ Write a realistic, short and natural response expressing your reaction, query, o
         revenue,
         usersToday,
         usersWeek,
+        newUsersToday: usersToday,
+        newUsersThisWeek: usersWeek,
         orders: allOrders
       });
     } catch (err: any) {
@@ -7803,9 +8042,35 @@ Write a realistic, short and natural response expressing your reaction, query, o
     if (!db) return res.status(500).json({ error: "Database not initialized" });
     try {
       const usersSnap = await db.collection("users").get();
+      
+      const bcastCounts: Record<string, number> = {};
+      try {
+        const broadcastsSnap = await db.collectionGroup("broadcasts").get();
+        for (const b of broadcastsSnap.docs) {
+          if (b.ref && typeof b.ref.path === 'string') {
+            const parts = b.ref.path.split("/");
+            const userIndex = parts.indexOf("users");
+            if (userIndex !== -1 && userIndex + 1 < parts.length) {
+              const email = parts[userIndex + 1].toLowerCase().trim();
+              bcastCounts[email] = (bcastCounts[email] || 0) + 1;
+            }
+          } else {
+            const ownerEmail = (b.data && b.data().ownerEmail) || "";
+            if (ownerEmail) {
+              const email = ownerEmail.toLowerCase().trim();
+              bcastCounts[email] = (bcastCounts[email] || 0) + 1;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn("[Admin API] Failed to run collectionGroup for broadcast counts:", err.message);
+      }
+
       const users = usersSnap.docs.map((d: any) => {
         const data = d.data();
         const { password, ...userWithoutPassword } = data;
+        const emailLower = d.id.toLowerCase().trim();
+        userWithoutPassword.broadcastCount = bcastCounts[emailLower] || 0;
         return userWithoutPassword;
       });
       res.json({ users });
@@ -7838,10 +8103,43 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const emailLower = req.params.email.toLowerCase().trim();
     try {
       await db.collection("users").doc(emailLower).delete();
+      await logAdminAction("Deleted user account", emailLower, req);
       res.json({ success: true });
     } catch (err: any) {
       console.error("[Admin API] Failed to delete user:", err.message);
       res.status(500).json({ error: "Failed to delete user", details: err.message });
+    }
+  });
+
+  // Users Management - Bulk credits modification
+  app.post("/api/admin/users/all/credits", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { amount, mode } = req.body;
+    try {
+      const usersSnap = await db.collection("users").get();
+      for (const d of usersSnap.docs) {
+        const u = d.data();
+        const currentCredits = typeof u.credits === "number" ? u.credits : 0;
+        let newCredits = currentCredits;
+
+        if (mode === "set") {
+          newCredits = Number(amount);
+        } else if (mode === "add") {
+          newCredits = currentCredits + Number(amount);
+        } else if (mode === "deduct") {
+          newCredits = Math.max(0, currentCredits - Number(amount));
+        }
+
+        await db.collection("users").doc(d.id).update({
+          credits: newCredits
+        });
+      }
+      await logAdminAction("Bulk modified credits", `Amount: ${amount}, Mode: ${mode}`, req);
+      res.json({ success: true, message: `Bulk adjusted credits for all clients to mode: ${mode}, amount: ${amount}` });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to run bulk credit update:", err.message);
+      res.status(500).json({ error: "Failed to run bulk credit update", details: err.message });
     }
   });
 
@@ -7882,6 +8180,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
       }
 
       await db.collection("users").doc(emailLower).update({ credits: newCredits });
+      await logAdminAction(`Credits change (${mode})`, `${emailLower} updated by ${amount}`, req);
       res.json({ success: true, email: emailLower, credits: newCredits });
     } catch (err: any) {
       console.error("[Admin API] Failed to update user credits:", err.message);
@@ -7914,6 +8213,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
       }
 
       await db.collection("users").doc(emailLower).update({ trialCredits: newTrialCredits });
+      await logAdminAction(`Trial credits change (${mode})`, `${emailLower} updated by ${amount}`, req);
       res.json({ success: true, email: emailLower, trialCredits: newTrialCredits });
     } catch (err: any) {
       console.error("[Admin API] Failed to update user trial credits:", err.message);
@@ -8008,6 +8308,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
         console.warn("[Admin API] Failed to update session trialLocked:", e.message);
       }
 
+      await logAdminAction("Reactivated trial status", emailLower, req);
       res.json({ success: true, message: "Trial successfully reactivated, and trial credits loaded." });
     } catch (err: any) {
       console.error("[Admin API] Failed to reactivate trial:", err.message);
@@ -8042,6 +8343,9 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
       await userRef.update(updates);
 
+      // Invalidate memory cache so dashboard reads fresh disconnected state immediately
+      clearFbDataCache(emailLower);
+
       // Also delete the sessions document fb_${email.replace(/[^a-zA-Z0-9]/g, '_')}
       const sessionId = `fb_${emailLower.replace(/[^a-zA-Z0-9]/g, '_')}`;
       try {
@@ -8050,6 +8354,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
         console.warn("[Admin API] Failed to delete connection session:", e.message);
       }
 
+      await logAdminAction("Disconnected Facebook Integration", emailLower, req);
       res.json({ success: true, message: "Facebook connection disconnected successfully." });
     } catch (err: any) {
       console.error("[Admin API] Failed to disconnect Facebook:", err.message);
@@ -8064,6 +8369,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const emailLower = req.params.email.toLowerCase().trim();
     try {
       await db.collection("users").doc(emailLower).update({ suspended: true });
+      await logAdminAction("Suspended user account", emailLower, req);
       res.json({ success: true, email: emailLower, suspended: true });
     } catch (err: any) {
       console.error("[Admin API] Failed to suspend user:", err.message);
@@ -8078,6 +8384,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
     const emailLower = req.params.email.toLowerCase().trim();
     try {
       await db.collection("users").doc(emailLower).update({ suspended: false });
+      await logAdminAction("Activated/Unsuspended user account", emailLower, req);
       res.json({ success: true, email: emailLower, suspended: false });
     } catch (err: any) {
       console.error("[Admin API] Failed to unsuspend user:", err.message);
@@ -8140,6 +8447,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
       billing.subscriptions[pageId] = sub;
       await db.collection("users").doc(emailLower).update({ billing });
+      await logAdminAction(`Subscription modified (${action})`, `${emailLower} (Page ${pageId})`, req);
       res.json({ success: true, billing });
     } catch (err: any) {
       console.error("[Admin API] Failed to update subscription:", err.message);
@@ -8257,10 +8565,26 @@ Write a realistic, short and natural response expressing your reaction, query, o
     };
     try {
       await db.collection("announcements").doc(annId).set(announcement);
+      await logAdminAction("Published system announcement", title, req);
       res.json({ success: true, announcement });
     } catch (err: any) {
       console.error("[Admin API] Failed to publish announcement:", err.message);
       res.status(500).json({ error: "Failed to publish announcement", details: err.message });
+    }
+  });
+
+  // Delete Announcement
+  app.delete("/api/admin/announcements/:id", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const { id } = req.params;
+    try {
+      await db.collection("announcements").doc(id).delete();
+      await logAdminAction("Deleted system announcement", `ID: ${id}`, req);
+      res.json({ success: true, message: `Announcement ${id} deleted safely.` });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to delete announcement:", err.message);
+      res.status(500).json({ error: "Failed to delete announcement", details: err.message });
     }
   });
 

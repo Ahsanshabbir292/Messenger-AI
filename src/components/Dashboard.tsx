@@ -1190,8 +1190,14 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   }, []);
 
   const validateWorkspaceMembership = useCallback(async () => {
+    if (!appUser?.email) return;
     try {
-      const res = await axios.get('/api/auth/me');
+      const res = await axios.get('/api/auth/me', {
+        headers: {
+          'x-user-email': appUser?.email,
+          'x-workspace-id': currentWorkspaceId
+        }
+      });
       if (res.data && res.data.user) {
         const freshUser = res.data.user;
         
@@ -1235,7 +1241,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     } catch (err: any) {
       console.error("[Workspace Sync] Failed to validate workspace membership:", err);
     }
-  }, []);
+  }, [appUser?.email, currentWorkspaceId, onUserUpdate]);
 
   const getConversations = async (pageId: string, forceRefresh: boolean = false, showLoader: boolean = true) => {
     if (showLoader) setIsLoading(true);
@@ -1702,6 +1708,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       });
       const { url } = res.data;
       setFbAuthUrl(url);
+      setFbSyncModalOpen(true); // Proactively open fallback wizard so user has direct connection choices immediately in sandboxed iframe
 
       const width = 600, height = 700;
       const left = window.screenX + (window.outerWidth - width) / 2;
@@ -1725,6 +1732,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
               console.log("[AutoSync] Facebook authentication success detected via background API poll!");
               getPages();
               getUserProfile();
+              setFbSyncModalOpen(false); // Auto-dismiss helper modal on success
               return true;
             }
           } catch (e) {
@@ -1746,10 +1754,6 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
             }
           }
         }, 1500);
-      } else {
-        // Automatically activate fallback modal if popup is blocked
-        console.log("[FB-Simulator] Popup blocked or not openable. Activating visual synchronization wizard.");
-        setFbSyncModalOpen(true);
       }
     } catch (err: any) {
       alert(formatAxiosError(err, "Failed to retrieve Facebook auth URL."));
@@ -1841,6 +1845,33 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     validateWorkspaceMembership();
     getPages();
     getUserProfile();
+
+    // Check localStorage on mount for successful or failed FB connection (critical for inline redirect)
+    try {
+      const pendingFbSuccess = localStorage.getItem('FB_AUTH_SUCCESS');
+      if (pendingFbSuccess) {
+        const data = JSON.parse(pendingFbSuccess);
+        // Expand validity to 5 minutes to support slower redirect/reload times
+        if (data && Date.now() - data.timestamp < 300000) {
+          addToast("Facebook connected successfully via secure portal!", "success");
+          validateWorkspaceMembership();
+          getPages();
+          getUserProfile();
+        }
+        localStorage.removeItem('FB_AUTH_SUCCESS');
+      }
+
+      const pendingFbError = localStorage.getItem('FB_AUTH_ERROR');
+      if (pendingFbError) {
+        const data = JSON.parse(pendingFbError);
+        if (data && Date.now() - data.timestamp < 300000) {
+          addToast(data.message || "Facebook connection failed.", "error");
+        }
+        localStorage.removeItem('FB_AUTH_ERROR');
+      }
+    } catch (e) {
+      console.error("Local mount storage FB check error:", e);
+    }
     
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'FB_AUTH_SUCCESS') {
@@ -1887,7 +1918,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       window.removeEventListener('message', handleMessage);
       window.removeEventListener('storage', handleStorageChange);
     };
-  }, [getPages, getUserProfile, validateWorkspaceMembership, currentWorkspaceId]);
+  }, [appUser?.email, currentWorkspaceId]);
 
   useEffect(() => {
     if (socket) {

@@ -3,7 +3,7 @@ import axios from 'axios';
 import { 
   Layers, MessageSquare, MessageCircle, CircleDollarSign, 
   Megaphone, Sparkles, Zap, Clock, ChevronRight, Facebook, 
-  RefreshCw, Globe, CreditCard, Users, Settings, AlertCircle
+  RefreshCw, Globe, CreditCard, Users, Settings, AlertCircle, X
 } from 'lucide-react';
 import { SafeAvatar } from './SafeAvatar';
 
@@ -50,6 +50,15 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
   const totalMessagesExchanged = conversations.reduce((acc: number, curr: any) => acc + (curr.messages?.data?.length || 0), 0);
 
   const [announcements, setAnnouncements] = React.useState<any[]>([]);
+  const [dismissedIds, setDismissedIds] = React.useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('dismissed_announcements');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
   React.useEffect(() => {
     axios.get('/api/announcements')
       .then(res => {
@@ -60,25 +69,44 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
       .catch(() => {});
   }, []);
 
+  const dismissAnnouncement = (id: string) => {
+    const updated = [...dismissedIds, id];
+    setDismissedIds(updated);
+    try {
+      localStorage.setItem('dismissed_announcements', JSON.stringify(updated));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const activeAnnouncements = announcements.filter(a => a.id && !dismissedIds.includes(a.id));
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-20">
       
       {/* System Announcement Banner */}
-      {announcements.length > 0 && (
+      {activeAnnouncements.length > 0 && (
         <div className="bg-indigo-50 border border-indigo-100/70 p-5 rounded-3xl relative overflow-hidden shadow-sm animate-in fade-in duration-300">
-          <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-10 pointer-events-none">
+          <button 
+            onClick={() => dismissAnnouncement(activeAnnouncements[0].id)}
+            className="absolute right-4 top-4 p-1.5 hover:bg-indigo-100 rounded-full text-slate-500 hover:text-slate-800 transition-colors z-10"
+            aria-label="Dismiss Announcement"
+          >
+            <X className="w-4 h-4" />
+          </button>
+          <div className="absolute right-12 top-1/2 -translate-y-1/2 opacity-10 pointer-events-none">
             <Megaphone className="w-24 h-24 text-indigo-600" />
           </div>
           <div className="flex items-start gap-4">
             <div className="p-2.5 bg-indigo-600 text-white rounded-2xl shrink-0 mt-0.5">
               <Megaphone className="w-5 h-5" />
             </div>
-            <div>
+            <div className="pr-8">
               <span className="text-[10px] text-indigo-500 font-extrabold uppercase tracking-wider font-mono">
                 Official System Announcement
               </span>
-              <h4 className="text-sm font-black text-slate-900 mt-1">{announcements[0].title}</h4>
-              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed whitespace-pre-wrap">{announcements[0].content}</p>
+              <h4 className="text-sm font-black text-slate-900 mt-1">{activeAnnouncements[0].title}</h4>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed whitespace-pre-wrap">{activeAnnouncements[0].content}</p>
             </div>
           </div>
         </div>

@@ -4,7 +4,7 @@ import {
   BarChart2, Users, CreditCard, Layers, Megaphone, Bell, Shield, ShieldAlert, 
   Trash2, Search, Filter, RefreshCw, X, CheckSquare, Settings, Check, 
   ChevronRight, AlertTriangle, Play, Pause, Circle, Calendar, List, 
-  Plus, DollarSign, Ban, Unlock, UserCheck, Trash, UserMinus, HelpCircle
+  Plus, DollarSign, Ban, Unlock, UserCheck, Trash, UserMinus, HelpCircle, Activity
 } from 'lucide-react';
 import { 
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, XAxis, YAxis, 
@@ -17,7 +17,7 @@ interface AdminPageProps {
   navigateTo: (path: string) => void;
 }
 
-type AdminTab = 'dashboard' | 'users' | 'credits' | 'subscriptions' | 'pages' | 'broadcasts' | 'teams' | 'announcements' | 'billing';
+type AdminTab = 'dashboard' | 'users' | 'credits' | 'subscriptions' | 'pages' | 'broadcasts' | 'teams' | 'announcements' | 'billing' | 'activity_logs';
 
 export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPageProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
@@ -27,6 +27,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
   const [pages, setPages] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [adminLogs, setAdminLogs] = useState<any[]>([]);
   
   // Filtering states
   const [userSearch, setUserSearch] = useState('');
@@ -89,12 +90,13 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
         }
 
         // Parallel retrieval of stats and details
-        const [statsRes, usersRes, broadcastsRes, pagesRes, announcementsRes] = await Promise.all([
+        const [statsRes, usersRes, broadcastsRes, pagesRes, announcementsRes, logsRes] = await Promise.all([
           axios.get('/api/admin/stats'),
           axios.get('/api/admin/users'),
           axios.get('/api/admin/broadcasts'),
           axios.get('/api/admin/pages'),
-          axios.get('/api/announcements').catch(() => ({ data: { announcements: [] } }))
+          axios.get('/api/announcements').catch(() => ({ data: { announcements: [] } })),
+          axios.get('/api/admin/logs').catch(() => ({ data: { logs: [] } }))
         ]);
 
         setStats(statsRes.data);
@@ -103,6 +105,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
         setPages(pagesRes.data.pages || []);
         setOrders(statsRes.data.orders || []);
         setAnnouncements(announcementsRes.data.announcements || []);
+        setAdminLogs(logsRes.data.logs || []);
       } catch (err: any) {
         console.error("Failed to load administrative overview:", err);
         addToast(err.response?.data?.error || "Error fetching admin data", "danger");
@@ -301,6 +304,17 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
     }
   };
 
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!window.confirm("Are you sure you want to permanently delete this system announcement?")) return;
+    try {
+      await axios.delete(`/api/admin/announcements/${id}`);
+      addToast("System announcement successfully removed.", "success");
+      handleRefresh();
+    } catch (err: any) {
+      addToast("Failed to delete system announcement.", "danger");
+    }
+  };
+
   // Manual payment updates
   const handleMarkOrderPaid = async (ownerEmail: string, orderId: string) => {
     if (!window.confirm("Confirm making this pending payment transaction manually marked as Paid? This unlocks and extends associated page subscriptions.")) return;
@@ -395,7 +409,8 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
               { id: 'broadcasts', label: 'Broadcast History', icon: Megaphone },
               { id: 'teams', label: 'Team Alliances', icon: CheckSquare },
               { id: 'announcements', label: 'Announcements', icon: Bell },
-              { id: 'billing', label: 'Orders & Reconciles', icon: List }
+              { id: 'billing', label: 'Orders & Reconciles', icon: List },
+              { id: 'activity_logs', label: 'Activity Log', icon: Activity }
             ].map((tab) => {
               const Icon = tab.icon;
               const active = activeTab === tab.id;
@@ -465,14 +480,16 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
             <div className="space-y-8 animate-in fade-in duration-300">
               
               {/* Metric stats card deck */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 {[
                   { title: "Total Accounts", value: users.length, description: "All-time registrations", color: "from-blue-600 to-indigo-600" },
                   { title: "Total Broadcasts", value: broadcasts.length, description: "Sent across platform", color: "from-purple-600 to-indigo-600" },
                   { title: "Active Page Lines", value: totalActiveSubscriptions, description: "Live page endpoints", color: "from-emerald-600 to-teal-600" },
                   { title: "System Credits", value: totalCreditsInSystem, description: "Aggregated wallet size", color: "from-yellow-600 to-amber-600" },
                   { title: "Reconciled Revenue", value: `$${totalRevenue.toLocaleString()}`, description: "Platform invoice aggregate", color: "from-rose-600 to-pink-600" },
-                  { title: "Live Facebook Pages", value: pages.length, description: "Connected fb objects", color: "from-indigo-600 to-fuchsia-600" }
+                  { title: "Live Facebook Pages", value: pages.length, description: "Connected fb objects", color: "from-indigo-600 to-fuchsia-600" },
+                  { title: "New Users Today", value: stats?.newUsersToday ?? 0, description: "Registrations today", color: "from-indigo-500 to-blue-500" },
+                  { title: "New Users This Week", value: stats?.newUsersThisWeek ?? 0, description: "Registrations past 7 days", color: "from-fuchsia-500 to-pink-500" }
                 ].map((card, idx) => (
                   <div key={idx} className="bg-slate-900/50 border border-slate-800/80 p-5 rounded-2xl hover:border-slate-700/80 transition-all flex flex-col justify-between">
                     <div>
@@ -627,6 +644,8 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                         <th className="py-3">Email Address</th>
                         <th className="py-3">Workspace name</th>
                         <th className="py-3">Join Date</th>
+                        <th className="py-3">Last Login</th>
+                        <th className="py-3">Broadcasts</th>
                         <th className="py-3">Credits</th>
                         <th className="py-3">Status</th>
                         <th className="py-3 text-right">Actions</th>
@@ -646,6 +665,12 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                             {u.createdAt ? (
                               typeof u.createdAt === 'string' ? new Date(u.createdAt).toLocaleDateString() : 'Active Member'
                             ) : 'Platform Original'}
+                          </td>
+                          <td className="py-3.5 font-semibold text-slate-400 font-mono">
+                            {u.lastLogin ? new Date(u.lastLogin).toLocaleString() : 'Never Recorded'}
+                          </td>
+                          <td className="py-3.5 font-bold text-slate-300 font-mono">
+                            {u.broadcastCount ?? 0} sent
                           </td>
                            <td className="py-3.5">
                             <div className="flex flex-col gap-0.5">
@@ -1147,7 +1172,16 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       <div key={`announcement-${a.id || aIdx}`} className="bg-slate-900/50 border border-slate-800/60 p-4 rounded-2xl shadow-sm relative overflow-hidden group">
                         <div className="flex items-center justify-between mb-2">
                           <h5 className="font-bold text-sm text-indigo-300">{a.title}</h5>
-                          <span className="text-[10px] text-slate-500 font-mono">{new Date(a.createdAt || a.created_at || Date.now()).toLocaleDateString()}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] text-slate-500 font-mono">{new Date(a.createdAt || a.created_at || Date.now()).toLocaleDateString()}</span>
+                            <button
+                              onClick={() => handleDeleteAnnouncement(a.id)}
+                              className="p-1 px-2 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 hover:border-transparent rounded-lg text-[9px] font-extrabold transition-all cursor-pointer flex items-center gap-1"
+                              title="Delete announcement permanently"
+                            >
+                              <Trash className="w-3 h-3" /> Delete
+                            </button>
+                          </div>
                         </div>
                         <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap">{a.content}</p>
                       </div>
@@ -1215,6 +1249,60 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
             </div>
           )}
 
+          {activeTab === 'activity_logs' && (
+            <div className="space-y-6 animate-in fade-in duration-300">
+              <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-black uppercase text-indigo-400 tracking-wider">
+                    Administrative Activity Audits
+                  </h4>
+                  <p className="text-slate-400 text-xs mt-1">Real-time audit trailing of all super-administrative updates, creations, removals, and credits reconciliations.</p>
+                </div>
+                <button 
+                  onClick={handleRefresh}
+                  className="px-3.5 py-2 bg-slate-900 border border-slate-800 hover:border-indigo-500/30 text-slate-300 hover:text-white font-bold text-[11px] rounded-xl flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <RefreshCw className="w-3 h-3" /> Refresh logs
+                </button>
+              </div>
+
+              <div className="bg-slate-900/30 border border-slate-800/80 p-6 rounded-3xl">
+                <div className="overflow-x-auto min-w-full font-sans">
+                  {adminLogs.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <p className="text-slate-500 text-xs italic">No administrative activities recorded in this session yet.</p>
+                    </div>
+                  ) : (
+                    <table className="w-full text-xs text-slate-400">
+                      <thead className="text-[10px] text-slate-500 uppercase font-black border-b border-slate-800/60 pb-3 text-left">
+                        <tr>
+                          <th className="py-3">Executor / Admin</th>
+                          <th className="py-3">Action Mapped</th>
+                          <th className="py-3">Target Reference</th>
+                          <th className="py-3">System Timestamp</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                        {adminLogs.map((log: any, idx: number) => (
+                          <tr key={log.id || idx} className="hover:bg-slate-900/10">
+                            <td className="py-3.5 text-slate-300 font-bold">{log.adminEmail || 'system'}</td>
+                            <td className="py-3.5">
+                              <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-sans font-bold text-[10px]">
+                                {log.action}
+                              </span>
+                            </td>
+                            <td className="py-3.5 text-slate-300">{log.target || 'N/A'}</td>
+                            <td className="py-3.5 text-slate-500 font-semibold font-sans">{log.timestamp ? new Date(log.timestamp).toLocaleString() : 'N/A'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </main>
 
@@ -1275,6 +1363,31 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                   >
                     Adjust
                   </button>
+                </div>
+              </div>
+
+              {/* Workspace Registry Telemetry (BUG 7) */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wide">Workspace Registry Telemetry</h4>
+                <div className="p-4 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-2.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500 font-bold">Account Created Date</span>
+                    <span className="text-slate-300 font-semibold font-mono">
+                      {selectedUser.createdAt ? new Date(selectedUser.createdAt).toLocaleString() : 'Platform Original'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500 font-bold">Last Active Login</span>
+                    <span className="text-slate-300 font-semibold font-mono">
+                      {selectedUser.lastLogin ? new Date(selectedUser.lastLogin).toLocaleString() : 'Never Recorded'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-slate-500 font-bold">Total Broadcasts Sent</span>
+                    <span className="text-indigo-400 font-extrabold font-mono">
+                      {typeof selectedUser.broadcastCount === 'number' ? selectedUser.broadcastCount : (userBroadcasts?.length ?? 0)} broadcasts
+                    </span>
+                  </div>
                 </div>
               </div>
 
