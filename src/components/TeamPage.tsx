@@ -19,7 +19,7 @@ interface TeamPageProps {
   setTeamMembers: React.Dispatch<React.SetStateAction<any[]>>;
   appUser: any;
   pages: any[];
-  addToast: (msg: string, type?: 'success' | 'err' | 'info') => void;
+  addToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
   setMemberToRemove: (member: any) => void;
 }
 
@@ -89,97 +89,101 @@ export const TeamPage: React.FC<TeamPageProps> = ({
           {/* MEMBERS LIST */}
           <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden">
             <div className="divide-y divide-slate-100">
-              {[...teamMembers]
-                .map((member) => {
-                  const isCurrentUser = member.email && appUser?.email && member.email.toLowerCase() === appUser?.email?.toLowerCase();
-                  return (
-                    <div key={member.id} className="p-6 md:p-8 flex items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
-                      <div className="flex items-center gap-4">
-                        {/* Color Coded Initials Fallback */}
-                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-sm uppercase shrink-0 border shadow-sm ${
-                          member.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-100' :
-                          member.role === 'admin' ? 'bg-sky-50 text-sky-700 border-sky-100' :
-                          member.role === 'agent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                          'bg-amber-50 text-amber-700 border-amber-100'
-                        }`}>
-                          {member.name ? member.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2) : 'US'}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-sm font-black text-slate-900 truncate">
-                              {member.name}
-                            </h4>
-                            {isCurrentUser && (
-                              <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-600 rounded-md">
-                                You
-                              </span>
+              {(() => {
+                const roleOrder = { owner: 0, admin: 1, agent: 2, support: 3 };
+                return [...teamMembers]
+                  .sort((a, b) => (roleOrder[a.role as keyof typeof roleOrder] ?? 9) - (roleOrder[b.role as keyof typeof roleOrder] ?? 9))
+                  .map((member) => {
+                    const isCurrentUser = member.email && appUser?.email && member.email.toLowerCase() === appUser?.email?.toLowerCase();
+                    return (
+                      <div key={member.id} className="p-6 md:p-8 flex items-center justify-between gap-4 hover:bg-slate-50/50 transition-colors">
+                        <div className="flex items-center gap-4">
+                          {/* Color Coded Initials Fallback */}
+                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-sm uppercase shrink-0 border shadow-sm ${
+                            member.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-100' :
+                            member.role === 'admin' ? 'bg-sky-50 text-sky-700 border-sky-100' :
+                            member.role === 'agent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                            'bg-amber-50 text-amber-700 border-amber-100'
+                          }`}>
+                            {member.name ? member.name.split(' ').map((n: string) => n[0]).join('').substring(0, 2) : 'US'}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-black text-slate-900 truncate">
+                                {member.name}
+                              </h4>
+                              {isCurrentUser && (
+                                <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-600 rounded-md">
+                                  You
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-400 font-bold font-mono tracking-wide truncate">{member.email}</p>
+                            {member.role === 'support' && (
+                              <p className="text-[10px] text-indigo-500 font-bold mt-1 uppercase tracking-wider">
+                                {member.assigned_pages && member.assigned_pages.length > 0
+                                  ? `Access restricted: ${member.assigned_pages.length} Pages assigned`
+                                  : 'No pages assigned yet'}
+                              </p>
                             )}
                           </div>
-                          <p className="text-[11px] text-slate-400 font-bold font-mono tracking-wide truncate">{member.email}</p>
-                          {member.role === 'support' && (
-                            <p className="text-[10px] text-indigo-500 font-bold mt-1 uppercase tracking-wider">
-                              {member.assigned_pages && member.assigned_pages.length > 0
-                                ? `Access restricted: ${member.assigned_pages.length} Pages assigned`
-                                : 'No pages assigned yet'}
-                            </p>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {member.status === 'pending' && (
+                            <span className="px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-amber-500 text-white rounded-lg animate-pulse shrink-0">
+                              Pending Invite
+                            </span>
+                          )}
+
+                          {(member.status === 'active' || member.status === 'approved') && (
+                            <span className="px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-emerald-500 text-white rounded-lg shrink-0 flex items-center gap-1.5 font-sans">
+                              <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping shrink-0"></span> Active
+                            </span>
+                          )}
+
+                          {member.status === 'pending' && member.token && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const protocol = window.location.protocol;
+                                const host = window.location.host;
+                                const inviteLink = `${protocol}//${host}/?invite_token=${member.token}&email=${encodeURIComponent(member.email)}&name=${encodeURIComponent(member.name)}&role=${encodeURIComponent(member.role)}`;
+                                handleCopyText(inviteLink, member.id);
+                              }}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all shrink-0 flex items-center gap-1 border-none cursor-pointer"
+                              title="Copy Invitation Link"
+                            >
+                              {copiedText === member.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                              {copiedText === member.id ? 'Copied Link' : 'Invite Link'}
+                            </button>
+                          )}
+
+                          {/* Badge on Right Side */}
+                          <span className={`px-3 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg border shrink-0 ${
+                            member.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-100' :
+                            member.role === 'admin' ? 'bg-sky-50 text-sky-700 border-sky-100' :
+                            member.role === 'agent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                            'bg-amber-50 text-amber-700 border-amber-100'
+                          }`}>
+                            {member.role}
+                          </span>
+
+                          {/* Remove Button (if not owner and not current workspace user) */}
+                          {member.role !== 'owner' && !isCurrentUser && (currentActiveRole === 'owner' || currentActiveRole === 'admin') && (
+                            <button 
+                              onClick={() => setMemberToRemove(member)}
+                              title="Remove this workspace member"
+                              className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border-none bg-transparent cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           )}
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-3">
-                        {member.status === 'pending' && (
-                          <span className="px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-amber-500 text-white rounded-lg animate-pulse shrink-0">
-                            Pending Invite
-                          </span>
-                        )}
-
-                        {(member.status === 'active' || member.status === 'approved') && (
-                          <span className="px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-emerald-500 text-white rounded-lg shrink-0 flex items-center gap-1.5 font-sans">
-                            <span className="w-1.5 h-1.5 bg-white rounded-full animate-ping shrink-0"></span> Active
-                          </span>
-                        )}
-
-                        {member.status === 'pending' && member.token && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const protocol = window.location.protocol;
-                              const host = window.location.host;
-                              const inviteLink = `${protocol}//${host}/?invite_token=${member.token}&email=${encodeURIComponent(member.email)}&name=${encodeURIComponent(member.name)}&role=${encodeURIComponent(member.role)}`;
-                              handleCopyText(inviteLink, member.id);
-                            }}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-black text-[9px] uppercase tracking-widest transition-all shrink-0 flex items-center gap-1 border-none cursor-pointer"
-                            title="Copy Invitation Link"
-                          >
-                            {copiedText === member.id ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                            {copiedText === member.id ? 'Copied Link' : 'Invite Link'}
-                          </button>
-                        )}
-
-                        {/* Badge on Right Side */}
-                        <span className={`px-3 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg border shrink-0 ${
-                          member.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-100' :
-                          member.role === 'admin' ? 'bg-sky-50 text-sky-700 border-sky-100' :
-                          member.role === 'agent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                          'bg-amber-50 text-amber-700 border-amber-100'
-                        }`}>
-                          {member.role}
-                        </span>
-
-                        {/* Remove Button (if not owner and not current workspace user) */}
-                        {member.role !== 'owner' && !isCurrentUser && (currentActiveRole === 'owner' || currentActiveRole === 'admin') && (
-                          <button 
-                            onClick={() => setMemberToRemove(member)}
-                            title="Remove this workspace member"
-                            className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border-none bg-transparent cursor-pointer"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+              })()}
             </div>
           </div>
 
@@ -250,14 +254,14 @@ export const TeamPage: React.FC<TeamPageProps> = ({
               e.preventDefault();
               
               if (!addMemberEmail || !addMemberRole || !addMemberName) {
-                addToast("Please fill in all standard configuration inputs.", 'err');
+                addToast("Please fill in all standard configuration inputs.", 'error');
                 return;
               }
 
               // Check uniqueness
               const alreadyExists = teamMembers.some(m => m.email.toLowerCase() === addMemberEmail.trim().toLowerCase());
               if (alreadyExists) {
-                addToast("This user is already registered in this workspace registry.", 'err');
+                addToast("This user is already registered in this workspace registry.", 'error');
                 return;
               }
 
@@ -296,7 +300,17 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                       role: addMemberRole,
                       avatar_url: null,
                       status: "pending",
-                      token: res.data.inviteLink ? new URL(res.data.inviteLink).searchParams.get('invite_token') : null,
+                      token: (() => {
+                        try {
+                          if (!res.data.inviteLink) return null;
+                          const url = res.data.inviteLink.startsWith('http') 
+                            ? new URL(res.data.inviteLink) 
+                            : new URL(res.data.inviteLink, window.location.origin);
+                          return url.searchParams.get('invite_token');
+                        } catch {
+                          return null;
+                        }
+                      })(),
                       joined_at: new Date().toISOString(),
                       assigned_pages: addMemberRole === 'support' ? addMemberAssignedPages : []
                     };
@@ -313,11 +327,11 @@ export const TeamPage: React.FC<TeamPageProps> = ({
 
                   setTeamSubMode('list');
                 } else {
-                  addToast(res.data.error || "Failed to submit invitation.", 'err');
+                  addToast(res.data.error || "Failed to submit invitation.", 'error');
                 }
               } catch (err: any) {
                 console.error("Invite submit error:", err);
-                addToast(err.response?.data?.error || err.message || "Failed to process database invitation.", 'err');
+                addToast(err.response?.data?.error || err.message || "Failed to process database invitation.", 'error');
               } finally {
                 setIsSending(false);
               }

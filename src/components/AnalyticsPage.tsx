@@ -72,6 +72,7 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
   const [audiencePages, setAudiencePages] = useState<any[]>([]);
   const [totalAudience, setTotalAudience] = useState(0);
   const [eligibleCount, setEligibleCount] = useState(0);
+  const [blockedCount, setBlockedCount] = useState(0);
 
   // Fetch relevant audience data for stats calculation
   const fetchAnalyticsData = async (showSkeleton = true) => {
@@ -89,6 +90,7 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
       setTotalAudience(response.data.total || 0);
       setEligibleCount(response.data.eligible_count || 0);
       setAudiencePages(response.data.pages || []);
+      setBlockedCount(response.data.blocked_count || 0);
     } catch (err: any) {
       console.error("[Analytics API Error]", err);
       // Fallback/Graceful default handling if api call fails
@@ -99,7 +101,7 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
 
   useEffect(() => {
     fetchAnalyticsData();
-  }, []);
+  }, [timeRange, startDate, endDate]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -209,25 +211,16 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
     const data = [];
     const baseDate = timeRange === 'Custom' ? new Date(endDate) : new Date();
 
-    let accumulated = Math.round(calculatedTotalContacts * 0.82); // start at 82%
-    const dailyIncrement = Math.ceil((calculatedTotalContacts * 0.18) / (daysCount || 1));
-
     for (let i = daysCount - 1; i >= 0; i--) {
       const d = new Date(baseDate);
       d.setDate(baseDate.getDate() - i);
       const dayStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       
-      const isLastIndex = (i === 0);
-      const todayTotal = isLastIndex ? calculatedTotalContacts : Math.min(calculatedTotalContacts, accumulated);
-      const newContactsAdded = isLastIndex ? Math.max(0, calculatedTotalContacts - accumulated) : dailyIncrement;
-
       data.push({
         date: dayStr,
-        'Total Contacts': todayTotal,
-        'New Contacts': newContactsAdded
+        'Total Contacts': calculatedTotalContacts,
+        'New Contacts': 0
       });
-
-      accumulated += dailyIncrement;
     }
     return data;
   };
@@ -244,7 +237,7 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
   // 4. Audience Donut Data
   const audiencePieData = [
     { name: 'Active', value: calculatedTotalContacts },
-    { name: 'Blocked', value: 0 }
+    { name: 'Blocked', value: blockedCount }
   ];
   const COLORS = ['#4F46E5', '#EF4444'];
 
@@ -268,7 +261,11 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
     }
 
     const deliveryRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 100;
-    const replyRate = totalSent > 0 ? Math.min(94, Math.max(30, Math.round(84 - (totalFailed * 2.5)))) : 0; 
+    const replyCount = conversations.filter(c => {
+      const msgs = c.messages?.data || [];
+      return msgs.some((m: any) => m.from?.id !== c._associatedPageId);
+    }).length;
+    const replyRate = totalSent > 0 ? Math.min(100, Math.round((replyCount / totalSent) * 100)) : 0; 
 
     const activeBroadcastsCount = broadcastsHistory.filter(b => b.status === 'processing' || b.status === 'running' || b.status === 'sending').length;
     const completedBroadcastsCount = broadcastsHistory.filter(b => b.status === 'completed' || b.status === 'sent' || b.status === 'success' || !b.status || b.status === 'success' || b.status === 'complete').length;
@@ -282,19 +279,11 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
       activeBroadcastsCount,
       completedBroadcastsCount
     };
-  }, [broadcastsHistory]);
+  }, [broadcastsHistory, conversations]);
 
   // Most Engaged Top 5 Contacts List derived dynamically from audienceUsers
   const mostEngagedContacts = React.useMemo(() => {
-    if (!audienceUsers || audienceUsers.length === 0) {
-      return [
-        { name: "Sajid Khan", broadcasts: 8, replies: 14, score: 95 },
-        { name: "Aisha Rehman", broadcasts: 6, replies: 11, score: 88 },
-        { name: "Zainab Malik", broadcasts: 5, replies: 9, score: 82 },
-        { name: "Haris Jamil", broadcasts: 4, replies: 7, score: 79 },
-        { name: "Fatima Shah", broadcasts: 3, replies: 5, score: 72 }
-      ];
-    }
+    if (!audienceUsers || audienceUsers.length === 0) return [];
     return audienceUsers.slice(0, 5).map((u: any, idx: number) => {
       const bcasts = 8 - idx;
       const replies = Math.round(bcasts * 1.7) + (idx % 2 === 0 ? 1 : 0);
@@ -772,7 +761,9 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute text-center">
-                      <span className="block text-2xl font-black text-slate-900 tracking-tight">100%</span>
+                      <span className="block text-2xl font-black text-slate-900 tracking-tight">
+                        {calculatedTotalContacts + blockedCount > 0 ? Math.round((calculatedTotalContacts / (calculatedTotalContacts + blockedCount)) * 100) : 100}%
+                      </span>
                       <span className="text-[10px] uppercase tracking-wider font-extrabold text-indigo-600 block mt-0.5">Active</span>
                     </div>
                   </div>
@@ -781,14 +772,18 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
                       <div className="w-3.5 h-3.5 rounded-full bg-indigo-600 shrink-0"></div>
                       <div className="text-left">
                         <span className="block text-xs font-black text-slate-800 uppercase tracking-wide">Active</span>
-                        <span className="text-xs font-semibold text-slate-400">{calculatedTotalContacts} Contacts (100%)</span>
+                        <span className="text-xs font-semibold text-slate-400">
+                          {calculatedTotalContacts} Contacts ({calculatedTotalContacts + blockedCount > 0 ? Math.round((calculatedTotalContacts / (calculatedTotalContacts + blockedCount)) * 100) : 100}%)
+                        </span>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="w-3.5 h-3.5 rounded-full bg-rose-500 shrink-0"></div>
                       <div className="text-left">
                         <span className="block text-xs font-black text-slate-800 uppercase tracking-wide">Blocked</span>
-                        <span className="text-xs font-semibold text-slate-400">0 Contacts (0%)</span>
+                        <span className="text-xs font-semibold text-slate-400">
+                          {blockedCount} Contacts ({calculatedTotalContacts + blockedCount > 0 ? Math.round((blockedCount / (calculatedTotalContacts + blockedCount)) * 100) : 0}%)
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -829,27 +824,31 @@ export function AnalyticsPage({ pages, creditBalance, broadcastsHistory, addToas
                 <p className="text-xs font-semibold text-slate-400 mt-1">Top recipients based on broadcast response engagement</p>
               </div>
               <div className="p-6 divide-y divide-slate-50">
-                {mostEngagedContacts.map((c, i) => {
-                  const avatarTheme = getAvatarColors(c.name);
-                  return (
-                    <div key={i} className="flex items-center justify-between gap-4 py-4 first:pt-2 last:pb-2">
-                      <div className="flex items-center gap-3.5 min-w-0">
-                        <div className={`w-11 h-11 rounded-full border flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${avatarTheme.bg}`}>
-                          {getInitials(c.name)}
+                {mostEngagedContacts.length === 0 ? (
+                  <p className="text-xs font-bold text-slate-400 text-center py-8">No audience data yet. Send broadcasts to see engagement here.</p>
+                ) : (
+                  mostEngagedContacts.map((c, i) => {
+                    const avatarTheme = getAvatarColors(c.name);
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-4 py-4 first:pt-2 last:pb-2">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                          <div className={`w-11 h-11 rounded-full border flex items-center justify-center font-bold text-xs shrink-0 shadow-sm ${avatarTheme.bg}`}>
+                            {getInitials(c.name)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-black text-slate-800 truncate">{c.name}</p>
+                            <p className="text-xs font-bold text-slate-400 mt-0.5">{c.broadcasts} broadcasts • {c.replies} replies</p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-sm font-black text-slate-800 truncate">{c.name}</p>
-                          <p className="text-xs font-bold text-slate-400 mt-0.5">{c.broadcasts} broadcasts • {c.replies} replies</p>
+                        
+                        <div className="text-right">
+                          <span className="text-sm font-black text-indigo-600 block">{c.score}%</span>
+                          <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mt-0.5">Eng. Rate</span>
                         </div>
                       </div>
-                      
-                      <div className="text-right">
-                        <span className="text-sm font-black text-indigo-600 block">{c.score}%</span>
-                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mt-0.5">Eng. Rate</span>
-                      </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
           </div>
