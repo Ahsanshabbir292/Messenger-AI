@@ -22,8 +22,6 @@ interface BroadcastBulkProps {
     message: string;
     file: File | null;
     attachmentType: string;
-    sendTo: 'all' | 'group';
-    groupId: string;
     messageTag: string;
     scheduleDate: string;
     scheduleTime: string;
@@ -41,8 +39,6 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
 }) => {
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
   const [targetAudience, setTargetAudience] = useState<'all' | 'eligible'>('all');
-  const [sendTo, setSendTo] = useState<'all' | 'group'>('all');
-  const [groupId, setGroupId] = useState<string>('g1');
   const [msgType, setMsgType] = useState<'text' | 'image' | 'both'>('text');
   const [message, setMessage] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
@@ -149,13 +145,28 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
       return;
     }
 
+    if (isScheduleChecked) {
+      if (!scheduleDate || !scheduleTime) {
+        alert('Please select both a schedule date and time.');
+        return;
+      }
+      const scheduledDateTime = new Date(`${scheduleDate}T${scheduleTime}`);
+      if (scheduledDateTime <= new Date()) {
+        alert('Scheduled time must be in the future.');
+        return;
+      }
+    }
+
+    if (estimatedCost > creditBalance) {
+      alert(`Insufficient credits. This broadcast requires ${estimatedCost} credits but you only have ${creditBalance}.`);
+      return;
+    }
+
     onSubmit({
       pageIds: selectedPageIds,
       message,
       file,
       attachmentType,
-      sendTo,
-      groupId,
       messageTag,
       scheduleDate: isScheduleChecked ? scheduleDate : '',
       scheduleTime: isScheduleChecked ? scheduleTime : '',
@@ -400,7 +411,9 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
                         className="w-28 h-28 object-cover rounded-2xl mx-auto shadow-md"
                       />
                     ) : (
-                      <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto text-indigo-600" />
+                      <div className="w-16 h-16 rounded-2xl bg-indigo-50 flex items-center justify-center mx-auto text-indigo-600 font-bold text-xs uppercase">
+                        MP4
+                      </div>
                     )}
                     <div>
                       <p className="text-xs font-black text-slate-800 truncate max-w-sm mx-auto">{file.name}</p>
@@ -567,6 +580,12 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
           </div>
         </div>
 
+        {estimatedCost > creditBalance && (
+          <p className="text-xs font-bold text-rose-600 text-center mt-2">
+            ⚠️ Insufficient credits to send this broadcast.
+          </p>
+        )}
+
         {/* Footer actions row */}
         <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-slate-100 text-right justify-end font-sans">
           <button
@@ -578,9 +597,9 @@ export const BroadcastBulk: React.FC<BroadcastBulkProps> = ({
           </button>
           <button
             type="submit"
-            disabled={isSubmitting || selectedPageIds.length === 0}
+            disabled={isSubmitting || selectedPageIds.length === 0 || estimatedCost > creditBalance}
             className={`px-8 py-4 bg-indigo-600 hover:bg-slate-950 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 active:scale-95 flex items-center justify-center gap-2 border-none cursor-pointer ${
-              (isSubmitting || selectedPageIds.length === 0) ? 'opacity-60 cursor-not-allowed' : ''
+              (isSubmitting || selectedPageIds.length === 0 || estimatedCost > creditBalance) ? 'opacity-60 cursor-not-allowed' : ''
             }`}
           >
             {isSubmitting ? 'Queueing Broadcasters...' : 'Send Bulk Broadcast now'}

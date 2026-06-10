@@ -22,8 +22,6 @@ interface BroadcastSingleProps {
     message: string;
     file: File | null;
     attachmentType: string;
-    sendTo: 'all' | 'group';
-    groupId: string;
     messageTag: string;
     scheduleDate: string;
     scheduleTime: string;
@@ -41,8 +39,6 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
 }) => {
   const [pageId, setPageId] = useState<string>('');
   const [targetAudience, setTargetAudience] = useState<'all' | 'eligible'>('all');
-  const [sendTo, setSendTo] = useState<'all' | 'group'>('all');
-  const [groupId, setGroupId] = useState<string>('g1');
   const [msgType, setMsgType] = useState<'text' | 'image' | 'both'>('text');
   const [message, setMessage] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
@@ -138,13 +134,28 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
       return;
     }
 
+    if (isScheduleChecked) {
+      if (!scheduleDate || !scheduleTime) {
+        alert('Please select both a schedule date and time.');
+        return;
+      }
+      const scheduledDateTime = new Date(`${scheduleDate}T${scheduleTime}`);
+      if (scheduledDateTime <= new Date()) {
+        alert('Scheduled time must be in the future.');
+        return;
+      }
+    }
+
+    if (estimatedCost > creditBalance) {
+      alert(`Insufficient credits. This broadcast requires ${estimatedCost} credits but you only have ${creditBalance}.`);
+      return;
+    }
+
     onSubmit({
       pageId,
       message,
       file,
       attachmentType,
-      sendTo,
-      groupId,
       messageTag,
       scheduleDate: isScheduleChecked ? scheduleDate : '',
       scheduleTime: isScheduleChecked ? scheduleTime : '',
@@ -561,6 +572,12 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
           </div>
         </div>
 
+        {estimatedCost > creditBalance && (
+          <p className="text-xs font-bold text-rose-600 text-center mt-2">
+            ⚠️ Insufficient credits to send this broadcast.
+          </p>
+        )}
+
         {/* Action button row */}
         <div className="flex flex-col sm:flex-row gap-4 pt-6 border-t border-slate-100 text-right justify-end font-sans">
           <button
@@ -572,9 +589,9 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
           </button>
           <button
             type="submit"
-            disabled={isSubmitting || !pageId}
+            disabled={isSubmitting || !pageId || estimatedCost > creditBalance}
             className={`px-8 py-4 bg-indigo-600 hover:bg-slate-950 text-white rounded-2xl text-xs font-black uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 active:scale-95 flex items-center justify-center gap-2 border-none cursor-pointer ${
-              (isSubmitting || !pageId) ? 'opacity-60 cursor-not-allowed' : ''
+              (isSubmitting || !pageId || estimatedCost > creditBalance) ? 'opacity-60 cursor-not-allowed' : ''
             }`}
           >
             {isSubmitting ? 'Initializing Broadcaster...' : 'Send Broadcast Now'}

@@ -46,8 +46,6 @@ export function BroadcastDetailsView({
   const isCompleted = currentStatus !== "running" && currentStatus !== "sending" && currentStatus !== "processing";
 
   // State for live simulated updates and refresh countdown
-  const [liveReadIncrement, setLiveReadIncrement] = React.useState(0);
-  const [liveReplyIncrement, setLiveReplyIncrement] = React.useState(0);
   const [secondsLeft, setSecondsLeft] = React.useState(30);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -66,34 +64,7 @@ export function BroadcastDetailsView({
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onRefresh]);
-
-  // Live client-side interaction ticks simulation to represent real-time responses
-  React.useEffect(() => {
-    if (broadcast.successCount === 0 && !isLiveBroadcasting) return;
-    
-    // Choose active count base
-    const baseCount = broadcast.successCount || 10;
-    const tickInterval = setInterval(() => {
-      setLiveReadIncrement(prev => {
-        const maxPercent = Math.round(baseCount * 0.35);
-        if (prev < maxPercent) {
-          return prev + Math.floor(Math.random() * 2) + 1;
-        }
-        return prev;
-      });
-
-      setLiveReplyIncrement(prev => {
-        const maxPercent = Math.round(baseCount * 0.12);
-        if (prev < maxPercent) {
-          return prev + (Math.random() < 0.45 ? 1 : 0);
-        }
-        return prev;
-      });
-    }, 4500);
-
-    return () => clearInterval(tickInterval);
-  }, [broadcast.successCount, isLiveBroadcasting]);
+  }, []); // empty deps — timer runs once on mount
 
   // Trigger real data pull
   const handleManualRefresh = async () => {
@@ -107,9 +78,6 @@ export function BroadcastDetailsView({
       setSecondsLeft(30);
     }, 800);
   };
-
-  // Console.log the full broadcast object first so we can see exact field names
-  console.log("Broadcast data:", broadcast);
 
   // Helper formatter for missing / undefined or null fields
   const formatVal = (val: any) => {
@@ -205,17 +173,6 @@ export function BroadcastDetailsView({
 
   const readColors = getReadColorClasses(readPercent);
   const replyColors = getReplyColorClasses(replyPercent);
-
-  // Audience Tiers segmentation calculations
-  const t1Count = typeof broadcast.tier1Count === "number" ? broadcast.tier1Count : (totalRecipients !== undefined ? Math.round(totalRecipients * 0.45) : undefined);
-  const t2Count = typeof broadcast.tier2Count === "number" ? broadcast.tier2Count : (totalRecipients !== undefined ? Math.round(totalRecipients * 0.35) : undefined);
-  const t3Count = typeof broadcast.tier3Count === "number" ? broadcast.tier3Count : (totalRecipients !== undefined && t1Count !== undefined && t2Count !== undefined ? totalRecipients - t1Count - t2Count : undefined);
-
-  const t1Success = typeof broadcast.tier1Success === "number" ? broadcast.tier1Success : t1Count;
-  const t2Success = typeof broadcast.tier2Success === "number" ? broadcast.tier2Success : (t2Count !== undefined ? Math.round(t2Count * 0.95) : undefined);
-  const t3Success = typeof broadcast.tier3Success === "number" ? broadcast.tier3Success : (t3Count !== undefined ? Math.round(t3Count * 0.4) : undefined);
-
-  const t3Skipped = typeof broadcast.tier3Skipped === "number" ? broadcast.tier3Skipped : (typeof broadcast.skippedCount === "number" ? broadcast.skippedCount : (t3Count !== undefined && t3Success !== undefined ? Math.max(0, t3Count - t3Success) : undefined));
 
   // Build failures / skipped reasons breakdown
   const reasons: Record<string, number> = {};

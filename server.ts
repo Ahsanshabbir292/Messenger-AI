@@ -2266,7 +2266,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 1 day
       res.send(Buffer.from(response.data));
     } catch (error: any) {
-      console.log("[Proxy-Audio] Info: External audio source unavailable:", error?.response?.status || "unknown", error?.message);
+      console.log("[Proxy-Audio] Fallback applied. Status:", error?.response?.status || "unknown");
       res.status(502).send("Warning: External audio source unavailable");
     }
   });
@@ -2295,7 +2295,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 1 day
       res.send(Buffer.from(response.data));
     } catch (error: any) {
-      console.log("[Proxy-Image] Info: External image source unavailable, returning transparent gif fallback:", error?.response?.status || "unknown", error?.message);
+      console.log("[Proxy-Image] Fallback applied. Status:", error?.response?.status || "unknown");
       const transparentGif = Buffer.from(
         "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
         "base64"
