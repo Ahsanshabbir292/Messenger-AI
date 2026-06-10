@@ -362,7 +362,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       setWorkspaces([{ id: wId, name: appUser.workspaceName }]);
       setCurrentWorkspaceId(wId);
     }
-  }, [appUser?.workspaces, appUser?.workspaceName, appUser?.workspaceId]);
+  }, [JSON.stringify(appUser?.workspaces), appUser?.workspaceName, appUser?.workspaceId]);
 
   useEffect(() => {
     setSelectedPage(null);

@@ -894,17 +894,32 @@ const restQueryCache = new Map<string, { timestamp: number; data: any }>();
 const CACHE_TTL_MS = 120000; // Increased to 2 minutes cache to prevent 429 requests while retaining snappy feel
 
 const pendingPromises = new Map<string, Promise<any>>();
-let globalRateLimitUntil = 0;
 
 function clearRestQueryCache() {
   // Graceful keep signature but we don't clear the full cache unless absolutely required
 }
 
-function invalidateRestQueryCache(parentPath: string, id: string) {
+function invalidateRestQueryCache(parentPath: string, id: string, data?: any) {
   if (!parentPath || !id) return;
   const docKey = `doc:${parentPath}/${id}`;
+
+  let isOnlyMetadata = false;
+  if (data && typeof data === 'object') {
+    const keys = Object.keys(data);
+    if (keys.length > 0) {
+      const metadataFields = ['lastLogin', 'lockHeartbeat', 'lockOwner', 'lockHeartbeatStr', 'heartbeat', 'updatedAt'];
+      isOnlyMetadata = keys.every(k => metadataFields.includes(k));
+    }
+  }
+
+  // Always delete the document cache specifically so that fresh reads of THIS document get updated
   restQueryCache.delete(docKey);
   pendingPromises.delete(docKey);
+
+  if (isOnlyMetadata) {
+    // Skip full collection/colgroup invalidation for simple metadata/heartbeat updates!
+    return;
+  }
 
   const colKey = `col:${parentPath}`;
   restQueryCache.delete(colKey);
@@ -925,24 +940,13 @@ function invalidateRestQueryCache(parentPath: string, id: string) {
 }
 
 async function axiosRequestWithRetry(config: any, retries = 6, delay = 1500): Promise<any> {
-  const now = Date.now();
-  if (now < globalRateLimitUntil) {
-    const queueWait = globalRateLimitUntil - now;
-    console.log(`[RateLimit-Queue] Coalescing Firestore call. Waiting ${queueWait}ms for rate limiting to clear...`);
-    await new Promise(resolve => setTimeout(resolve, queueWait));
-  }
-
   try {
     return await axios(config);
   } catch (err: any) {
     if (retries > 0 && err.response && err.response.status === 429) {
-      // Set rate limit cooldown window for 6-8 seconds to allow REST backend to rest
-      const cooldownMs = 6000 + Math.floor(Math.random() * 2000);
-      globalRateLimitUntil = Date.now() + cooldownMs;
-
       const jitter = Math.floor(Math.random() * 800) + 200;
       const totalDelay = delay + jitter;
-      console.warn(`[RestDB-Retry] Received 429 rate limit. Cooling down for ${cooldownMs}ms and retrying in ${totalDelay}ms... (Remaining retries: ${retries})`);
+      console.warn(`[RestDB-Retry] Received 429 rate limit. Retrying in ${totalDelay}ms... (Remaining retries: ${retries})`);
       await new Promise(resolve => setTimeout(resolve, totalDelay));
       return axiosRequestWithRetry(config, retries - 1, delay * 2);
     }
@@ -1078,7 +1082,7 @@ class RestDocumentReference {
   }
 
   async set(data: any) {
-    invalidateRestQueryCache(this.parentPath, this.id);
+    invalidateRestQueryCache(this.parentPath, this.id, data);
     const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
     const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
@@ -1098,7 +1102,7 @@ class RestDocumentReference {
   }
 
   async update(data: any) {
-    invalidateRestQueryCache(this.parentPath, this.id);
+    invalidateRestQueryCache(this.parentPath, this.id, data);
     const keys = Object.keys(data);
     if (keys.length === 0) return;
     const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
