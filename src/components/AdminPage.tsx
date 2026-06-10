@@ -652,8 +652,8 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {filteredUsers.map((u) => (
-                        <tr key={u.email} className="hover:bg-slate-905/30 transition-all cursor-pointer" onClick={() => viewUserDetails(u.email)}>
+                      {filteredUsers.map((u, idx) => (
+                        <tr key={`${u.email || 'user'}-${idx}`} className="hover:bg-slate-905/30 transition-all cursor-pointer" onClick={() => viewUserDetails(u.email)}>
                           <td className="py-3.5">
                             <div>
                               <p className="font-bold text-white">{u.fullName || 'No Name Provided'}</p>
@@ -772,8 +772,8 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {users.map((u) => (
-                        <tr key={u.email} className="hover:bg-slate-900/10">
+                      {users.map((u, idx) => (
+                        <tr key={`${u.email || 'user'}-${idx}`} className="hover:bg-slate-900/10">
                           <td className="py-3.5 font-bold text-slate-300">{u.email}</td>
                           <td className="py-3.5 font-extrabold text-white">{u.fullName || 'No Name Provided'}</td>
                           <td className="py-3.5">
@@ -848,12 +848,12 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {users.flatMap(u => {
+                      {users.flatMap((u, uIdx) => {
                         const subsMap = u.billing?.subscriptions || {};
-                        return Object.keys(subsMap).map(pageId => {
+                        return Object.keys(subsMap).map((pageId, pIdx) => {
                           const sub = subsMap[pageId];
                           return (
-                            <tr key={`${u.email}-${pageId}`} className="hover:bg-slate-900/10">
+                            <tr key={`${u.email || 'user'}-${pageId}-${uIdx}-${pIdx}`} className="hover:bg-slate-900/10">
                               <td className="py-3.5">
                                 <div>
                                   <p className="font-bold text-white">{sub.name || `Page ${pageId}`}</p>
@@ -931,8 +931,8 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {filteredPages.map((p) => (
-                        <tr key={p.id} className="hover:bg-slate-900/10">
+                      {filteredPages.map((p, idx) => (
+                        <tr key={`${p.id || 'page'}-${idx}`} className="hover:bg-slate-900/10">
                           <td className="py-3.5 font-bold text-white">
                             <div>
                               <span>{p.name}</span>
@@ -1063,10 +1063,10 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60">
-                      {users.map((owner) => {
+                      {users.map((owner, idx) => {
                         const members = owner.teamMembers || [];
                         return (
-                          <tr key={owner.email} className="hover:bg-slate-900/5 align-top">
+                          <tr key={`${owner.email || 'owner'}-${idx}`} className="hover:bg-slate-900/5 align-top">
                             <td className="py-4 font-bold text-white w-1/3">
                               <div>
                                 <p>{owner.fullName || 'No Name Provided'}</p>
@@ -1397,14 +1397,14 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                 {(!selectedUser.facebookWorkspaces || Object.keys(selectedUser.facebookWorkspaces).length === 0) ? (
                   <p className="text-xs text-slate-500 italic">No Facebook workspaces mapped.</p>
                 ) : (
-                  Object.keys(selectedUser.facebookWorkspaces).flatMap(wsId => {
+                  Object.keys(selectedUser.facebookWorkspaces).flatMap((wsId, wsIdx) => {
                     const ws = selectedUser.facebookWorkspaces[wsId];
                     const pagelist = ws.pages || [];
                     if (pagelist.length === 0) return [];
                     return pagelist.map((p: any, idx: number) => {
                       const subStatus = selectedUser.billing?.subscriptions?.[p.id] || { status: 'Trial' };
                       return (
-                        <div key={`${wsId}-page-${p.id || idx}`} className="p-3 bg-slate-950/40 rounded-xl border border-slate-800 flex items-center justify-between">
+                        <div key={`${wsId}-page-${p.id || idx}-${wsIdx}`} className="p-3 bg-slate-950/40 rounded-xl border border-slate-800 flex items-center justify-between">
                           <div className="min-w-0">
                             <p className="font-bold text-xs text-white truncate">{p.name}</p>
                             <p className="text-[10px] text-slate-500 font-mono truncate">{p.id}</p>

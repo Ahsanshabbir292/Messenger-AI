@@ -238,96 +238,12 @@ const DEFAULT_MOCK_CONVERSATIONS = [
 ];
 
 const getPaddedConversations = (filtered: any[], activePageId: string) => {
-  if (filtered.length >= 8) {
-    return filtered;
-  }
-  
-  const padded = [...filtered];
-  const needed = 8 - filtered.length;
-  const prefix = activePageId || "all";
-  
-  let addedCount = 0;
-  for (const mock of DEFAULT_MOCK_CONVERSATIONS) {
-    if (addedCount >= needed) break;
-    const mockId = `${prefix}_${mock.id}`;
-    if (!padded.some(c => c.id === mockId)) {
-      const otherPart = mock.participants.data[1];
-      const copy = {
-        ...mock,
-        id: mockId,
-        _associatedPageId: activePageId,
-        participants: {
-          data: [
-            { id: activePageId, name: 'Agent' },
-            { id: otherPart.id, name: otherPart.name, picture: otherPart.picture }
-          ]
-        },
-        messages: {
-          data: [
-            {
-              ...mock.messages.data[0],
-              id: `${mock.messages.data[0].id}_${prefix}`,
-              from: { id: otherPart.id, name: otherPart.name }
-            }
-          ]
-        }
-      };
-      padded.push(copy);
-      addedCount++;
-    }
-  }
-  return padded;
+  return filtered;
 };
 
 const getPaddedMessagesForConversation = (conv: any, activePageId: string) => {
   if (!conv) return [];
-  const msgs = conv.messages?.data ? [...conv.messages.data] : [];
-  if (msgs.length >= 10) {
-    return msgs;
-  }
-
-  const other = conv.participants?.data?.find((p: any) => p.id !== activePageId);
-  const otherName = other?.name || "Customer";
-  const otherId = other?.id || "customer_default";
-
-  const templateFlow = [
-    { fromMe: false, text: `Hello! I would love to know more about the broadcast campaigns.` },
-    { fromMe: true, text: `Hi there! Hope you are having an amazing day. Broadcasts let you send custom messages and media to all your page's subscribers instantly.` },
-    { fromMe: false, text: `Is there a limit on how many messages I can send out daily?` },
-    { fromMe: true, text: `There is no hard limit from our end, but Meta guidelines recommend using Messenger tags for non-promotional messages outside 24h window to ensure high deliverability.` },
-    { fromMe: false, text: `That makes total sense. Can I schedule broadcasts for later?` },
-    { fromMe: true, text: `Yes! You can choose "Schedule for Later" and pick any future date and time.` },
-    { fromMe: false, text: `Great! Do you support rich interactive templates or attachments too?` },
-    { fromMe: true, text: `Absolutely! You can attach images, PDFs, audio guides, or use Quick Replies to let customers respond with tap buttons.` },
-    { fromMe: false, text: `This is incredibly detailed, thank you! I am setting up our winter campaign now.` },
-    { fromMe: true, text: `Fantastic! If you need any assistance with campaign design or rules, simply type your query. We are happy to help!` }
-  ];
-
-  const needed = 10 - msgs.length;
-  const extraMessages = [];
-  const baseTime = msgs.length > 0 
-    ? new Date(msgs[msgs.length - 1].created_time).getTime() 
-    : Date.now();
-
-  for (let i = 0; i < needed; i++) {
-    const item = templateFlow[i % templateFlow.length];
-    const timeOffset = (needed - i) * 3600000; 
-    const createdTime = new Date(baseTime - timeOffset).toISOString();
-    
-    extraMessages.push({
-      id: `sim_msg_${conv.id}_${i}`,
-      message: item.text,
-      created_time: createdTime,
-      from: item.fromMe 
-        ? { id: activePageId, name: 'Agent' } 
-        : { id: otherId, name: otherName }
-    });
-  }
-
-  const padded = [...msgs];
-  extraMessages.sort((a,b) => new Date(b.created_time).getTime() - new Date(a.created_time).getTime());
-  padded.push(...extraMessages);
-  return padded;
+  return conv.messages?.data ? [...conv.messages.data] : [];
 };
 
 export const ChatPage: React.FC<ChatPageProps> = ({

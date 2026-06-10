@@ -2266,7 +2266,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 1 day
       res.send(Buffer.from(response.data));
     } catch (error: any) {
-      console.warn("[Proxy-Audio] Warning proxying audio:", error?.response?.status || "unknown", error?.message);
+      console.log("[Proxy-Audio] Info: External audio source unavailable:", error?.response?.status || "unknown", error?.message);
       res.status(502).send("Warning: External audio source unavailable");
     }
   });
@@ -2295,7 +2295,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       res.setHeader("Cache-Control", "public, max-age=86400"); // Cache for 1 day
       res.send(Buffer.from(response.data));
     } catch (error: any) {
-      console.warn("[Proxy-Image] Warning proxying image:", error?.response?.status || "unknown", error?.message);
+      console.log("[Proxy-Image] Info: External image source unavailable, returning transparent gif fallback:", error?.response?.status || "unknown", error?.message);
       const transparentGif = Buffer.from(
         "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
         "base64"
@@ -5371,90 +5371,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
   // --- Sandbox Simulation Helper Functions ---
   function getDefaultSimulatedConversations(pageId: string) {
-    if (pageId === "page_perseus_core") {
-      return [
-        {
-          id: "conv_p1_1",
-          participants: {
-            data: [
-              { name: "Sajid Khan", id: "user_sajid", picture: { data: { url: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80" } } }
-            ]
-          },
-          messages: {
-            data: [
-              { message: "Hello! I need to know about your automation services price list.", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3600000).toISOString() },
-              { message: "What are the standard web integration rates? Are there customized options for custom business logic?", from: { name: "Sajid Khan", id: "user_sajid" }, created_time: new Date(Date.now() - 3000000).toISOString() }
-            ]
-          },
-          updated_time: new Date(Date.now() - 3000000).toISOString()
-        },
-        {
-          id: "conv_p1_2",
-          participants: {
-            data: [
-              { name: "Aisha Rehman", id: "user_aisha", picture: { data: { url: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80" } } }
-            ]
-          },
-          messages: {
-            data: [
-              { message: "Can we connect our CRM of Salesforce with your chatbot agent?", from: { name: "Aisha Rehman", id: "user_aisha" }, created_time: new Date(Date.now() - 7200000).toISOString() }
-            ]
-          },
-          updated_time: new Date(Date.now() - 7200000).toISOString()
-        }
-      ];
-    } else if (pageId === "page_fashion_store") {
-      return [
-        {
-          id: "conv_p2_1",
-          participants: {
-            data: [
-              { name: "Zainab Malik", id: "user_zainab", picture: { data: { url: "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80" } } }
-            ]
-          },
-          messages: {
-            data: [
-              { message: "Hi! Is the silk velvet suit available in dark blue size Medium?", from: { name: "Zainab Malik", id: "user_zainab" }, created_time: new Date(Date.now() - 1800000).toISOString() }
-            ]
-          },
-          updated_time: new Date(Date.now() - 1800000).toISOString()
-        }
-      ];
-    } else if (pageId === "page_property_portal") {
-      return [
-        {
-          id: "conv_p3_1",
-          participants: {
-            data: [
-              { name: "Haris Jamil", id: "user_haris", picture: { data: { url: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80" } } }
-            ]
-          },
-          messages: {
-            data: [
-              { message: "Interested in DHA Phase 6 1-Kanal villa. Can you send down brochure and pricing details?", from: { name: "Haris Jamil", id: "user_haris" }, created_time: new Date(Date.now() - 7200000).toISOString() }
-            ]
-          },
-          updated_time: new Date(Date.now() - 7200000).toISOString()
-        }
-      ];
-    } else {
-      return [
-        {
-          id: "conv_p4_1",
-          participants: {
-            data: [
-              { name: "Bilal Butt", id: "user_bilal", picture: { data: { url: "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&w=150&q=80" } } }
-            ]
-          },
-          messages: {
-            data: [
-              { message: "Hello, what is your restaurant closing time tonight? Do you take online custom reservations or walk-ins only?", from: { name: "Bilal Butt", id: "user_bilal" }, created_time: new Date(Date.now() - 450000).toISOString() }
-            ]
-          },
-          updated_time: new Date(Date.now() - 450000).toISOString()
-        }
-      ];
-    }
+    return [];
   }
 
   async function getOrCreateSimulatedConversations(db: any, req: any, pageId: string) {
@@ -5464,7 +5381,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const simColRef = db.collection("users").doc(userEmail).collection("simulated_conversations").doc(pageId);
       const snap = await simColRef.get();
       if (snap.exists) {
-        return snap.data().conversations || [];
+        const conversations = snap.data().conversations || [];
+        // Extract any dummy/mock conversations that may have been previously persisted
+        return conversations.filter((c: any) => c && c.id && !c.id.startsWith("conv_p"));
       } else {
         const initialConvs = getDefaultSimulatedConversations(pageId);
         await simColRef.set({ conversations: initialConvs });
@@ -7361,7 +7280,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-1.5-flash",
         contents: message,
         config: {
           systemInstruction: "You are a helpful customer support bot for Perseus Bot. You specialize in helping users automate their Facebook Messenger conversations. Be professional, concise, and focus on Messenger automation solutions.",
@@ -8072,7 +7991,7 @@ Write a realistic, short and natural response expressing your reaction, query, o
   }
 
   async function verifyAdminMiddleware(req: any, res: any, next: any) {
-    const email = (req.session?.user?.email || req.headers['x-user-email'] || req.query.email || "") as string;
+    const email = (req.session?.user?.email || "") as string;
     if (email.toLowerCase().trim() === "ahsan.shabbir292@gmail.com") {
       return next();
     }
@@ -8124,7 +8043,17 @@ Write a realistic, short and natural response expressing your reaction, query, o
         
         let joinTime = 0;
         if (u.createdAt) {
-          joinTime = typeof u.createdAt === "string" ? new Date(u.createdAt).getTime() : 0;
+          if (typeof u.createdAt === "string") {
+            joinTime = new Date(u.createdAt).getTime();
+          } else if (u.createdAt?._seconds) {
+            joinTime = u.createdAt._seconds * 1000;
+          } else if (u.createdAt?.seconds) {
+            joinTime = u.createdAt.seconds * 1000;
+          } else if (u.createdAt?.toDate) {
+            joinTime = u.createdAt.toDate().getTime();
+          } else if (u.createdAt instanceof Date) {
+            joinTime = u.createdAt.getTime();
+          }
           if (joinTime > 0) {
             if (now - joinTime < oneDay) usersToday++;
             if (now - joinTime < sevenDays) usersWeek++;
@@ -8221,6 +8150,13 @@ Write a realistic, short and natural response expressing your reaction, query, o
       const userDoc = await db.collection("users").doc(emailLower).get();
       if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
       const { password, ...userWithoutPassword } = userDoc.data();
+      try {
+        const bcastSnap = await db.collection("users").doc(emailLower)
+          .collection("broadcasts").get();
+        userWithoutPassword.broadcastCount = bcastSnap.size;
+      } catch {
+        userWithoutPassword.broadcastCount = 0;
+      }
       res.json({ user: userWithoutPassword });
     } catch (err: any) {
       console.error("[Admin API] Failed to fetch user details:", err.message);
