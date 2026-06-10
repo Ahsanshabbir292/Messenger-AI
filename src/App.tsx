@@ -5,18 +5,19 @@
 
 import React, { useState } from 'react';
 import axios from 'axios';
-import LandingPage from './components/LandingPage';
-import AuthPage from './components/AuthPage';
-import Dashboard from './components/Dashboard';
-import ChatWidget from './components/ChatWidget';
-import PrivacyPage from './components/PrivacyPage';
-import TermsPage from './components/TermsPage';
-import DeletionPage from './components/DeletionPage';
-import SupportFAQPage from './components/SupportFAQPage';
-import AboutPage from './components/AboutPage';
-import ContactPage from './components/ContactPage';
-import AdminPage from './components/AdminPage';
 import { ShieldAlert } from 'lucide-react';
+
+const LandingPage = React.lazy(() => import('./components/LandingPage'));
+const AuthPage = React.lazy(() => import('./components/AuthPage'));
+const Dashboard = React.lazy(() => import('./components/Dashboard'));
+const ChatWidget = React.lazy(() => import('./components/ChatWidget'));
+const PrivacyPage = React.lazy(() => import('./components/PrivacyPage'));
+const TermsPage = React.lazy(() => import('./components/TermsPage'));
+const DeletionPage = React.lazy(() => import('./components/DeletionPage'));
+const SupportFAQPage = React.lazy(() => import('./components/SupportFAQPage'));
+const AboutPage = React.lazy(() => import('./components/AboutPage'));
+const ContactPage = React.lazy(() => import('./components/ContactPage'));
+const AdminPage = React.lazy(() => import('./components/AdminPage'));
 
 type ViewMode = 'landing' | 'signin' | 'signup' | 'dashboard' | 'privacy' | 'terms' | 'deletion' | 'faq-support' | 'about' | 'contact' | 'admin';
 
@@ -152,12 +153,21 @@ export default function App() {
 
   React.useEffect(() => {
     const checkSession = async () => {
-      if (appUser?.email) {
-        axios.defaults.headers.common['x-user-email'] = appUser.email;
-      }
+      let emailParam = undefined;
+      try {
+        const saved = localStorage.getItem('current_app_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.email) {
+            emailParam = parsed.email;
+            axios.defaults.headers.common['x-user-email'] = parsed.email;
+          }
+        }
+      } catch (e) {}
+
       try {
         const res = await axios.get('/api/auth/me', {
-          params: appUser?.email ? { email: appUser.email } : undefined
+          params: emailParam ? { email: emailParam } : undefined
         });
         if (res.data.user) {
           setAppUser(res.data.user);
@@ -194,7 +204,7 @@ export default function App() {
       }
     };
     checkSession();
-  }, [appUser?.email]);
+  }, []);
 
   React.useEffect(() => {
     if (!loading) {
@@ -269,7 +279,11 @@ export default function App() {
   }
 
   return (
-    <>
+    <React.Suspense fallback={
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-indigo-600/20 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+    }>
       {view === 'landing' && (
         <LandingPage 
           onSignIn={goToSignIn} 
@@ -359,6 +373,6 @@ export default function App() {
       )}
 
       {view !== 'dashboard' && view !== 'admin' && <ChatWidget />}
-    </>
+    </React.Suspense>
   );
 }

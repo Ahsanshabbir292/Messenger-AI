@@ -8,6 +8,8 @@ import axios from "axios";
 import { Server } from "socket.io";
 import { createServer } from "http";
 import multer from "multer";
+import admin from "firebase-admin";
+import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 import nodemailer from "nodemailer";
 import { initializeApp } from "firebase/app";
 import compression from "compression";
@@ -56,23 +58,25 @@ try {
   console.error("Failed to write env log file", e);
 }
 
-// Automatic background email diagnostic test on server startup (runs once after 5s)
-setTimeout(async () => {
-  console.log("[DIAGNOSTIC] Running background email test targeting ahsan.shabbir292@gmail.com...");
-  try {
-    const result = await sendMailWithFallbacks({
-      to: "ahsan.shabbir292@gmail.com",
-      subject: "Perseus Bot Automatic Diagnostic Test",
-      text: "Testing Resend configuration.",
-      html: "<h3>Testing Resend configuration</h3>"
-    });
-    fs.writeFileSync('email_result.json', JSON.stringify({ success: true, result }, null, 2));
-    console.log("[DIAGNOSTIC] Background email test succeeded and saved to email_result.json!");
-  } catch (err: any) {
-    console.error("[DIAGNOSTIC] Background email test failed!", err.message);
-    fs.writeFileSync('email_result.json', JSON.stringify({ success: false, error: err.message, stack: err.stack }, null, 2));
-  }
-}, 5000);
+// Automatic background email diagnostic test on server startup (runs once after 5s if not in production)
+if (process.env.NODE_ENV !== "production") {
+  setTimeout(async () => {
+    console.log("[DIAGNOSTIC] Running background email test targeting ahsan.shabbir292@gmail.com...");
+    try {
+      const result = await sendMailWithFallbacks({
+        to: "ahsan.shabbir292@gmail.com",
+        subject: "Perseus Bot Automatic Diagnostic Test",
+        text: "Testing Resend configuration.",
+        html: "<h3>Testing Resend configuration</h3>"
+      });
+      fs.writeFileSync('email_result.json', JSON.stringify({ success: true, result }, null, 2));
+      console.log("[DIAGNOSTIC] Background email test succeeded and saved to email_result.json!");
+    } catch (err: any) {
+      console.error("[DIAGNOSTIC] Background email test failed!", err.message);
+      fs.writeFileSync('email_result.json', JSON.stringify({ success: false, error: err.message, stack: err.stack }, null, 2));
+    }
+  }, 5000);
+}
 
 function cleanEnvValue(val: string | undefined): string {
   if (!val) return "";
@@ -891,7 +895,7 @@ function fromFirestoreFields(fields: any) {
 }
 
 const restQueryCache = new Map<string, { timestamp: number; data: any }>();
-const CACHE_TTL_MS = 120000; // Increased to 2 minutes cache to prevent 429 requests while retaining snappy feel
+const CACHE_TTL_MS = 180000; // Increased to 3 minutes cache to prevent 429 requests while retaining snapping feel
 
 const pendingPromises = new Map<string, Promise<any>>();
 
@@ -925,33 +929,98 @@ function invalidateRestQueryCache(parentPath: string, id: string, data?: any) {
   restQueryCache.delete(colKey);
   pendingPromises.delete(colKey);
   
+  const fullPath = `${parentPath}/${id}`;
+  const pathSegments = fullPath.split("/");
+
   // Also delete subcollection or wildcard queries for the specific paths
   for (const k of restQueryCache.keys()) {
     if (k.startsWith(`col:${parentPath}/${id}/`) || k === `col:${parentPath}/${id}`) {
       restQueryCache.delete(k);
       pendingPromises.delete(k);
     }
-    // Delete any cached collection group query when documents change
+    // Delete any cached collection group query when documents belonging to that collection group change
     if (k.startsWith("colgroup:")) {
-      restQueryCache.delete(k);
-      pendingPromises.delete(k);
+      const colGroupId = k.split(":")[1];
+      if (pathSegments.includes(colGroupId)) {
+        restQueryCache.delete(k);
+        pendingPromises.delete(k);
+      }
     }
   }
 }
 
-async function axiosRequestWithRetry(config: any, retries = 6, delay = 1500): Promise<any> {
-  try {
-    return await axios(config);
-  } catch (err: any) {
-    if (retries > 0 && err.response && err.response.status === 429) {
-      const jitter = Math.floor(Math.random() * 800) + 200;
-      const totalDelay = delay + jitter;
-      console.warn(`[RestDB-Retry] Received 429 rate limit. Retrying in ${totalDelay}ms... (Remaining retries: ${retries})`);
-      await new Promise(resolve => setTimeout(resolve, totalDelay));
-      return axiosRequestWithRetry(config, retries - 1, delay * 2);
+interface QueuedRestRequest {
+  config: any;
+  retries: number;
+  delay: number;
+  resolve: (value: any) => void;
+  reject: (err: any) => void;
+}
+
+const restRequestQueue: QueuedRestRequest[] = [];
+let activeRestRequests = 0;
+const MAX_CONCURRENT_REST = 12; // Perfectly balanced higher concurrency (parallel lanes) back to 12
+let cooldownUntilTimestamp = 0;
+let cooldownTimeoutRef: NodeJS.Timeout | null = null;
+
+function processRestQueue() {
+  if (Date.now() < cooldownUntilTimestamp) {
+    if (!cooldownTimeoutRef) {
+      const waitTime = cooldownUntilTimestamp - Date.now();
+      cooldownTimeoutRef = setTimeout(() => {
+        cooldownTimeoutRef = null;
+        processRestQueue();
+      }, waitTime);
     }
-    throw err;
+    return;
   }
+
+  while (activeRestRequests < MAX_CONCURRENT_REST && restRequestQueue.length > 0) {
+    const req = restRequestQueue.shift();
+    if (!req) break;
+
+    activeRestRequests++;
+
+    (async (r) => {
+      try {
+        const res = await axios(r.config);
+        r.resolve(res);
+      } catch (err: any) {
+        if (r.retries > 0 && err.response && err.response.status === 429) {
+          const backoffDelay = r.delay;
+          const jitter = Math.floor(Math.random() * 1000) + 500;
+          const totalDelay = backoffDelay + jitter;
+          
+          // Cool down the entire queue for 1.5 seconds to allow rate limits to reset
+          cooldownUntilTimestamp = Date.now() + 1500;
+          console.warn(`[RestDB-Queue] Received 429. Cooling down queue and re-queueing request in ${totalDelay}ms (Retries left: ${r.retries})`);
+          
+          setTimeout(() => {
+            restRequestQueue.push({
+              config: r.config,
+              retries: r.retries - 1,
+              delay: r.delay * 2, // Exponential backoff
+              resolve: r.resolve,
+              reject: r.reject
+            });
+            processRestQueue();
+          }, totalDelay);
+        } else {
+          r.reject(err);
+        }
+      } finally {
+        activeRestRequests--;
+        processRestQueue();
+      }
+    })(req);
+  }
+}
+
+async function axiosRequestWithRetry(config: any, retries = 8, delay = 2000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    restRequestQueue.push({ config, retries, delay, resolve, reject });
+    processRestQueue();
+  });
 }
 
 async function getCachedRestQuery(key: string, fetchFn: () => Promise<any>): Promise<any> {
@@ -1229,12 +1298,70 @@ class RestFirestore {
 }
 
 let isDbInitializing = false;
+let firebaseAdminApp: admin.app.App | null = null;
 
 async function getDb(): Promise<any> {
   if (db) return db;
   isDbInitializing = true;
-  console.log(`[Firebase] Initializing ultra-stable REST-based Firestore database client!`);
-  db = new RestFirestore();
+
+  const flagPath = path.join(appDir, ".firestore_fallback_active");
+  if (fs.existsSync(flagPath)) {
+    console.warn("[Firebase] Local JSON database fallback is active. Initializing MemoryFirestore!");
+    db = new MemoryFirestore();
+    isDbInitializing = false;
+    return db;
+  }
+
+  try {
+    console.log(`[Firebase] Initializing official Firebase Admin SDK for high-performance Firestore!`);
+    if (!firebaseAdminApp) {
+      const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+      if (serviceAccountPath && fs.existsSync(serviceAccountPath)) {
+        console.log("[Firebase] Initializing using GOOGLE_APPLICATION_CREDENTIALS path.");
+        firebaseAdminApp = admin.initializeApp({
+          credential: admin.credential.cert(serviceAccountPath),
+          projectId: firebaseConfig.projectId
+        });
+      } else if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+        console.log("[Firebase] Initializing using FIREBASE_SERVICE_ACCOUNT_KEY env var.");
+        try {
+          const saKey = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+          firebaseAdminApp = admin.initializeApp({
+            credential: admin.credential.cert(saKey),
+            projectId: firebaseConfig.projectId
+          });
+        } catch (saErr: any) {
+          console.error("[Firebase] Error parsing FIREBASE_SERVICE_ACCOUNT_KEY JSON:", saErr.message);
+          firebaseAdminApp = admin.initializeApp({
+            projectId: firebaseConfig.projectId
+          });
+        }
+      } else {
+        console.log(`[Firebase] Initializing via default credentials for project ${firebaseConfig.projectId}`);
+        firebaseAdminApp = admin.initializeApp({
+          projectId: firebaseConfig.projectId
+        });
+      }
+    }
+
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    console.log(`[Firebase] Connecting to Admin Firestore Database ID: ${dbId}`);
+    db = getAdminFirestore(firebaseAdminApp, dbId === "default" ? undefined : dbId);
+
+    // Verify active connectivity / permissions
+    try {
+      await db.collection("system_check").limit(1).get();
+      console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
+    } catch (testErr: any) {
+      console.warn("[Firebase] Admin Firestore testing failed. Activating local MemoryFirestore fallback:", testErr.message);
+      db = new MemoryFirestore();
+    }
+  } catch (err: any) {
+    console.error("[Firebase] Error initializing Firebase Admin App:", err.message);
+    console.warn("[Firebase] Falling back to high-availability local MemoryFirestore!");
+    db = new MemoryFirestore();
+  }
+
   isDbInitializing = false;
   return db;
 }
@@ -3539,7 +3666,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
     if (!appId || appId === "" || appId === "YOUR_FACEBOOK_APP_ID") {
       console.log(`[FB-Simulator] No FACEBOOK_APP_ID found. Standard OAuth fallback to simulation for ${userEmail}, workspace: ${workspaceId}`);
       const simulateUrl = `${appUrl}/auth/facebook/simulate?email=${encodeURIComponent(userEmail)}&workspaceId=${encodeURIComponent(workspaceId)}`;
-      return res.json({ url: simulateUrl });
+      return res.json({ url: simulateUrl, simulateUrl });
     }
 
     const redirectUri = `${appUrl}/auth/facebook/callback`;
@@ -3554,8 +3681,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
     const stateValue = workspaceId ? `${userEmail}||${workspaceId}` : userEmail;
     const authUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&response_type=code&state=${encodeURIComponent(stateValue)}&auth_type=rerequest`;
+    const simulateUrl = `${appUrl}/auth/facebook/simulate?email=${encodeURIComponent(userEmail)}&workspaceId=${encodeURIComponent(workspaceId)}`;
     
-    res.json({ url: authUrl });
+    res.json({ url: authUrl, simulateUrl });
   });
 
   // Gorgeous Facebook Connection Simulator (Sandbox Mode)

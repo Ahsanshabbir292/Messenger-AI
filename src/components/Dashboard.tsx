@@ -318,6 +318,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   const [syncing, setSyncing] = useState(false);
   const [fbSyncModalOpen, setFbSyncModalOpen] = useState(false);
   const [fbAuthUrl, setFbAuthUrl] = useState("");
+  const [fbSimulateUrl, setFbSimulateUrl] = useState("");
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
     if (appUser?.workspaces && Array.isArray(appUser.workspaces) && appUser.workspaces.length > 0) {
       return appUser.workspaces;
@@ -1702,60 +1703,78 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
 
   const handleSyncPages = async () => {
     setSyncing(true);
+    
+    const width = 600, height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    
+    let popup: Window | null = null;
+    try {
+      popup = window.open('about:blank', 'fb_oauth', `width=${width},height=${height},left=${left},top=${top}`);
+      if (popup) {
+        popup.document.write(`
+          <div style="font-family:sans-serif; text-align:center; padding-top:100px; color:#475569;">
+            <div style="width:24px; height:24px; border:3px solid #cbd5e1; border-top-color:#1877f2; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 16px;"></div>
+            <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+            <h3 style="margin:0; font-size:16px; color:#0f172a;">Connecting Facebook...</h3>
+            <p style="margin:4px 0 0; font-size:13px;">Please wait while the connection is initiated.</p>
+          </div>
+        `);
+      }
+    } catch (err) {
+      console.warn("[FB_OAUTH] Failed to open pre-popup:", err);
+    }
+
     try {
       const res = await axios.get('/api/auth/facebook/url', {
         params: { email: appUser?.email, workspaceId: currentWorkspaceId }
       });
-      const { url } = res.data;
+      const { url, simulateUrl } = res.data;
       setFbAuthUrl(url);
-      setFbSyncModalOpen(true); // Proactively open fallback wizard so user has direct connection choices immediately in sandboxed iframe
+      setFbSimulateUrl(simulateUrl || url);
 
-      const width = 600, height = 700;
-      const left = window.screenX + (window.outerWidth - width) / 2;
-      const top = window.screenY + (window.outerHeight - height) / 2;
-      
-      let popup: Window | null = null;
-      try {
-        popup = window.open(url, 'fb_oauth', `width=${width},height=${height},left=${left},top=${top}`);
-      } catch (err) {
-        console.warn("[FB_OAUTH] Failed to open popup due to sandboxing constraint:", err);
-      }
-      
       if (popup) {
-        let isSuccessDetected = false;
-        
-        const checkSuccess = async () => {
-          try {
-            const profileRes = await axios.get('/api/facebook/me');
-            if (profileRes.data && profileRes.data.id) {
-              isSuccessDetected = true;
-              console.log("[AutoSync] Facebook authentication success detected via background API poll!");
-              getPages();
-              getUserProfile();
-              setFbSyncModalOpen(false); // Auto-dismiss helper modal on success
-              return true;
-            }
-          } catch (e) {
-            // Unauthenticated responses or pending connection are ignored during polling
-          }
-          return false;
-        };
+        popup.location.href = url;
+      } else {
+        window.location.href = url;
+        return;
+      }
 
-        const pollTimer = setInterval(async () => {
-          if (popup && popup.closed) {
-            clearInterval(pollTimer);
-            console.log("[AutoSync] Popup window detected as closed. Making final page/profile retrieval...");
+      let isSuccessDetected = false;
+      
+      const checkSuccess = async () => {
+        try {
+          const profileRes = await axios.get('/api/facebook/me');
+          if (profileRes.data && profileRes.data.id) {
+            isSuccessDetected = true;
+            console.log("[AutoSync] Facebook authentication success detected via background API poll!");
             getPages();
             getUserProfile();
-          } else if (!isSuccessDetected) {
-            const connected = await checkSuccess();
-            if (connected) {
-              clearInterval(pollTimer);
-            }
+            return true;
           }
-        }, 1500);
-      }
+        } catch (e) {
+          // Unauthenticated responses or pending connection are ignored during polling
+        }
+        return false;
+      };
+
+      const pollTimer = setInterval(async () => {
+        if (popup && popup.closed) {
+          clearInterval(pollTimer);
+          console.log("[AutoSync] Popup window detected as closed. Making final page/profile retrieval...");
+          getPages();
+          getUserProfile();
+        } else if (!isSuccessDetected) {
+          const connected = await checkSuccess();
+          if (connected) {
+            clearInterval(pollTimer);
+          }
+        }
+      }, 1500);
     } catch (err: any) {
+      if (popup) {
+        popup.close();
+      }
       alert(formatAxiosError(err, "Failed to retrieve Facebook auth URL."));
     } finally {
       setSyncing(false);
@@ -6001,81 +6020,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                  </button>
               </div>
            </div>
-         </div>
-       )}
-
-      {/* Facebook Redirect & Helper Modal */}
-      {fbSyncModalOpen && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 lg:p-10 animate-in fade-in duration-200">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setFbSyncModalOpen(false)}></div>
-          <div className="bg-white w-full max-w-lg rounded-[2rem] sm:rounded-[3rem] shadow-2xl relative z-10 p-6 sm:p-10 text-center animate-in zoom-in-95 duration-200 border border-slate-100">
-             <div className="w-14 h-14 sm:w-16 sm:h-16 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-5 sm:mb-6 text-[#1877F2] shadow-md animate-bounce">
-                <Facebook className="w-6 h-6 sm:w-8 sm:h-8 fill-current" />
-             </div>
-             
-             <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tighter">Facebook Sync Connection Portal</h3>
-             <p className="text-slate-500 font-medium text-xs sm:text-sm mt-2 leading-relaxed px-4">
-                Browser secure settings might have blocked the popup window. Choose an option below to connect effortlessly:
-             </p>
-
-             <div className="p-4 sm:p-5 bg-amber-50 rounded-2xl border border-amber-100/60 text-amber-800 text-left text-xs sm:text-md my-5 sm:my-6 space-y-1.5 font-medium leading-relaxed">
-                <p className="font-bold text-amber-900 flex items-center gap-1.5 leading-none">
-                  <span className="w-1.5 h-1.5 bg-amber-600 rounded-full inline-block animate-ping"></span>
-                  Bypass Popup Blocks (Easy Way):
-                </p>
-                <p className="text-xs sm:text-sm text-amber-850 mt-1">
-                  AI Studio frame automatically blocks popups. <strong>Option 1 (Direct Integration)</strong> is the recommended way to complete the connection smoothly under standard policies.
-                </p>
-             </div>
-
-             <div className="p-4 sm:p-5 bg-indigo-50 rounded-2xl border border-indigo-100/60 text-indigo-800 text-left text-xs sm:text-md mb-5 sm:mb-6 space-y-1.5 font-medium leading-relaxed">
-                <p className="font-bold text-indigo-900 flex items-center gap-1.5 leading-none">
-                  <span className="w-1.5 h-1.5 bg-indigo-600 rounded-full inline-block animate-pulse"></span>
-                  Permissions Configuration & Select All Pages:
-                </p>
-                <p className="text-xs sm:text-sm text-indigo-850 mt-1">
-                  When the Facebook window opens, click <strong>"Edit Settings"</strong> and ensure you <strong>check/tick all your Pages</strong>. Any unchecked page cannot be synchronized as permissions are restricted.
-                </p>
-             </div>
-
-             <div className="flex flex-col gap-3 sm:gap-4">
-                {/* Option 1: Inline Direct Redirect (100% Works) */}
-                <button 
-                  onClick={() => {
-                    setFbSyncModalOpen(false);
-                    addToast("Bypassing popup blocking... Secure simulator open ho raha hai.", "success");
-                    // Wait a moment for toast then navigate
-                    setTimeout(() => {
-                      window.location.href = fbAuthUrl;
-                    }, 800);
-                  }}
-                  className="w-full py-3.5 sm:py-4 bg-[#1877F2] hover:bg-[#166fe5] text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all shadow-xl shadow-blue-100 flex items-center justify-center gap-2 cursor-pointer border-none"
-                >
-                   <Sparkles className="w-4 h-4" /> Option 1: Connect In This Window (Bypass Blocks)
-                </button>
-
-                {/* Option 2: Open in separate window manually */}
-                <a 
-                  href={fbAuthUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => setFbSyncModalOpen(false)}
-                  className="w-full py-3.5 sm:py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl sm:rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-2 text-decoration-none"
-                >
-                   <ExternalLink className="w-4 h-4" /> Option 2: Open In New Tab Manually
-                </a>
-
-                {/* Option 3: Cancel */}
-                <button 
-                  onClick={() => setFbSyncModalOpen(false)}
-                  className="w-full py-3 text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-900 transition-colors bg-transparent border-none cursor-pointer mt-1"
-                >
-                   Cancel / Go Back
-                </button>
-             </div>
           </div>
-        </div>
-      )}
+        )}
+
+
     </div>
   );
 }
