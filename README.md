@@ -1,20 +1,22 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Perseus Bot
 
-# Run and deploy your AI Studio app
+Perseus Bot is a full-stack platform managing automated customer conversations, real-time message broadcasting, dynamic credit balances, and secure multi-user role management linked with Meta Facebook Graph API and Google Cloud Firestore.
 
-This contains everything you need to run your app locally.
+## Required Environment Variables (set these on Render/Railway/etc)
 
-View your app in AI Studio: https://ai.studio/apps/29c3908b-22bc-437d-90bc-108c053233ac
+```env
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_API_KEY=your-api-key  
+FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+FIREBASE_APP_ID=your-app-id
+FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+FIREBASE_MESSAGING_SENDER_ID=your-sender-id
+FIREBASE_FIRESTORE_DATABASE_ID=your-database-id
+FACEBOOK_APP_ID=your-facebook-app-id
+FACEBOOK_APP_SECRET=your-facebook-app-secret
+FACEBOOK_REDIRECT_URI=https://your-domain.com/auth/facebook/callback
+SESSION_SECRET=your-random-secret-key
+NODE_ENV=production
+```
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+These variables must be set in your hosting dashboard (Render → Environment, Railway → Variables). The app reads them on every startup. Your Firestore data is stored in Google Firebase cloud — it is NEVER deleted by redeployment. Only wrong/missing env vars cause data to appear lost.

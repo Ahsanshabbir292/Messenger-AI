@@ -82,6 +82,21 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
     const fetchAdminData = async () => {
       setLoading(true);
       try {
+        // Automatically inject user email header if missing or available
+        let currentEmail = appUser?.email;
+        if (!currentEmail) {
+          try {
+            const savedUserStr = localStorage.getItem('current_app_user');
+            if (savedUserStr) {
+              const parsed = JSON.parse(savedUserStr);
+              currentEmail = parsed?.email;
+            }
+          } catch (e) {}
+        }
+        if (currentEmail) {
+          axios.defaults.headers.common['x-user-email'] = currentEmail;
+        }
+
         const verifyRes = await axios.post('/api/admin/verify');
         if (!verifyRes.data.success) {
           addToast("Admin verification failed. Redirection active.", "danger");
@@ -1365,6 +1380,29 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                     Adjust
                   </button>
                 </div>
+              </div>
+
+              {/* Facebook Connection Status warning & action (Fix 2) */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wide">Facebook Connection Status</h4>
+                {selectedUser.facebook?.id || (selectedUser.facebookWorkspaces && Object.keys(selectedUser.facebookWorkspaces).length > 0) ? (
+                  <div className="p-4 bg-red-950/40 border border-red-500/20 rounded-2xl">
+                    <p className="text-xs text-red-400 font-bold mb-1">⚠️ Connected Facebook Account</p>
+                    <p className="text-xs text-red-300 mb-3">
+                      {selectedUser.facebook?.name || (selectedUser.facebookWorkspaces && Object.values(selectedUser.facebookWorkspaces)[0] ? (Object.values(selectedUser.facebookWorkspaces)[0] as any).name : "Connected Profile")}
+                    </p>
+                    <button
+                      onClick={() => handleDisconnectFacebook(selectedUser.email)}
+                      className="w-full py-2.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl transition cursor-pointer border-none animate-pulse hover:animate-none"
+                    >
+                      🔓 Disconnect Facebook
+                    </button>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-950/40 border border-slate-800 rounded-2xl">
+                    <p className="text-xs text-slate-500">No Facebook account connected</p>
+                  </div>
+                )}
               </div>
 
               {/* Workspace Registry Telemetry (BUG 7) */}

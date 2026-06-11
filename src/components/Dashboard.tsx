@@ -465,6 +465,22 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   }, [conversations, selectedPage?.id, pages]);
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [creditBalance, setCreditBalance] = useState(5000.00);
+
+  // Poll for credits in real-time (Fix 1 Part B)
+  useEffect(() => {
+    const pollCredits = async () => {
+      try {
+        const res = await axios.get('/api/user/credits');
+        if (typeof res.data.credits === 'number') {
+          setCreditBalance(res.data.credits);
+        }
+      } catch (e) {}
+    };
+    
+    const interval = setInterval(pollCredits, 30000); // every 30 seconds
+    pollCredits(); // also run immediately on mount
+    return () => clearInterval(interval);
+  }, []);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<'admin' | 'agent' | 'support'>('admin');
 
@@ -611,12 +627,23 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       getPages();
     };
 
+    const handleCreditsUpdate = (data: any) => {
+      console.log("[Socket Realtime] Credits updated:", data);
+      if (data && typeof data.credits === 'number') {
+        setCreditBalance(data.credits);
+      } else {
+        getPages();
+      }
+    };
+
     socket.on("broadcast_progress", handleProgress);
     socket.on("broadcast_completed", handleCompleted);
+    socket.on("credits_updated", handleCreditsUpdate);
 
     return () => {
       socket.off("broadcast_progress", handleProgress);
       socket.off("broadcast_completed", handleCompleted);
+      socket.off("credits_updated", handleCreditsUpdate);
     };
   }, [socket, getBroadcastHistory]);
 
@@ -1950,8 +1977,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
           socket.emit("join_page", selectedPage.id);
         }
       }
+      if (appUser?.email) {
+        socket.emit("join_user", appUser.email);
+      }
     }
-  }, [selectedPage, socket, selectedPageIds, pages]);
+  }, [selectedPage, socket, selectedPageIds, pages, appUser?.email]);
 
   useEffect(() => {
     if (selectedPage) {

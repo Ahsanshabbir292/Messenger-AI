@@ -71,7 +71,8 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
   };
 
   const recipientCount = getRecipientsCalculated();
-  const estimatedCost = recipientCount * 1; // 1 credit per recipient
+  const creditsPerMessage = msgType === 'both' ? 2 : 1;
+  const estimatedCost = recipientCount * creditsPerMessage;
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -550,7 +551,14 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
             <div>
               <p className="text-[9px] font-black uppercase text-indigo-500 tracking-wider">Estimated Cost</p>
               <p className="text-2xl font-black text-slate-900 mt-1">
-                {estimatedCost === 0 ? "0 credits" : `${estimatedCost.toLocaleString()} credits`}
+                {estimatedCost === 0 ? "0 credits" : (
+                  <span>
+                    {estimatedCost.toLocaleString()} credits
+                    <span className="text-[10px] font-normal text-slate-400 ml-1">
+                      ({creditsPerMessage} credit{creditsPerMessage > 1 ? 's' : ''} × {recipientCount.toLocaleString()} recipients)
+                    </span>
+                  </span>
+                )}
               </p>
             </div>
             <p className="text-[10px] text-slate-400 font-bold mt-4 uppercase tracking-wider">
