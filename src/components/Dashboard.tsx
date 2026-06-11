@@ -837,7 +837,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     return [
       {
         id: '1',
-        name: 'Ahsan Shabbir',
+        name: appUser?.fullName || 'Ahsan Shabbir',
         email: appUser?.email || 'ahsan.shabbir292@gmail.com',
         role: 'owner',
         avatar_url: null,

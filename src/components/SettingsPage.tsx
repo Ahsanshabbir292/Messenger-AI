@@ -201,7 +201,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 py-2 border-b border-slate-50">
                 <span className="text-slate-500 font-semibold text-xs sm:text-sm">Owner</span>
-                <span className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight">{(userProfile?.name || appUser?.fullName || "Ahsan Shabbir")}</span>
+                <span className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight">{(appUser?.fullName || userProfile?.name || "Ahsan Shabbir")}</span>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 py-2">
                 <span className="text-slate-500 font-semibold text-xs sm:text-sm">Created</span>
@@ -340,8 +340,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <h3 className="text-base sm:text-lg font-bold text-slate-900">Profile</h3>
               <button 
                 onClick={() => {
-                  setEditProfileName(userProfile?.name || "Ahsan Shabbir");
-                  setEditProfileEmail(userProfile?.email || "ahsan.shabbir292@gmail.com");
+                  setEditProfileName(appUser?.fullName || userProfile?.name || "Ahsan Shabbir");
+                  setEditProfileEmail(appUser?.email || userProfile?.email || "ahsan.shabbir292@gmail.com");
                   setIsEditProfileModalOpen(true);
                 }}
                 className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-lg sm:rounded-xl transition-all cursor-pointer border-none"
@@ -352,11 +352,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             <div className="p-5 sm:p-6 md:p-8 space-y-4 sm:space-y-6 text-left">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 py-2 border-b border-slate-50 last:border-b-0 pb-3">
                 <span className="text-slate-500 font-semibold text-xs sm:text-sm">Name</span>
-                <span className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight">{userProfile?.name || "Ahsan Shabbir"}</span>
+                <span className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight">{appUser?.fullName || userProfile?.name || "Ahsan Shabbir"}</span>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 py-2 border-b border-slate-50 last:border-b-0 pb-3">
                 <span className="text-slate-500 font-semibold text-xs sm:text-sm">Email</span>
-                <span className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight">{userProfile?.email || "ahsan.shabbir292@gmail.com"}</span>
+                <span className="text-slate-900 font-bold text-xs sm:text-sm tracking-tight">{appUser?.email || userProfile?.email || "ahsan.shabbir292@gmail.com"}</span>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 sm:gap-4 py-2 border-b border-slate-50 last:border-b-0 pb-3">
                 <span className="text-slate-500 font-semibold text-xs sm:text-sm">Email verified</span>
