@@ -204,9 +204,10 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
   // Disconnect Facebook Action
   const handleDisconnectFacebook = async (email: string) => {
     if (!window.confirm(`Warning: Are you sure you want to disconnect Facebook for ${email}? This will delete connected profiles, pages, and cached credentials.`)) return;
+    if (!window.confirm(`DOUBLE CONFIRMATION:\nThis action is irreversible and is the ONLY way a user's Facebook lock can be unlinked. It will permanently remove their facebook_locks entry, allowing them to connect a new Facebook account.\n\nAre you sure you want to proceed?`)) return;
     try {
       await axios.post(`/api/admin/users/${encodeURIComponent(email)}/disconnect-facebook`);
-      addToast(`Facebook connection disconnected for ${email}`, "success");
+      addToast(`Facebook connection disconnected and lock removed for ${email}`, "success");
       handleRefresh();
       if (selectedUser?.email === email) {
         viewUserDetails(email);
@@ -1455,11 +1456,14 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                   </button>
                   <button
                     onClick={() => handleDisconnectFacebook(selectedUser.email)}
-                    className="py-2.5 px-3 bg-orange-600/10 hover:bg-orange-600 text-orange-300 hover:text-white border border-orange-500/20 hover:border-transparent text-[10px] font-extrabold rounded-2xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    className="py-2.5 px-3 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 hover:border-transparent text-[10px] font-extrabold rounded-2xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ring-2 ring-rose-500/20"
                   >
-                    🔌 Disconnect FB
+                    🔌 Disconnect & Unlock FB
                   </button>
                 </div>
+                <p className="text-[10px] text-slate-400 leading-relaxed font-semibold text-left">
+                  <span className="text-rose-400 font-bold">⚠️ Security Notice:</span> Disconnecting a user's Facebook account here is the **only** way to remove their permanent one-to-one lock. This action automatically deletes their lock record, freeing the Facebook profile to be connected elsewhere.
+                </p>
               </div>
             </div>
 

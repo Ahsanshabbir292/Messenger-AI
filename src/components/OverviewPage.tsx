@@ -12,15 +12,15 @@ interface OverviewPageProps {
   broadcastsHistory: any[];
   workspaceCredits: Record<string, number>;
   currentWorkspaceId: string;
-  currentPlan: 'trial' | 'architect' | 'empire' | 'expired';
+  currentPlan: any;
   userProfile: any;
   appUser: any;
   syncing: boolean;
   handleSyncPages: () => void | Promise<void>;
   setActiveTab: (tab: string) => void;
-  setBillingSubView: (view: 'list' | 'buy' | 'history') => void;
+  setBillingSubView: (view: any) => void;
   addToast: (message: string, type?: 'success' | 'err' | 'info') => void;
-  setCurrentPlan?: (plan: 'trial' | 'architect' | 'empire' | 'expired') => void;
+  setCurrentPlan?: (plan: any) => void;
   onUpgradePlan?: () => void;
   conversations?: any[];
 }
@@ -113,7 +113,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
       )}
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 sm:gap-6">
         {/* Active Pages */}
         <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
           <div className="p-4 sm:p-5 flex items-center gap-4 flex-1">
@@ -162,22 +162,6 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           </div>
         </div>
 
-        {/* Credit Balance */}
-        <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
-          <div className="p-4 sm:p-5 flex items-center gap-4 flex-1">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#FEF9E7] rounded-xl flex items-center justify-center shrink-0">
-              <CircleDollarSign className="w-5 h-5 sm:w-6 sm:h-6 text-[#F59E0B]" />
-            </div>
-            <div>
-              <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Credit Balance</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">${(workspaceCredits[currentWorkspaceId] || 0.00).toFixed(2)}</h4>
-            </div>
-          </div>
-          <button onClick={() => setActiveTab('billing')} className="px-4 sm:px-5 py-3 bg-slate-50/50 border-t border-slate-100 text-indigo-600 text-[10px] sm:text-xs font-semibold flex items-center gap-1 hover:bg-slate-50 transition-colors">
-            View billing <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
         {/* Total Broadcasts */}
         <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
           <div className="p-4 sm:p-5 flex items-center gap-4 flex-1">
@@ -211,6 +195,7 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
         </div>
       </div>
 
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8">
         {/* Left Area: Page Status */}
         <div className="lg:col-span-8 space-y-6 sm:space-y-8">
@@ -221,13 +206,14 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
                 <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
                   <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Preview State:</span>
                   <select
-                    value={currentPlan}
+                    value={currentPlan || ""}
                     onChange={(e) => {
                       setCurrentPlan(e.target.value as any);
                       addToast(`Switched page status preview to: ${e.target.value.toUpperCase()}`, "info");
                     }}
                     className="text-[10px] font-black text-slate-700 bg-transparent border-none outline-none cursor-pointer focus:ring-0 p-0"
                   >
+                    <option value="" disabled>Select plan...</option>
                     <option value="trial">Free Trial</option>
                     <option value="architect">Architect Plan</option>
                     <option value="empire">Empire Plan</option>

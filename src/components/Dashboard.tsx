@@ -420,14 +420,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     selectedPageIdsRef.current = selectedPageIds;
   }, [selectedPageIds]);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
-  const [currentPlan, setCurrentPlan] = useState<'trial' | 'architect' | 'empire' | 'expired'>(() => {
-    const saved = localStorage.getItem('current_plan_v1');
-    return (saved as any) || 'trial';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('current_plan_v1', currentPlan);
-  }, [currentPlan]);
+  const [currentPlan, setCurrentPlan] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedPage && pages.length > 0 && selectedPageIds.length > 0) {
@@ -991,7 +984,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     setIsBillingLoading(true);
     try {
       const res = await axios.get('/api/billing/data');
-      setBillingData(res.data);
+      if (res.data) {
+        setCreditBalance(res.data.creditBalance !== undefined ? res.data.creditBalance : 0);
+        setCurrentPlan(res.data.currentPlan || null);
+      }
     } catch (err) {
       console.error("Failed to fetch billing data", err);
     } finally {
@@ -1241,6 +1237,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       }
     } catch (err: any) {
       console.error("[Workspace Sync] Failed to validate workspace membership:", err);
+      if (err.response && (err.response.status === 401 || err.response.status === 403 || err.response.status === 404)) {
+        onLogout?.();
+      }
     }
   }, [appUser?.email, currentWorkspaceId, onUserUpdate]);
 
@@ -4744,38 +4743,11 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
 
           {activeTab === 'billing' && (
             <BillingPage
-              billingSubView={billingSubView}
-              setBillingSubView={setBillingSubView}
-              isBillingLoading={isBillingLoading}
-              billingData={billingData}
-              pages={pages}
-              selectedOrderId={selectedOrderId}
-              setSelectedOrderId={setSelectedOrderId}
-              buySelectedPageIds={buySelectedPageIds}
-              setBuySelectedPageIds={setBuySelectedPageIds}
-              searchPageQuery={searchPageQuery}
-              setSearchPageQuery={setSearchPageQuery}
-              billingDiscountCode={billingDiscountCode}
-              setBillingDiscountCode={setBillingDiscountCode}
-              promoError={promoError}
-              setPromoError={setPromoError}
-              appliedPromo={appliedPromo}
-              setAppliedPromo={setAppliedPromo}
-              cardholderName={cardholderName}
-              setCardholderName={setCardholderName}
-              cardNumber={cardNumber}
-              setCardNumber={setCardNumber}
-              cardExpiry={cardExpiry}
-              setCardExpiry={setCardExpiry}
-              cardCvc={cardCvc}
-              setCardCvc={setCardCvc}
-              isProcessingPayment={isProcessingPayment}
               appUser={appUser}
-              handleCreateOrder={handleCreateOrder}
-              handleDeleteOrder={handleDeleteOrder}
-              handleEditOrder={handleEditOrder}
-              handlePayOrder={handlePayOrder}
+              creditBalance={creditBalance}
+              currentPlan={currentPlan}
               fetchBillingData={fetchBillingData}
+              addToast={addToast}
             />
           )}
 

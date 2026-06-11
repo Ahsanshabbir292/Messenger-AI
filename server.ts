@@ -2335,16 +2335,16 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
 
     const eventName = req.body.meta?.event_name;
-    if (eventName === "order_created" || eventName === "subscription_created") {
-      const orderId = req.body.meta?.custom_data?.order_id;
-      const workspaceId = req.body.meta?.custom_data?.workspace_id;
+    if (eventName === "order_created" || eventName === "subscription_created" || eventName === "subscription_payment_success") {
+      const customData = req.body.meta?.custom_data || req.body.data?.attributes?.custom_data || {};
+      const userId = customData.user_id || customData.userId || customData.workspace_id || customData.workspaceId;
 
-      if (!orderId || !workspaceId) {
-        console.warn("[Lemon Webhook] Missing order_id or workspace_id:", { orderId, workspaceId });
-        return res.status(200).json({ message: "No custom meta data to process" });
+      if (!userId) {
+        console.warn("[Lemon Webhook] Missing custom user_id in payload:", JSON.stringify(customData));
+        return res.status(200).json({ message: "No custom user_id to process" });
       }
 
-      console.log(`[Lemon Webhook] Processing event=${eventName} for orderId=${orderId} workspaceId=${workspaceId}`);
+      console.log(`[Lemon Webhook] Processing event=${eventName} for userId=${userId}`);
 
       const db = await getDb();
       if (!db) {
@@ -2352,57 +2352,75 @@ Super-administrative console restricted to permitted accounts to audit system ac
       }
 
       try {
-        const userRef = db.collection("users").doc(workspaceId);
+        const userRef = db.collection("users").doc(userId);
         const userDoc = await userRef.get();
         if (!userDoc.exists) {
-          console.error(`[Lemon Webhook] User not found for workspaceId=${workspaceId}`);
+          console.error(`[Lemon Webhook] User not found for userId=${userId}`);
           return res.status(404).json({ error: "User not found" });
         }
 
-        const userData = userDoc.data();
-        const billing = userData?.billing || { subscriptions: {}, orders: [] };
-        if (!billing.subscriptions) billing.subscriptions = {};
-        if (!billing.orders) billing.orders = [];
+        const userData = userDoc.data() || {};
+        let creditBalance = userData.creditBalance !== undefined ? userData.creditBalance : 5000.0;
 
-        const orderIndex = billing.orders.findIndex((o: any) => o.id === orderId);
-        if (orderIndex === -1) {
-          console.error(`[Lemon Webhook] Order ${orderId} not found for user ${workspaceId}`);
-          return res.status(404).json({ error: "Order not found" });
-        }
+        const currentPlanId = customData.plan_id || customData.planId;
+        const currentPackId = customData.pack_id || customData.packId;
 
-        const o = billing.orders[orderIndex];
-        o.status = "Paid";
-        o.billing_period_start = new Date().toISOString();
-        o.billing_period_end = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        let updatedData: any = {};
 
-        // Activate or extend page subscriptions in this order
-        const now = new Date();
-        for (const orderPage of o.pages) {
-          const pageId = orderPage.id;
-          const currentSub = billing.subscriptions[pageId] || {
-            page_id: pageId,
-            name: orderPage.name,
-            status: "Trial",
-            trial_ends_at: null,
-            subscription_ends_at: null
-          };
-
-          let newEnd: Date;
-          if (currentSub.subscription_ends_at && new Date(currentSub.subscription_ends_at) > now) {
-            newEnd = new Date(new Date(currentSub.subscription_ends_at).getTime() + 30 * 24 * 60 * 60 * 1000);
-          } else {
-            newEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        if (currentPlanId) {
+          // It's a Subscription Plan Purchase
+          const addedCredits = PLAN_CREDITS[currentPlanId] || 0;
+          updatedData.plan = currentPlanId;
+          updatedData.creditBalance = creditBalance + addedCredits;
+          updatedData.planActivatedAt = new Date().toISOString();
+          console.log(`[Lemon Webhook] Processed Plan planId=${currentPlanId} adding ${addedCredits} credits to user ${userId}`);
+        } else if (currentPackId) {
+          // It's a Credit Pack Purchase
+          const packDef = CREDIT_PACK_PRICES[currentPackId];
+          const addedCredits = packDef ? packDef.credits : 0;
+          updatedData.creditBalance = creditBalance + addedCredits;
+          console.log(`[Lemon Webhook] Processed Credit Pack packId=${currentPackId} adding ${addedCredits} credits to user ${userId}`);
+        } else {
+          // Fallback to check product IDs from payload attributes just in case
+          const productIdStr = String(req.body.data?.attributes?.product_id || req.body.data?.attributes?.variant_id || '');
+          
+          let foundPlanId: string | null = null;
+          for (const [key, val] of Object.entries(PLAN_PRODUCT_IDS)) {
+            if (productIdStr === val || productIdStr.toLowerCase() === key.toLowerCase() || req.body.data?.attributes?.product_name?.toLowerCase()?.includes(key.toLowerCase())) {
+              foundPlanId = key;
+              break;
+            }
           }
 
-          currentSub.subscription_ends_at = newEnd.toISOString();
-          currentSub.status = "Active";
-          billing.subscriptions[pageId] = currentSub;
+          let foundPackId: string | null = null;
+          for (const [key, val] of Object.entries(PACK_PRODUCT_IDS)) {
+            if (productIdStr === val || productIdStr.toLowerCase() === key.toLowerCase() || req.body.data?.attributes?.product_name?.toLowerCase()?.includes(key.replace('_', '').toLowerCase())) {
+              foundPackId = key;
+              break;
+            }
+          }
+
+          if (foundPlanId) {
+            const addedCredits = PLAN_CREDITS[foundPlanId] || 0;
+            updatedData.plan = foundPlanId;
+            updatedData.creditBalance = creditBalance + addedCredits;
+            updatedData.planActivatedAt = new Date().toISOString();
+            console.log(`[Lemon Webhook] Fallback match Plan product: planId=${foundPlanId} adding ${addedCredits} credits to user ${userId}`);
+          } else if (foundPackId) {
+            const packDef = CREDIT_PACK_PRICES[foundPackId];
+            const addedCredits = packDef ? packDef.credits : 0;
+            updatedData.creditBalance = creditBalance + addedCredits;
+            console.log(`[Lemon Webhook] Fallback match Pack product: packId=${foundPackId} adding ${addedCredits} credits to user ${userId}`);
+          } else {
+            console.warn("[Lemon Webhook] Could not determine purchased product or pack. Product ID received:", productIdStr);
+            return res.status(200).json({ message: "Could not identify product in payload" });
+          }
         }
 
-        await userRef.update({ billing });
-        console.log(`[Lemon Webhook] Successfully activated pages and set Order PAID for ${orderId}`);
+        await userRef.update(updatedData);
+        console.log(`[Lemon Webhook] Successfully updated user data in Firestore for ${userId}`);
       } catch (err: any) {
-        console.error("[Lemon Webhook] DB error updating order:", err.message);
+        console.error("[Lemon Webhook] DB error updating user:", err.message);
         return res.status(500).json({ error: "Database operation failed: " + err.message });
       }
     } else {
@@ -3432,15 +3450,169 @@ Super-administrative console restricted to permitted accounts to audit system ac
     const db = await getDb();
     if (!db) return false;
 
-    // Bypassing duplicate checking for simulated/test local accounts to allow fluid testing across multiple workspaces/users
-    if (fbUserId.startsWith("sim_") || fbUserId.startsWith("simulated_")) {
-      console.log(`[FB-DuplicateCheck] Bypassing duplicate checking for simulated/sandbox Facebook account: ${fbName} (${fbUserId})`);
-      return false;
-    }
-
     const normalizedUserEmail = userEmail.trim().toLowerCase();
     const normalizedFbUserId = String(fbUserId).trim();
 
+    const sendBlockedHtml = (ownerMsg: string) => {
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Facebook Connection Blocked</title>
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <style>
+            body {
+              font-family: 'Inter', -apple-system, sans-serif;
+              background-color: #f8fafc;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              color: #0f172a;
+            }
+            .card {
+              background: white;
+              padding: 2.5rem;
+              border-radius: 1rem;
+              box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+              max-width: 440px;
+              width: 100%;
+              text-align: center;
+              border: 1px solid #fee2e2;
+            }
+            .icon-container {
+              width: 64px;
+              height: 64px;
+              background-color: #fee2e2;
+              color: #ef4444;
+              border-radius: 50%;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              margin: 0 auto 1.5rem;
+            }
+            .icon {
+              width: 32px;
+              height: 32px;
+            }
+            h2 {
+              margin: 0 0 1rem;
+              font-size: 1.5rem;
+              font-weight: 700;
+              color: #991b1b;
+            }
+            p {
+              color: #4b5563;
+              font-size: 0.95rem;
+              line-height: 1.6;
+              margin: 0 0 1.75rem;
+            }
+            .btn {
+              display: inline-block;
+              width: 100%;
+              padding: 0.875rem 1.5rem;
+              background-color: #dc2626;
+              color: white;
+              border: none;
+              border-radius: 0.5rem;
+              font-weight: 600;
+              font-size: 1rem;
+              cursor: pointer;
+              transition: background-color 0.2s;
+              text-decoration: none;
+              box-sizing: border-box;
+            }
+            .btn:hover {
+              background-color: #b91c1c;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="icon-container">
+              <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </div>
+            <h2>Connection Failed</h2>
+            <div style="text-align: left; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+              <span style="font-size: 11px; font-weight: 800; color: #b91c1c; text-transform: uppercase;">Facebook Profile Mapped Elsewhere</span>
+              <p style="font-size: 13px; color: #7f1d1d; margin: 4px 0 0 0;">
+                The Facebook profile (<strong>${fbName}</strong>) is already connected to <strong>${ownerMsg}</strong>.
+              </p>
+            </div>
+            <p style="font-size: 13px; text-align: left; color: #4b5563;">
+              A Facebook profile can only be linked to a single workspace at a time. If you wish to connect to this workspace, please choose or sign into another Facebook account.
+            </p>
+            
+            <button onclick="closeAndReturn()" class="btn">Return / Dismiss</button>
+          </div>
+  
+          <script>
+            try {
+              localStorage.setItem('FB_AUTH_ERROR', JSON.stringify({
+                message: 'Connection failed: This Facebook account is already connected to another workspace.',
+                timestamp: Date.now()
+              }));
+            } catch (e) {
+              console.error(e);
+            }
+  
+            if (window.opener) {
+              try {
+                window.opener.postMessage({ 
+                  type: 'FB_AUTH_ERROR', 
+                  message: 'Connection failed: This Facebook account is already connected to another workspace.' 
+                }, '*');
+              } catch (e) {
+                console.error(e);
+              }
+            }
+  
+            function closeAndReturn() {
+              if (window.opener) {
+                window.close();
+              } else {
+                window.location.href = "/";
+              }
+            }
+          </script>
+        </body>
+        </html>
+      `);
+    };
+
+    // STEP 1: Check permanent lock collection first (fast lookup)
+    try {
+      const lockDoc = await db.collection("facebook_locks").doc(normalizedFbUserId).get();
+      if (lockDoc.exists) {
+        const lockData = lockDoc.data();
+        const lockedEmail = (lockData?.lockedToEmail || "").toLowerCase().trim();
+        
+        // If locked to a DIFFERENT user → always block
+        if (lockedEmail !== normalizedUserEmail) {
+          const ownerMsg = `another account (${lockedEmail})`;
+          sendBlockedHtml(ownerMsg);
+          return true;
+        }
+        
+        // If locked to the SAME user but different workspace → also block (permanent lock means one account, one workspace)
+        if (lockData?.workspaceId && String(lockData.workspaceId) !== String(workspaceId)) {
+          const ownerMsg = `your workspace "${lockData?.workspaceName || 'Another Workspace'}"`;
+          sendBlockedHtml(ownerMsg);
+          return true;
+        }
+
+        // Same user and same workspace → allow it to update/refresh tokens under Case B
+        return false;
+      }
+    } catch (e: any) {
+      console.warn("[FB-Lock] Lock collection check failed:", e.message);
+    }
+
+    // STEP 2: Fallback — scan all users
     try {
       const usersSnap = await db.collection("users").get();
       for (const doc of usersSnap.docs) {
@@ -3503,141 +3675,14 @@ Super-administrative console restricted to permitted accounts to audit system ac
           const isSameWorkspace = String(match.wsId) === String(workspaceId);
 
           // We block if it is a different user entirely OR if it represents a different workspace
-          if (!isSameUser || !isSameWorkspace) {
+          // If the user requested us to use 'if (true)' as the condition:
+          if (true) { // Always block — Facebook accounts are permanently locked once connected
             const ownerMsg = isSameUser 
               ? `your workspace "${match.wsName}"` 
               : `another user (${doc.id})`;
 
             console.log(`[FB-DuplicateCheck] Connection blocked. fbUserId=${fbUserId} is already connected to user=${doc.id}, workspaceId=${match.wsId}`);
-
-            res.send(`
-              <!DOCTYPE html>
-              <html>
-              <head>
-                <title>Facebook Connection Blocked</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-                <style>
-                  body {
-                    font-family: 'Inter', -apple-system, sans-serif;
-                    background-color: #f8fafc;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    min-height: 100vh;
-                    margin: 0;
-                    color: #0f172a;
-                  }
-                  .card {
-                    background: white;
-                    padding: 2.5rem;
-                    border-radius: 1rem;
-                    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
-                    max-width: 440px;
-                    width: 100%;
-                    text-align: center;
-                    border: 1px solid #fee2e2;
-                  }
-                  .icon-container {
-                    width: 64px;
-                    height: 64px;
-                    background-color: #fee2e2;
-                    color: #ef4444;
-                    border-radius: 50%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    margin: 0 auto 1.5rem;
-                  }
-                  .icon {
-                    width: 32px;
-                    height: 32px;
-                  }
-                  h2 {
-                    margin: 0 0 1rem;
-                    font-size: 1.5rem;
-                    font-weight: 700;
-                    color: #991b1b;
-                  }
-                  p {
-                    color: #4b5563;
-                    font-size: 0.95rem;
-                    line-height: 1.6;
-                    margin: 0 0 1.75rem;
-                  }
-                  .btn {
-                    display: inline-block;
-                    width: 100%;
-                    padding: 0.875rem 1.5rem;
-                    background-color: #dc2626;
-                    color: white;
-                    border: none;
-                    border-radius: 0.5rem;
-                    font-weight: 600;
-                    font-size: 1rem;
-                    cursor: pointer;
-                    transition: background-color 0.2s;
-                    text-decoration: none;
-                    box-sizing: border-box;
-                  }
-                  .btn:hover {
-                    background-color: #b91c1c;
-                  }
-                </style>
-              </head>
-              <body>
-                <div class="card">
-                  <div class="icon-container">
-                    <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                  </div>
-                  <h2>Connection Failed</h2>
-                  <div style="text-align: left; background-color: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 12px; margin-bottom: 20px;">
-                    <span style="font-size: 11px; font-weight: 800; color: #b91c1c; text-transform: uppercase;">Facebook Profile Mapped Elsewhere</span>
-                    <p style="font-size: 13px; color: #7f1d1d; margin: 4px 0 0 0;">
-                      The Facebook profile (<strong>${fbName}</strong>) is already connected to <strong>${ownerMsg}</strong>.
-                    </p>
-                  </div>
-                  <p style="font-size: 13px; text-align: left; color: #4b5563;">
-                    A Facebook profile can only be linked to a single workspace at a time. If you wish to connect to this workspace, please choose or sign into another Facebook account.
-                  </p>
-                  
-                  <button onclick="closeAndReturn()" class="btn">Return / Dismiss</button>
-                </div>
-        
-                <script>
-                  try {
-                    localStorage.setItem('FB_AUTH_ERROR', JSON.stringify({
-                      message: 'Connection failed: This Facebook account is already connected to another workspace.',
-                      timestamp: Date.now()
-                    }));
-                  } catch (e) {
-                    console.error(e);
-                  }
-        
-                  if (window.opener) {
-                    try {
-                      window.opener.postMessage({ 
-                        type: 'FB_AUTH_ERROR', 
-                        message: 'Connection failed: This Facebook account is already connected to another workspace.' 
-                      }, '*');
-                    } catch (e) {
-                      console.error(e);
-                    }
-                  }
-        
-                  function closeAndReturn() {
-                    if (window.opener) {
-                      window.close();
-                    } else {
-                      window.location.href = "/";
-                    }
-                  }
-                </script>
-              </body>
-              </html>
-            `);
+            sendBlockedHtml(ownerMsg);
             return true;
           }
         }
@@ -4029,6 +4074,22 @@ Super-administrative console restricted to permitted accounts to audit system ac
         
         // Invalidate Facebook config cache immediately for simulated portal connection
         clearFbDataCache(userEmail);
+
+        // Save permanent Facebook lock for simulated logins too
+        try {
+          const workspaceName = snap.exists ? (snap.data()?.workspaces?.find((w: any) => String(w.id) === String(workspaceId || "1"))?.name || "Another Workspace") : "Another Workspace";
+          await db.collection("facebook_locks").doc(String(fbUserId)).set({
+            fbUserId: String(fbUserId),
+            fbName: fbName || "",
+            lockedToEmail: userEmail,
+            lockedAt: new Date().toISOString(),
+            workspaceId: workspaceId || "",
+            workspaceName: workspaceName
+          });
+          console.log(`[FB-Lock-Sim] Simulated Facebook account ${fbUserId} permanently locked to ${userEmail}`);
+        } catch (lockErr: any) {
+          console.warn("[FB-Lock-Sim] Failed to write lock record:", lockErr.message);
+        }
       } catch (err: any) {
         console.error("[FB-Simulator] Error saving simulated payload in DB:", err.message);
       }
@@ -4457,6 +4518,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
         let mergedPages = [...pages];
         let existingPageIdsSet = new Set(pages.map((p: any) => p.id));
         let preservedSelectedIds: string[] = [];
+        let resolvedWorkspaceName = "Your Workspace";
 
         try {
           const userDocRef = db.collection("users").doc(userEmail);
@@ -4473,6 +4535,8 @@ Super-administrative console restricted to permitted accounts to audit system ac
                 existingPageIdsSet.add(dbP.id);
               }
             }
+
+            resolvedWorkspaceName = u?.workspaces?.find((w: any) => String(w.id) === String(workspaceId || "1"))?.name || "Your Workspace";
           }
         } catch (e: any) {
           console.warn("[FB Pages Sync] Failed to read existing pages for merge:", e.message);
@@ -4507,6 +4571,21 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
           // Invalidate the cache immediately so that subsequent requests fetch the updated live configuration
           clearFbDataCache(userEmail);
+
+          // Save permanent Facebook lock
+          try {
+            await db.collection("facebook_locks").doc(String(fbUserId)).set({
+              fbUserId: String(fbUserId),
+              fbName: fbUserName || "",
+              lockedToEmail: userEmail,
+              lockedAt: new Date().toISOString(),
+              workspaceId: workspaceId || "",
+              workspaceName: resolvedWorkspaceName
+            });
+            console.log(`[FB-Lock] Facebook account ${fbUserId} permanently locked to ${userEmail}`);
+          } catch (lockErr: any) {
+            console.warn("[FB-Lock] Failed to write lock record:", lockErr.message);
+          }
         }
       }
 
@@ -5118,6 +5197,37 @@ Super-administrative console restricted to permitted accounts to audit system ac
   });
 
   // --- BILLING & SUBSCRIPTIONS API ---
+
+  const PLAN_CREDITS: Record<string, number> = {
+    starter: 30000,
+    growth: 300000,
+    pro: 800000,
+    business: 2000000,
+    enterprise: 4500000,
+  };
+
+  const PLAN_PRODUCT_IDS: Record<string, string> = {
+    starter:    "STARTER_PRODUCT_ID",
+    growth:     "GROWTH_PRODUCT_ID",
+    pro:        "PRO_PRODUCT_ID",
+    business:   "BUSINESS_PRODUCT_ID",
+    enterprise: "ENTERPRISE_PRODUCT_ID",
+  };
+
+  const PACK_PRODUCT_IDS: Record<string, string> = {
+    pack_50k:   "PACK_50K_PRODUCT_ID",
+    pack_200k:  "PACK_200K_PRODUCT_ID",
+    pack_600k:  "PACK_600K_PRODUCT_ID",
+    pack_1500k: "PACK_1500K_PRODUCT_ID",
+  };
+
+  const CREDIT_PACK_PRICES: Record<string, { credits: number; price: number }> = {
+    pack_50k:   { credits: 50000,   price: 5  },
+    pack_200k:  { credits: 200000,  price: 15 },
+    pack_600k:  { credits: 600000,  price: 35 },
+    pack_1500k: { credits: 1500000, price: 75 },
+  };
+
   app.get("/api/billing/data", async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
@@ -5131,241 +5241,17 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const userRef = db.collection("users").doc(userEmail);
       const userDoc = await userRef.get();
       const userData = userDoc.exists ? userDoc.data() : {};
-      
-      const billing = userData.billing || { subscriptions: {}, orders: [] };
-      if (!billing.subscriptions) billing.subscriptions = {};
-      if (!billing.orders) billing.orders = [];
 
-      // Sync active connected FB pages into our subscriptions object
-      const fbData = await getFacebookData(req);
-      const fbPages = fbData?.pages || [];
+      const creditBalance = userData?.creditBalance !== undefined ? userData.creditBalance : 5000.0;
+      const currentPlan = userData?.plan || null;
 
-      let hasChanges = false;
-      for (const page of fbPages) {
-        if (!billing.subscriptions[page.id]) {
-          // Initialize page default free trial (3 days from now)
-          const trialEnds = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
-          billing.subscriptions[page.id] = {
-            page_id: page.id,
-            name: page.name,
-            status: "Trial",
-            trial_ends_at: trialEnds,
-            subscription_ends_at: null
-          };
-          hasChanges = true;
-        }
-      }
-
-      // Dynamically recalculate trial/active/expired status based on current timestamps
-      const now = new Date();
-      for (const pageId of Object.keys(billing.subscriptions)) {
-        const sub = billing.subscriptions[pageId];
-        
-        let targetStatus = sub.status || "Trial";
-        if (targetStatus !== "Disabled") {
-          if (sub.subscription_ends_at && new Date(sub.subscription_ends_at) > now) {
-            targetStatus = "Active";
-          } else {
-            // For any trial/expired status where there's no paid subscription, ensure it is active with 3 days remaining
-            const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
-            sub.trial_ends_at = threeDaysFromNow;
-            targetStatus = "Trial";
-            hasChanges = true;
-          }
-        }
-        
-        if (sub.status !== targetStatus) {
-          sub.status = targetStatus;
-          hasChanges = true;
-        }
-      }
-
-      if (hasChanges && userDoc.exists) {
-        await userRef.update({ billing });
-      } else if (hasChanges && !userDoc.exists) {
-        await userRef.set({ email: userEmail, billing, ip: req.ip, createdAt: new Date() });
-      }
-
-      res.json(billing);
+      res.json({
+        creditBalance,
+        currentPlan
+      });
     } catch (err: any) {
       console.error("[Billing API] Error getting billing details:", err.message);
       res.status(500).json({ error: "Failed to fetch billing data", details: err.message });
-    }
-  });
-
-  app.post("/api/billing/order", async (req, res) => {
-    const { pageIds, discountCode } = req.body;
-    if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
-      return res.status(400).json({ error: "No pages selected for order" });
-    }
-
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-    const userEmail = await getResolvedUserEmail(req);
-    if (!userEmail || userEmail === "anonymous") {
-      return res.status(401).json({ error: "Unauthorized. Please log in first." });
-    }
-
-    try {
-      const fbData = await getFacebookData(req);
-      const fbPages = fbData?.pages || [];
-
-      const userRef = db.collection("users").doc(userEmail);
-      const userDoc = await userRef.get();
-      const userData = userDoc.exists ? userDoc.data() : {};
-      
-      const billing = userData.billing || { subscriptions: {}, orders: [] };
-      if (!billing.subscriptions) billing.subscriptions = {};
-      if (!billing.orders) billing.orders = [];
-
-      // Calculate base pricing
-      const basePrice = 10; // $10 per page
-      let subtotal = pageIds.length * basePrice;
-      let discount = 0;
-
-      // Promo discount validation
-      const codeUpper = discountCode?.trim().toUpperCase();
-      if (codeUpper === "SAVE50" || codeUpper === "WELCOME50") {
-        discount = subtotal * 0.5; // 50% discount
-      } else if (codeUpper === "SAVE20") {
-        discount = subtotal * 0.2; // 20% discount
-      } else if (codeUpper === "VIP90") {
-        discount = subtotal * 0.9; // 90% discount
-      }
-
-      const totalAmount = Math.max(0, subtotal - discount);
-
-      // Create unique order
-      const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
-      const newOrder = {
-        id: orderId,
-        workspace_id: userEmail,
-        status: "Awaiting Payment",
-        pages: pageIds.map(pid => {
-          const matchedPage = fbPages.find((p: any) => p.id === pid) || billing.subscriptions[pid];
-          return {
-            id: pid,
-            name: matchedPage?.name || `Page ${pid}`,
-            price: basePrice
-          };
-        }),
-        amount: totalAmount,
-        created_at: new Date().toISOString(),
-        billing_period_start: new Date().toISOString(),
-        billing_period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        discountCode: discountCode || null
-      };
-
-      billing.orders.push(newOrder);
-
-      if (userDoc.exists) {
-        await userRef.update({ billing });
-      } else {
-        await userRef.set({ email: userEmail, billing, ip: req.ip, createdAt: new Date() });
-      }
-
-      res.json({ success: true, order: newOrder });
-    } catch (err: any) {
-      console.error("[Billing API] Error creating order:", err.message);
-      res.status(500).json({ error: "Failed to create order", details: err.message });
-    }
-  });
-
-  app.post("/api/billing/order/:orderId/pay", async (req, res) => {
-    const { orderId } = req.params;
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-    const userEmail = await getResolvedUserEmail(req);
-    if (!userEmail || userEmail === "anonymous") {
-      return res.status(401).json({ error: "Unauthorized. Please log in first." });
-    }
-
-    try {
-      const userRef = db.collection("users").doc(userEmail);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-
-      const userData = userDoc.data();
-      const billing = userData.billing || { subscriptions: {}, orders: [] };
-      if (!billing.subscriptions) billing.subscriptions = {};
-      if (!billing.orders) billing.orders = [];
-
-      const orderIndex = billing.orders.findIndex((o: any) => o.id === orderId);
-      if (orderIndex === -1) return res.status(404).json({ error: "Order not found" });
-
-      const o = billing.orders[orderIndex];
-      o.status = "Paid";
-
-      // Activate or extend page subscriptions in this order
-      const now = new Date();
-      for (const orderPage of o.pages) {
-        const pageId = orderPage.id;
-        const currentSub = billing.subscriptions[pageId] || {
-          page_id: pageId,
-          name: orderPage.name,
-          status: "Trial",
-          trial_ends_at: null,
-          subscription_ends_at: null
-        };
-
-        // If subscription is currently active, extend it by 30 days. Otherwise, set it 30 days from now.
-        let newEnd: Date;
-        if (currentSub.subscription_ends_at && new Date(currentSub.subscription_ends_at) > now) {
-          newEnd = new Date(new Date(currentSub.subscription_ends_at).getTime() + 30 * 24 * 60 * 60 * 1000);
-        } else {
-          newEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        }
-
-        currentSub.subscription_ends_at = newEnd.toISOString();
-        currentSub.status = "Active";
-        billing.subscriptions[pageId] = currentSub;
-      }
-
-      await userRef.update({ billing });
-      res.json({ success: true, order: o });
-    } catch (err: any) {
-      console.error("[Billing API] Error paying order:", err.message);
-      res.status(500).json({ error: "Failed to process payment", details: err.message });
-    }
-  });
-
-  app.post("/api/billing/order/:orderId/delete", async (req, res) => {
-    const { orderId } = req.params;
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-    const userEmail = await getResolvedUserEmail(req);
-    if (!userEmail || userEmail === "anonymous") {
-      return res.status(401).json({ error: "Unauthorized. Please log in first." });
-    }
-
-    try {
-      const userRef = db.collection("users").doc(userEmail);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-
-      const userData = userDoc.data();
-      const billing = userData.billing || { subscriptions: {}, orders: [] };
-
-      // Filter out or cancel order
-      const orderIndex = billing.orders.findIndex((o: any) => o.id === orderId);
-      if (orderIndex === -1) return res.status(404).json({ error: "Order not found" });
-
-      // If already paid, mark Cancelled, otherwise splice
-      const order = billing.orders[orderIndex];
-      if (order.status === "Paid") {
-        order.status = "Cancelled";
-      } else {
-        billing.orders.splice(orderIndex, 1);
-      }
-
-      await userRef.update({ billing });
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("[Billing API] Error deleting order:", err.message);
-      res.status(500).json({ error: "Failed to delete order", details: err.message });
     }
   });
 
@@ -8097,6 +7983,19 @@ Write a realistic, short and natural response expressing your reaction, query, o
     }
   });
 
+  // Admin API to list all Facebook locks
+  app.get("/api/admin/facebook-locks", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    try {
+      const snap = await db.collection("facebook_locks").get();
+      const locks = snap.docs.map((d: any) => d.data());
+      res.json({ locks, total: locks.length });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to fetch locks", details: err.message });
+    }
+  });
+
   // Users Management - List
   app.get("/api/admin/users", verifyAdminMiddleware, async (req, res) => {
     const db = await getDb();
@@ -8410,6 +8309,26 @@ Write a realistic, short and natural response expressing your reaction, query, o
       }
 
       await userRef.update(updates);
+
+      // Also remove the permanent Facebook lock so the account can be re-connected freely
+      try {
+        const fbId = u?.facebook?.id || 
+          (u?.facebookWorkspaces ? (Object.values(u.facebookWorkspaces as any)[0] as any)?.id : null);
+        
+        if (fbId) {
+          await db.collection("facebook_locks").doc(String(fbId)).delete();
+          console.log(`[Admin] Permanent Facebook lock removed for fbId: ${fbId}`);
+        } else {
+          // Fallback: search locks by lockedToEmail to be absolutely thorough if legacy flat keys exist
+          const locksSnap = await db.collection("facebook_locks").where("lockedToEmail", "==", emailLower).get();
+          for (const lDoc of locksSnap.docs) {
+            await db.collection("facebook_locks").doc(lDoc.id).delete();
+            console.log(`[Admin] Permanent Facebook lock removed via email lookup for fbId: ${lDoc.id}`);
+          }
+        }
+      } catch (lockDeleteErr: any) {
+        console.warn("[Admin] Failed to delete Facebook lock record:", lockDeleteErr.message);
+      }
 
       // Invalidate memory cache so dashboard reads fresh disconnected state immediately
       clearFbDataCache(emailLower);

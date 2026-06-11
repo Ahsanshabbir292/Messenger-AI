@@ -177,27 +177,37 @@ export default function App() {
             navigateTo('/overview');
           }
         }
-      } catch (err) {
-        // Fallback: check if we have a robust local storage user we can trust
-        const saved = localStorage.getItem('current_app_user');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            if (parsed && parsed.email) {
-              setAppUser(parsed);
-              axios.defaults.headers.common['x-user-email'] = parsed.email;
-              if (currentPath === '/' || currentPath === '/signin' || currentPath === '/signup') {
-                navigateTo('/overview');
+      } catch (err: any) {
+        const isAuthError = err.response && (err.response.status === 401 || err.response.status === 403 || err.response.status === 404);
+        if (isAuthError) {
+          localStorage.removeItem('current_app_user');
+          delete axios.defaults.headers.common['x-user-email'];
+          setAppUser(null);
+          if (isDashboardRoute(currentPath) || currentPath === '/admin') {
+            navigateTo('/signin');
+          }
+        } else {
+          // Fallback: check if we have a robust local storage user we can trust (transient network errors only)
+          const saved = localStorage.getItem('current_app_user');
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved);
+              if (parsed && parsed.email) {
+                setAppUser(parsed);
+                axios.defaults.headers.common['x-user-email'] = parsed.email;
+                if (currentPath === '/' || currentPath === '/signin' || currentPath === '/signup') {
+                  navigateTo('/overview');
+                }
+                setLoading(false);
+                return;
               }
-              setLoading(false);
-              return;
-            }
-          } catch (e) {}
-        }
+            } catch (e) {}
+          }
 
-        // If trying to access protected dashboard, redirect to signin
-        if (isDashboardRoute(currentPath) || currentPath === '/admin') {
-          navigateTo('/signin');
+          // If trying to access protected dashboard, redirect to signin
+          if (isDashboardRoute(currentPath) || currentPath === '/admin') {
+            navigateTo('/signin');
+          }
         }
       } finally {
         setLoading(false);

@@ -216,6 +216,18 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <h3 className="text-base sm:text-lg font-bold text-slate-900">Facebook Connection</h3>
             </div>
             <div className="p-5 sm:p-6 md:p-8 space-y-4 sm:space-y-6 text-left">
+              {userProfile && (
+                <div className="bg-amber-50/70 border border-amber-200/60 rounded-xl p-4 flex items-start gap-3 text-amber-800 animate-in fade-in duration-300">
+                  <ShieldCheck className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-extrabold text-[13px] tracking-tight text-amber-950">Security Lock Enabled</p>
+                    <p className="text-xs text-amber-800/90 font-medium leading-relaxed">
+                      This Facebook connection is <strong>permanently locked and secured</strong> to your primary account to enforce secure 1-to-1 account mapping. For security purposes, this connection cannot be disconnected or changed from this settings dashboard. Only system administrators can perform a forced un-link.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 sm:w-14 sm:h-14 bg-indigo-750/10 rounded-full flex items-center justify-center overflow-hidden border border-slate-100 shadow-sm shrink-0">
@@ -315,179 +327,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
             </div>
           </div>
 
-          {/* SYSTEM EMAIL SETUP & DIAGNOSTICS CARD */}
-          <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-red-100 shadow-md overflow-hidden animate-none">
-            <div className="p-5 sm:p-6 md:p-8 border-b border-red-50 bg-red-50/10 flex justify-between items-center text-left">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-red-105 border border-red-200/50 flex items-center justify-center text-red-650">
-                  <Mail className="w-5 h-5 text-red-600" />
-                </div>
-                <div>
-                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">System Email Setup & Diagnostics</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-mono mt-0.5">Verification Services Diagnostics</p>
-                </div>
-              </div>
-              <button 
-                onClick={fetchEmailDebug}
-                disabled={emailLoading}
-                className="px-3 py-1.5 sm:px-4 sm:py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-lg sm:rounded-xl transition-all cursor-pointer border-none flex items-center gap-2"
-              >
-                <RefreshCw className={`w-3 h-3 ${emailLoading ? 'animate-spin' : ''}`} />
-                Refresh Status
-              </button>
-            </div>
 
-            <div className="p-5 sm:p-6 md:p-8 text-left space-y-6 sm:space-y-8">
-              {/* STATUS INDICATORS */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* RESEND */}
-                <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">Resend API</span>
-                    {emailDebug?.resend?.exists && !emailDebug?.resend?.isPlaceholder ? (
-                      <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 font-black text-[8px] tracking-widest px-2 py-0.5 rounded-full uppercase">AVAILABLE</span>
-                    ) : (
-                      <span className="bg-yellow-50 text-yellow-600 border border-yellow-105 font-black text-[8px] tracking-widest px-2 py-0.5 rounded-full uppercase">NOT READY</span>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-slate-500">API Key Mask:</p>
-                    <p className="font-mono text-xs text-slate-900 font-bold bg-white px-2 py-1.5 rounded border border-slate-100">
-                      {emailDebug?.resend?.exists 
-                        ? `${emailDebug.resend.prefix}... (${emailDebug.resend.length} chars)` 
-                        : "No key configured"}
-                    </p>
-                    {emailDebug?.resend?.isPlaceholder && (
-                      <p className="text-[10px] text-amber-600 font-bold mt-1">⚠️ Default demo key active (simulation mode only)</p>
-                    )}
-                  </div>
-                </div>
-
-                {/* SMTP GMAIL */}
-                <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 space-y-3">
-                  <div className="flex justify-between items-start">
-                    <span className="text-xs font-black uppercase text-slate-400 tracking-wider font-mono">Resend SMTP Relay</span>
-                    {emailDebug?.smtp?.passExists ? (
-                      <span className="bg-indigo-50 text-indigo-600 border border-indigo-100 font-black text-[8px] tracking-widest px-2 py-0.5 rounded-full uppercase">SMTP ACTIVE</span>
-                    ) : (
-                      <span className="bg-slate-50 text-slate-400 border border-slate-100 font-black text-[8px] tracking-widest px-2 py-0.5 rounded-full uppercase">NOT READY</span>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-xs font-semibold text-slate-500">Host / Outbound From:</p>
-                    <p className="font-mono text-xs text-slate-900 font-bold bg-white px-2 py-1.5 rounded border border-slate-100 truncate">
-                      {emailDebug?.smtp?.host || "smtp.resend.com"} ({emailDebug?.smtp?.fromEmail || "onboarding@resend.dev"})
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* CURRENT CONFIG WARNINGS (DETECTED FIXES) */}
-              <div className="p-4 sm:p-5 rounded-xl border border-red-100 bg-rose-50/5 space-y-3">
-                <h4 className="text-xs sm:text-sm font-black text-rose-950 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                  Resend Verification Code Issues Guide (Verification code na janay ki wajoohat)
-                </h4>
-                <div className="text-xs text-slate-600 space-y-4">
-                  {/* RESEND CHECK */}
-                  <div className="pl-4 border-l-2 border-slate-200">
-                    <p className="font-bold text-slate-800">1. Resend API Validation Mismatch ("API key is invalid")</p>
-                    <p className="mt-1">
-                      <strong>English:</strong> Ensure that you have configured your Resend API Key inside your development workspace environment variables settings. It must begin with <code className="bg-slate-100 px-1 py-0.5 rounded">re_</code> and be exactly 36 characters long.
-                    </p>
-                    <p className="mt-1 text-slate-500">
-                      <strong>Urdu:</strong> Meharbani karke check karein ke aap ne durust Resend API key apne environment variables mein daali hai. Key lazmi <code className="bg-slate-100 px-1 py-0.5 rounded">re_</code> se shuru hoti hai aur 36 characters ki hoti hai.
-                    </p>
-                  </div>
-
-                  {/* DOMAIN VERIFICATION CHECK */}
-                  <div className="pl-4 border-l-2 border-slate-200">
-                    <p className="font-bold text-slate-800">2. Sandbox Testing Limit (Verification emails not sending!)</p>
-                    <p className="mt-1">
-                      <strong>English:</strong> If you are using a new Resend key without verifying a custom domain, you are using Resend in Sandbox/Onboarding mode. Resend restricts Sandbox mode to <strong>only send emails to the email address used to register the Resend account itself</strong>. Unverified accounts cannot dispatch verification emails to other people. To send to any signup user, you must purchase/configure and verify your custom domain in your Resend account dashboard, and set its authorized sender email in the <code className="bg-slate-100 px-1 py-0.5 rounded">FROM_EMAIL</code> environment variable.
-                    </p>
-                    <p className="mt-1 text-slate-500">
-                      <strong>Urdu:</strong> Agar aap ne Resend dashboard mein apna custom domain verify nahi kiya, to aap Sandbox mode mein hain. Resend ka Sandbox mode <strong>sirf aap ki apni email par mail send kar sakta hai jis par aap ne Resend ka signup kiya tha</strong>. Kisi bhi naye user ko verification code send karne ke liye, Resend dashboard mein apna Domain verify karna lazmi hai, aur use <code className="bg-slate-100 px-1 py-0.5 rounded">FROM_EMAIL</code> variable mein configuration mein save karna lazmi hai.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* TEST EMAIL FORM */}
-              <div className="pt-5 border-t border-slate-100 text-left space-y-4">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900">Send Diagnostic Test Email</h4>
-                  <p className="text-[11px] text-slate-400 font-bold uppercase mt-0.5">Test your live configurations instantly</p>
-                </div>
-
-                <div className="flex flex-col sm:flex-row items-stretch gap-3">
-                  <div className="relative flex-1">
-                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 w-4 h-4" />
-                    <input 
-                      type="email" 
-                      placeholder="e.g. ahsan.shabbir292@gmail.com" 
-                      value={testEmail}
-                      onChange={(e) => setTestEmail(e.target.value)}
-                      className="w-full pl-10 pr-4 py-3 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500 transition-all font-medium text-slate-900 bg-white"
-                      disabled={testSending}
-                    />
-                  </div>
-                  <button
-                    onClick={handleSendTestEmail}
-                    disabled={testSending}
-                    className="px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-200 text-white font-black text-xs uppercase tracking-widest rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 border-none text-center"
-                  >
-                    {testSending ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 animate-spin" />
-                        Disbursing...
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-3.5 h-3.5" />
-                        Send Test Email
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* TEST RESULTS (TERMINAL VIEWER) */}
-                {testResult && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-950 text-slate-300 font-mono text-xs p-4 overflow-x-auto space-y-3">
-                    <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                      <span className="text-slate-400 font-bold uppercase text-[10px] tracking-wider flex items-center gap-1.5">
-                        <Server className="w-3 h-3 text-red-500" />
-                        Live Dispatch Logs
-                      </span>
-                      {testResult.success ? (
-                        <span className="text-emerald-400 font-black text-[9px] uppercase tracking-widest bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900">SUCCESS</span>
-                      ) : (
-                        <span className="text-red-400 font-black text-[9px] uppercase tracking-widest bg-red-950/50 px-2 py-0.5 rounded border border-red-900">FAILURE</span>
-                      )}
-                    </div>
-                    
-                    <div className="space-y-1 max-h-60 overflow-y-auto pr-2 text-[11px] leading-relaxed">
-                      {testResult.success ? (
-                        <>
-                          <p className="text-emerald-400">✔ Dispatch phase complete!</p>
-                          <p className="text-slate-400">Method applied: {testResult.result?.method}</p>
-                          <p className="text-slate-500">Payload details: {JSON.stringify(testResult.result?.info || {})}</p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-rose-450 font-bold text-red-400">✖ All mail validation endpoints failed.</p>
-                          <p className="text-slate-400">Detailed error text: {testResult.error || "Connection/Authentication failure"}</p>
-                          {testResult.stack && (
-                            <p className="text-slate-600 font-mono text-[9px] overflow-x-auto">{testResult.stack.substring(0, 400)}...</p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

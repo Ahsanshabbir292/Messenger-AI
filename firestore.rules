@@ -92,6 +92,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /facebook_locks/{fbUserId} {
+      allow read, write: if true;
+    }
+
     match /{path=**}/broadcasts/{broadcastId} {
       allow read, write: if true;
     }

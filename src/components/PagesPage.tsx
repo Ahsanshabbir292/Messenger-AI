@@ -9,7 +9,7 @@ interface PagesPageProps {
   trialLocked: boolean;
   handleSyncPages: () => void | Promise<void>;
   handleSelectTrialPage: (pageId: string, selected: boolean) => void | Promise<void>;
-  currentPlan?: 'trial' | 'architect' | 'empire' | 'expired';
+  currentPlan?: any;
   onUpgrade?: () => void;
   onLockTrial?: () => void;
   lastSyncedContacts?: string | null;
