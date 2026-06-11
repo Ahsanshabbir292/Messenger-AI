@@ -3163,6 +3163,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
         ip: clientIp, 
         credits: 5000.00,
         trialCredits: 100.00,
+        role: "owner",
         createdAt: FieldValue.serverTimestamp() 
       };
       
@@ -3211,6 +3212,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
           workspaceId: "ws_" + Math.random().toString(36).substring(7),
           workspaceName: `${fullName || email.split('@')[0]}'s Workspace`,
           googleLinked: true,
+          role: "owner",
+          credits: 5000.00,
+          trialCredits: 100.00,
           createdAt: FieldValue.serverTimestamp()
         };
         await userRef.set(userData);

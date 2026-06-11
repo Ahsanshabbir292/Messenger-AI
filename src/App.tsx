@@ -6,6 +6,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { ShieldAlert } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { auth } from './lib/firebase';
 
 const LandingPage = React.lazy(() => import('./components/LandingPage'));
 const AuthPage = React.lazy(() => import('./components/AuthPage'));
@@ -245,6 +247,11 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (e) {
+      console.warn("[Firebase Client Logout Error]:", e);
+    }
     try {
       await axios.post('/api/auth/logout');
     } catch (e) {}
