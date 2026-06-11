@@ -3212,115 +3212,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
   });
 
-  // Google OAuth Login / Link Route
-  app.post("/api/auth/google-login", async (req, res) => {
-    const { email, fullName } = req.body;
-    console.log(`[AUTH] Google Login action request for: ${email}`);
-
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
-
-    const db = await getDb();
-    if (!db) {
-      return res.status(500).json({ error: "Database not initialized" });
-    }
-
-    try {
-      const userRef = db.collection("users").doc(email.toLowerCase());
-      const userDoc = await userRef.get();
-      
-      let userData: any;
-
-      if (!userDoc.exists) {
-        // Create new user for first-time Google Sign up
-        userData = {
-          email: email.toLowerCase(),
-          fullName: fullName || email.split('@')[0],
-          workspaceId: "ws_" + Math.random().toString(36).substring(7),
-          workspaceName: `${fullName || email.split('@')[0]}'s Workspace`,
-          googleLinked: true,
-          role: "owner",
-          credits: 5000.00,
-          trialCredits: 100.00,
-          createdAt: FieldValue.serverTimestamp()
-        };
-        await userRef.set(userData);
-        console.log(`[AUTH] Created new Google-linked user doc: ${email}`);
-      } else {
-        // User already exists
-        userData = userDoc.data();
-        if (!userData.googleLinked) {
-          await userRef.update({ googleLinked: true });
-          userData.googleLinked = true;
-        }
-        console.log(`[AUTH] Logged in existing user with Google: ${email}`);
-      }
-
-      // Store in express session
-      const { password: _, ...userWithoutPassword } = userData;
-      req.session.user = userWithoutPassword;
-
-      res.json({ success: true, user: userWithoutPassword });
-    } catch (err: any) {
-      console.error("[AUTH] Google login error:", err);
-      res.status(500).json({ error: formatDbError(err) });
-    }
-  });
-
-  // Facebook OAuth Login / Link Route
-  app.post("/api/auth/facebook-login", async (req, res) => {
-    const { email, fullName } = req.body;
-    console.log(`[AUTH] Facebook Login action request for: ${email}`);
-
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
-
-    const db = await getDb();
-    if (!db) {
-      return res.status(500).json({ error: "Database not initialized" });
-    }
-
-    try {
-      const userRef = db.collection("users").doc(email.toLowerCase());
-      const userDoc = await userRef.get();
-      
-      let userData: any;
-
-      if (!userDoc.exists) {
-        // Create new user for first-time Facebook Sign up
-        userData = {
-          email: email.toLowerCase(),
-          fullName: fullName || email.split('@')[0],
-          workspaceId: "ws_" + Math.random().toString(36).substring(7),
-          workspaceName: `${fullName || email.split('@')[0]}'s Workspace`,
-          facebookLinked: true,
-          createdAt: FieldValue.serverTimestamp()
-        };
-        await userRef.set(userData);
-        console.log(`[AUTH] Created new Facebook-linked user doc: ${email}`);
-      } else {
-        // User already exists
-        userData = userDoc.data();
-        if (!userData.facebookLinked) {
-          await userRef.update({ facebookLinked: true });
-          userData.facebookLinked = true;
-        }
-        console.log(`[AUTH] Logged in existing user with Facebook: ${email}`);
-      }
-
-      // Store in express session
-      const { password: _, ...userWithoutPassword } = userData;
-      req.session.user = userWithoutPassword;
-
-      res.json({ success: true, user: userWithoutPassword });
-    } catch (err: any) {
-      console.error("[AUTH] Facebook login error:", err);
-      res.status(500).json({ error: formatDbError(err) });
-    }
-  });
-
   // Password Reset Phase 1: Request Reset Code
   app.post("/api/auth/forgot-password/request", async (req, res) => {
     const { email } = req.body;
@@ -8819,14 +8710,65 @@ Write a realistic, short and natural response expressing your reaction, query, o
     });
   }
 
-  // Startup check (Fix 4C)
+  // Startup check (Fix 4C) & Database Social Accounts Cleanup Block
   const testDb = await getDb();
   if (testDb) {
     try {
       await testDb.collection("_health").doc("ping").set({ ts: new Date().toISOString() });
       console.log("[Startup] ✅ Firestore connection verified — data is persistent");
+      
+      console.log("[Startup] 🧹 Running complete Google/Facebook sign-in accounts & integration cleanup...");
+      const usersSnap = await testDb.collection("users").get();
+      let deletedCount = 0;
+      let cleanedCount = 0;
+
+      for (const d of usersSnap.docs) {
+        const uEmail = d.id;
+        const uData = d.data();
+
+        // Check if user is a Google or Facebook signup (has linked flags or lacks a password)
+        const isSocialUser = !uData || !uData.password || uData.googleLinked === true || uData.facebookLinked === true;
+        
+        // Retain standard admin profile but disconnect social linking
+        const isPartner = uEmail.toLowerCase().trim() === "ahsan.shabbir292@gmail.com";
+
+        if (isSocialUser && !isPartner) {
+          // Clear associated broadcasts first
+          const bcastSnap = await testDb.collection("users").doc(uEmail).collection("broadcasts").get();
+          for (const bDoc of bcastSnap.docs) {
+            await bDoc.ref.delete();
+          }
+          await d.ref.delete();
+          deletedCount++;
+        } else {
+          // Clear all social credential linkages and integration nodes from standard users
+          const updates: any = {
+            googleLinked: null,
+            facebookLinked: null,
+            facebook: null,
+            facebookWorkspaces: {}
+          };
+
+          for (const key of Object.keys(uData || {})) {
+            if (key.startsWith("facebookWorkspaces.")) {
+              updates[key] = null;
+            }
+          }
+
+          await d.ref.update(updates);
+          cleanedCount++;
+        }
+      }
+
+      // Evict all stored locks
+      const locksSnap = await testDb.collection("facebook_locks").get();
+      for (const lDoc of locksSnap.docs) {
+        await lDoc.ref.delete();
+      }
+
+      console.log(`[Startup] 🧼 Done! Permanently deleted ${deletedCount} Google/Facebook login users. Reset credentials/links for ${cleanedCount} accounts. Wiped locks.`);
     } catch (e: any) {
-      console.error("[Startup] ❌ Firestore connection FAILED — user data may not persist:", e.message);
+      console.error("[Startup] ❌ Startup Database Verification & Cleanup failed:", e.message);
     }
   }
 

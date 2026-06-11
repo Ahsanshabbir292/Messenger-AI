@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { 
-  Mail, Lock, Github, CheckCircle2, ArrowLeft, Facebook, 
+  Mail, Lock, Github, CheckCircle2, ArrowLeft, 
   Sparkles, User, ShieldCheck, Eye, EyeOff, Globe, CheckCircle, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth } from '../lib/firebase';
 import { 
-  GoogleAuthProvider,
-  FacebookAuthProvider,
-  signInWithPopup 
+  signInWithEmailAndPassword
 } from 'firebase/auth';
 import CloudflareTurnstile from './CloudflareTurnstile';
 
@@ -213,165 +211,6 @@ export default function AuthPage({
     }
   };
 
-  const handleSimulatedLogin = async (type: 'google' | 'facebook', emailStr: string, nameStr: string) => {
-    setError(null);
-    setLoading(true);
-    try {
-      const finalEmail = emailStr.trim().toLowerCase();
-      const finalName = nameStr.trim();
-      const endpoint = type === 'google' ? '/api/auth/google-login' : '/api/auth/facebook-login';
-      
-      const res = await axios.post(endpoint, {
-        email: finalEmail,
-        fullName: finalName
-      });
-
-      const loggedUser = res.data.user;
-      const appUserObj = {
-        email: loggedUser?.email || finalEmail,
-        fullName: loggedUser?.fullName || finalName,
-        workspaceId: loggedUser?.workspaceId,
-        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || finalName}'s Workspace`,
-        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
-        role: loggedUser?.role || "admin"
-      };
-
-      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = finalEmail;
-      setSimMode(null);
-      onLoginSuccess();
-    } catch (err: any) {
-      setError(err.response?.data?.error || err.message || String(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleAuthLive = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
-      
-      if (!result.user || !result.user.email) {
-        throw new Error('Google Sign-In was successful but did not return email.');
-      }
-
-      const googleEmail = result.user.email || "";
-      const googleFullName = result.user.displayName || (googleEmail ? googleEmail.split('@')[0] : "User");
-      const res = await axios.post('/api/auth/google-login', {
-        email: googleEmail,
-        fullName: googleFullName
-      });
-
-      const loggedUser = res.data.user;
-      const finalEmail = loggedUser?.email || googleEmail || "";
-      const appUserObj = {
-        email: finalEmail,
-        fullName: loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
-        workspaceId: loggedUser?.workspaceId,
-        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User")}'s Workspace`,
-        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
-        role: loggedUser?.role || "admin"
-      };
-
-      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = finalEmail;
-      setSimMode(null);
-      onLoginSuccess();
-    } catch (err: any) {
-      console.warn("[Google Auth Warning]:", err);
-      const errCode = err.code || "";
-      const errMessage = err.message || String(err);
-      if (errCode === 'auth/popup-closed-by-user') {
-        setError('Google login popup was closed before completion.');
-      } else if (errCode === 'auth/popup-blocked' || errMessage.includes('popup-blocked')) {
-        setError('Google login popup was blocked by the browser inside the preview frame. If you are using an iframe preview, please allow popups or consider logging in/registering with email & password.');
-      } else if (errCode === 'auth/user-disabled' || errMessage.includes('user-disabled')) {
-        setError('Your Google account has been disabled or Google authentication is not enabled. Please log in or register with email & password.');
-      } else {
-        setError(err.response?.data?.error || err.message || String(err));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleGoogleAuth = () => {
-    setSimMode('google');
-    setSimEmail('ahsan.shabbir292@gmail.com');
-    setSimName('Ahsan Shabbir');
-    setCustomSim(false);
-  };
-
-  const handleFacebookAuthLive = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const provider = new FacebookAuthProvider();
-      provider.setCustomParameters({ display: 'popup' });
-      const result = await signInWithPopup(auth, provider);
-      
-      if (!result.user) {
-        throw new Error('Facebook Sign-In was successful but did not return user info.');
-      }
-
-      const facebookEmail = result.user.email || "";
-      const facebookFullName = result.user.displayName || "Facebook User";
-      const facebookUid = result.user.uid;
-      const finalEmail = facebookEmail || `${facebookUid}@facebook.com`;
-
-      const res = await axios.post('/api/auth/facebook-login', {
-        email: finalEmail,
-        fullName: facebookFullName
-      });
-
-      const loggedUser = res.data.user;
-      const appUserObj = {
-        email: loggedUser?.email || finalEmail,
-        fullName: loggedUser?.fullName || facebookFullName,
-        workspaceId: loggedUser?.workspaceId,
-        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || facebookFullName}'s Workspace`,
-        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
-        role: loggedUser?.role || "admin"
-      };
-
-      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
-      axios.defaults.headers.common['x-user-email'] = appUserObj.email;
-      setSimMode(null);
-      onLoginSuccess();
-    } catch (err: any) {
-      console.warn("[Facebook Auth Warning]:", err);
-      const errCode = err.code || "";
-      const errMessage = err.message || String(err);
-      if (errCode === 'auth/popup-closed-by-user') {
-        setError('Facebook login popup was closed before completion.');
-      } else if (errCode === 'auth/popup-blocked' || errMessage.includes('popup-blocked')) {
-        setError('Facebook login popup was blocked by the browser inside the preview frame. If you are using an iframe preview, please allow popups or consider logging in/registering with email & password.');
-      } else if (errCode === 'auth/user-disabled' || errMessage.includes('user-disabled')) {
-        setError('Your Facebook account has been disabled or Facebook authentication is not enabled. Please log in or register with email & password.');
-      } else if (errCode === 'auth/operation-not-allowed' || errCode === 'auth/configuration-not-found') {
-        setError(
-          "Facebook Login is not enabled in Firebase Console yet.\n" +
-          "Please enable Facebook Auth and configure the correct Facebook App credentials in Firebase Console: Authentication -> Sign-in method -> Add provider -> Facebook."
-        );
-      } else {
-        setError(err.response?.data?.error || err.message || String(err));
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFacebookAuth = () => {
-    setSimMode('facebook');
-    setSimEmail('ahsan.shabbir292@gmail.com');
-    setSimName('Ahsan Shabbir');
-    setCustomSim(false);
-  };
-
   const handleSigninSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -542,7 +381,7 @@ export default function AuthPage({
           <div className="mt-32">
              <div className="flex items-center gap-4 mb-8">
                 <div className="w-14 h-14 bg-indigo-600 rounded-[1.5rem] flex items-center justify-center shadow-2xl shadow-indigo-500/20">
-                   <Facebook className="w-7 h-7 text-white" />
+                   <Globe className="w-7 h-7 text-white" />
                 </div>
                 <span className="text-3xl font-black text-white tracking-tighter">Perseus<span className="text-indigo-500"> Bot</span></span>
              </div>
@@ -596,44 +435,10 @@ export default function AuthPage({
                     )}
                   </div>
                 ) : null}
-                <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none mb-3">
+                 <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none mb-6">
                   {mode === 'signin' ? 'Welcome Back.' : mode === 'forgot' ? 'Reset Password.' : (inviteData ? 'Join Workspace' : 'Create your account')}
                 </h1>
               </div>
-
-              {/* Google & Facebook OAuth Login Buttons */}
-              {mode !== 'forgot' && (
-                <div className="mt-2 text-center animate-in fade-in duration-300">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <button 
-                      type="button"
-                      onClick={handleGoogleAuth}
-                      disabled={loading}
-                      className="h-11 bg-white hover:bg-slate-50 text-slate-800 hover:text-slate-950 border border-slate-200 rounded-lg font-bold text-xs tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <Globe className="w-4 h-4 text-indigo-600 animate-pulse" />
-                      Continue with Google
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={handleFacebookAuth}
-                      disabled={loading}
-                      className="h-11 bg-[#1877f2] hover:bg-[#166fe5] text-white border border-transparent rounded-lg font-bold text-xs tracking-wide transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <Facebook className="w-4 h-4 text-white animate-pulse" />
-                      Continue with Facebook
-                    </button>
-                  </div>
-
-                  <div className="flex items-center my-5">
-                    <div className="flex-1 border-t border-slate-100" />
-                    <span className="px-3 text-[10px] font-black uppercase text-slate-400 tracking-widest">
-                      {mode === 'signin' ? 'or login with credentials' : 'or sign up with credentials'}
-                    </span>
-                    <div className="flex-1 border-t border-slate-100" />
-                  </div>
-                </div>
-              )}
 
               <form className="space-y-4" onSubmit={mode === 'signin' ? handleSigninSubmit : mode === 'forgot' ? handleForgotSubmit : (inviteData ? handleInviteSubmit : handleSignupSubmit)}>
                 {mode === 'signup' && (
@@ -1030,141 +835,6 @@ export default function AuthPage({
           </AnimatePresence>
         </div>
       </div>
-
-      {/* Simulation Fallback Modal */}
-      <AnimatePresence>
-        {simMode !== null && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.95, y: 10 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.95, y: 10 }}
-              className="bg-white rounded-3xl border border-slate-100 shadow-2xl p-6 sm:p-8 w-full max-w-md relative overflow-hidden"
-            >
-              <button 
-                onClick={() => setSimMode(null)} 
-                className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer border-none"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-3 mb-6 text-left">
-                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${simMode === 'google' ? 'bg-indigo-50 text-indigo-600' : 'bg-blue-50 text-[#1877f2]'}`}>
-                  {simMode === 'google' ? <Globe className="w-6 h-6 animate-pulse" /> : <Facebook className="w-6 h-6 animate-pulse" />}
-                </div>
-                <div>
-                  <h3 className="text-xl font-black text-slate-900 tracking-tight leading-none">
-                    {simMode === 'google' ? 'Google' : 'Facebook'} Sign-In Sandbox
-                  </h3>
-                  <p className="text-slate-500 text-xs font-semibold mt-1">Dev Preview Environment Fallback</p>
-                </div>
-              </div>
-
-              <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-indigo-950 text-[12px] leading-relaxed mb-6 font-medium text-left">
-                💡 <strong>Why are you seeing this?</strong> Popup dialogs are often blocked inside the cross-origin AI Studio workspace preview. To ensure a smooth testing experience, we simulated the login flow cleanly!
-              </div>
-
-              {!customSim ? (
-                <div className="space-y-4">
-                  <button
-                    type="button"
-                    onClick={() => handleSimulatedLogin(simMode, 'ahsan.shabbir292@gmail.com', 'Ahsan Shabbir')}
-                    disabled={loading}
-                    className="w-full p-4 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-indigo-200 rounded-2xl text-left transition-all active:scale-[0.99] group flex items-center justify-between cursor-pointer"
-                  >
-                    <div className="text-left">
-                      <p className="text-xs font-black uppercase tracking-wider text-slate-400 mb-0.5">Quick Login as Partner</p>
-                      <p className="text-sm font-bold text-slate-900">Ahsan Shabbir</p>
-                      <p className="text-xs text-slate-500 font-medium">ahsan.shabbir292@gmail.com</p>
-                    </div>
-                    <span className="px-3 py-1.5 bg-indigo-500 text-white font-black text-[9px] uppercase tracking-widest rounded-lg group-hover:bg-indigo-600 transition-colors">
-                      Quick Log In
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setCustomSim(true)}
-                    className="w-full py-3 border border-dashed border-slate-200 hover:border-indigo-400 text-slate-600 hover:text-indigo-600 rounded-xl font-bold text-xs tracking-wide transition-all uppercase flex items-center justify-center gap-2 bg-transparent cursor-pointer"
-                  >
-                    Type another test email...
-                  </button>
-
-                  <div className="pt-2 border-t border-slate-100">
-                    <button
-                      type="button"
-                      onClick={simMode === 'google' ? handleGoogleAuthLive : handleFacebookAuthLive}
-                      disabled={loading}
-                      className="w-full py-3 hover:bg-slate-50 text-slate-500 hover:text-slate-900 rounded-2xl font-black text-[10px] tracking-widest uppercase transition-all flex items-center justify-center gap-2 bg-transparent cursor-pointer"
-                    >
-                      🌐 Try Real Live Popup Auth anyway
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <form 
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (simEmail.trim() && simName.trim()) {
-                      handleSimulatedLogin(simMode, simEmail, simName);
-                    }
-                  }} 
-                  className="space-y-4 text-left"
-                >
-                  <div>
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1.5 block">Full Name</label>
-                    <input 
-                      type="text"
-                      required
-                      placeholder="e.g. John Doe"
-                      value={simName}
-                      onChange={(e) => setSimName(e.target.value)}
-                      className="w-full h-11 bg-white border border-slate-200 rounded-xl px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[11px] font-black uppercase text-slate-400 tracking-wider mb-1.5 block">Email Address</label>
-                    <input 
-                      type="email"
-                      required
-                      placeholder="e.g. test@example.com"
-                      value={simEmail}
-                      onChange={(e) => setSimEmail(e.target.value)}
-                      className="w-full h-11 bg-white border border-slate-200 rounded-xl px-4 focus:ring-2 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all font-medium text-sm"
-                    />
-                  </div>
-
-                  <div className="flex gap-3 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setCustomSim(false)}
-                      className="flex-1 h-11 bg-slate-50 hover:bg-slate-100 text-slate-500 rounded-xl font-bold text-xs tracking-wider transition-all border-none uppercase cursor-pointer"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="flex-1 h-11 bg-[#1d63ff] hover:bg-blue-700 text-white rounded-xl font-bold text-xs tracking-wider transition-all shadow-lg shadow-blue-100 border-none uppercase flex items-center justify-center cursor-pointer"
-                    >
-                      {loading ? (
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      ) : (
-                        'Log in with credentials'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
