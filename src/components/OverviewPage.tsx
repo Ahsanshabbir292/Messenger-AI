@@ -10,7 +10,7 @@ import { SafeAvatar } from './SafeAvatar';
 interface OverviewPageProps {
   pages: any[];
   broadcastsHistory: any[];
-  workspaceCredits: Record<string, number>;
+  creditBalance: number;
   currentWorkspaceId: string;
   currentPlan: any;
   userProfile: any;
@@ -28,7 +28,7 @@ interface OverviewPageProps {
 export const OverviewPage: React.FC<OverviewPageProps> = ({
   pages,
   broadcastsHistory,
-  workspaceCredits,
+  creditBalance,
   currentWorkspaceId,
   currentPlan,
   userProfile,
@@ -178,19 +178,19 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           </button>
         </div>
 
-        {/* Trial Credit */}
+        {/* Credit Balance */}
         <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col h-full">
           <div className="p-4 sm:p-5 flex items-center gap-4 flex-1">
             <div className="w-10 h-10 sm:w-12 sm:h-12 bg-[#E6F7F0] rounded-xl flex items-center justify-center shrink-0">
               <Sparkles className="w-5 h-5 sm:w-6 sm:h-6 text-[#10B981]" />
             </div>
             <div>
-              <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Trial Credit</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{remainingTrialCredits.toLocaleString()}</h4>
+              <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">Credit Balance</p>
+              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{(creditBalance ?? 0).toLocaleString()}</h4>
             </div>
           </div>
           <div className="px-4 sm:px-5 py-3 bg-slate-50/50 border-t border-slate-100 text-slate-400 text-[10px] sm:text-xs font-semibold truncate">
-            Out of 5,000 max
+            Available credits
           </div>
         </div>
       </div>

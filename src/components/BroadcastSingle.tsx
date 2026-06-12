@@ -575,7 +575,7 @@ export const BroadcastSingle: React.FC<BroadcastSingleProps> = ({
               </p>
             </div>
             <span className="text-[10px] text-emerald-600 font-extrabold mt-4 uppercase tracking-widest flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span> Real-Time Sandbox Refill Ready
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Credits available
             </span>
           </div>
         </div>

@@ -384,7 +384,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   const [lastSyncedContacts, setLastSyncedContacts] = useState<string | null>(null);
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
-  const [trialLocked, setTrialLocked] = useState<boolean>(false);
+  const trialLocked = false;
   // Simulated workspace-specific pages (initially empty, fetched from API)
   // In a real app, pages would be assigned to a workspace in the DB.
   // For this demo, we can assign them to the current workspace when they are fetched.
@@ -1129,7 +1129,6 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       const res = await axios.get('/api/facebook/pages');
       setPages(res.data.pages || []);
       setSelectedPageIds(res.data.selectedPageIds || []);
-      setTrialLocked(!!res.data.trialLocked);
       if (res.data.lastSyncedContacts) {
         setLastSyncedContacts(res.data.lastSyncedContacts);
       }
@@ -1178,26 +1177,14 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   };
 
   const handleLockTrial = async () => {
-    if (selectedPageIds.length === 0) {
-      alert("Please select at least 1 page to activate your trial.");
-      return;
-    }
-    if (selectedPageIds.length > 3) {
-      alert("You can only select up to 3 pages for trial.");
-      return;
-    }
-    const confirmLock = window.confirm("Are you sure you want to activate your trial? Once activated, you CANNOT change your selected trial pages anymore.");
-    if (!confirmLock) return;
-
     try {
       const res = await axios.post('/api/facebook/lock-trial');
       if (res.data.success) {
-        setTrialLocked(true);
-        alert("Free trial activated! Selected pages have been locked successfully.");
+        alert("Page updated successfully.");
         getPages();
       }
     } catch (err: any) {
-      alert(formatAxiosError(err, "Failed to activate trial"));
+      alert(formatAxiosError(err, "Failed to update page"));
     }
   };
 
@@ -1359,7 +1346,6 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
         const fetchedPages = res.data.pages || [];
         setPages(fetchedPages);
         setSelectedPageIds(res.data.selectedPageIds || []);
-        setTrialLocked(!!res.data.trialLocked);
         page = fetchedPages.find((p: any) => p.id === pageId);
       } catch (err) {
         console.error("Failed to fetch pages dynamically on audience chat click", err);
@@ -2312,7 +2298,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                   pages={pages}
                   broadcastsHistory={broadcastsHistory}
                   conversations={conversations}
-                  workspaceCredits={workspaceCredits}
+                  creditBalance={creditBalance}
                   currentWorkspaceId={currentWorkspaceId}
                   currentPlan={currentPlan}
                   userProfile={userProfile}
@@ -3633,23 +3619,6 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
             return (
               <div className="max-w-7xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-20 text-left w-full">
                 
-                {/* 1. Free Trial Active Top Banner */}
-                <div id="trial-active-banner" className="bg-[#E6F7F0]/85 border border-[#D1F2E0] text-[#027A48] px-4.5 py-3.5 rounded-[1.25rem] flex flex-col sm:flex-row items-start sm:items-center justify-between text-xs sm:text-sm font-semibold gap-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-[#10B981] fill-[#10B981]" />
-                    <span>Free Trial active — <span className="font-bold">3 days</span> remaining</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-4">
-                    <span className="flex items-center gap-1.5 text-slate-600 bg-[#D1F2E0]/45 px-3 py-1 rounded-xl text-xs border border-emerald-200 border-solid font-bold">
-                      <CreditCard className="w-3.5 h-3.5 text-[#10B981] animate-pulse" />
-                      <span className="font-extrabold text-[#027A48]">5,000</span> trial credits
-                    </span>
-                    <button className="text-[#027A48] hover:text-[#025A38] font-black flex items-center gap-1 underline decoration-2 cursor-pointer bg-transparent border-none">
-                      Upgrade <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
                 {/* 2. Main Header Section */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                   <div>

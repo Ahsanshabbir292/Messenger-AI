@@ -689,57 +689,36 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                             {u.broadcastCount ?? 0} sent
                           </td>
                            <td className="py-3.5">
-                            <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] text-slate-500 font-extrabold uppercase">BAL:</span>
-                                <span className="font-mono font-black text-indigo-400">${(u.credits || 0.00).toFixed(2)}</span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-[10px] text-slate-500 font-extrabold uppercase">TRIAL:</span>
-                                <span className="font-mono font-black text-yellow-500">${(u.trialCredits || 0.00).toFixed(2)}</span>
-                              </div>
-                            </div>
-                          </td>
-                          <td className="py-3.5">
-                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${u.suspended ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
-                              {u.suspended ? 'Suspended' : 'Active'}
-                            </span>
-                          </td>
-                          <td className="py-3.5 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
-                            <button 
-                              onClick={() => {
-                                setCreditsModal({
-                                  isOpen: true,
-                                  email: u.email,
-                                  currentCredits: u.credits || 0,
-                                  isTrial: false
-                                });
-                                setCreditAmount(100);
-                              }}
-                              className="px-2 py-1.5 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
-                            >
-                              Bal +/-
-                            </button>
-                            <button 
-                              onClick={() => {
-                                setCreditsModal({
-                                  isOpen: true,
-                                  email: u.email,
-                                  currentCredits: u.trialCredits || 0,
-                                  isTrial: true
-                                });
-                                setCreditAmount(100);
-                              }}
-                              className="px-2 py-1.5 bg-yellow-600/10 hover:bg-yellow-505 text-yellow-300 hover:text-white border border-yellow-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
-                            >
-                              Trial +/-
-                            </button>
-                            <button 
-                              onClick={() => handleToggleSuspend(u.email, !!u.suspended)}
-                              className={`px-2.5 py-1.5 border rounded-xl text-[10px] font-black transition-colors cursor-pointer ${u.suspended ? 'bg-emerald-600/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-600 hover:text-white' : 'bg-rose-600/10 border-rose-500/20 text-rose-300 hover:bg-rose-600 hover:text-white'}`}
-                            >
-                              {u.suspended ? 'Unsuspend' : 'Suspend'}
-                            </button>
+                             <div className="flex items-center gap-1">
+                               <span className="font-mono font-black text-indigo-400">{(u.credits || 0.00).toFixed(0)} credits</span>
+                             </div>
+                           </td>
+                           <td className="py-3.5">
+                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold ${u.suspended ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                               {u.suspended ? 'Suspended' : 'Active'}
+                             </span>
+                           </td>
+                           <td className="py-3.5 text-right space-x-2" onClick={(e) => e.stopPropagation()}>
+                             <button 
+                               onClick={() => {
+                                 setCreditsModal({
+                                   isOpen: true,
+                                   email: u.email,
+                                   currentCredits: u.credits || 0,
+                                   isTrial: false
+                                 });
+                                 setCreditAmount(100);
+                               }}
+                               className="px-2 py-1.5 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
+                             >
+                               Bal +/-
+                             </button>
+                             <button 
+                               onClick={() => handleToggleSuspend(u.email, !!u.suspended)}
+                               className={`px-2.5 py-1.5 border rounded-xl text-[10px] font-black transition-colors cursor-pointer ${u.suspended ? 'bg-emerald-600/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-600 hover:text-white' : 'bg-rose-600/10 border-rose-500/20 text-rose-300 hover:bg-rose-600 hover:text-white'}`}
+                             >
+                               {u.suspended ? 'Unsuspend' : 'Suspend'}
+                             </button>
                             <button 
                               onClick={() => handleDeleteUser(u.email)}
                               className="px-2.5 py-1.5 bg-rose-650/10 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
@@ -793,16 +772,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                           <td className="py-3.5 font-bold text-slate-300">{u.email}</td>
                           <td className="py-3.5 font-extrabold text-white">{u.fullName || 'No Name Provided'}</td>
                           <td className="py-3.5">
-                            <div className="flex flex-col gap-0.5">
-                              <div>
-                                <span className="text-[10px] text-slate-500 font-extrabold uppercase mr-1">Bal:</span>
-                                <span className="font-mono text-medium font-black text-indigo-400">${(u.credits || 0.00).toFixed(2)}</span>
-                              </div>
-                              <div>
-                                <span className="text-[10px] text-slate-500 font-extrabold uppercase mr-1">Trial:</span>
-                                <span className="font-mono text-medium font-black text-yellow-500">${(u.trialCredits || 0.00).toFixed(2)}</span>
-                              </div>
-                            </div>
+                            <span className="font-mono text-medium font-black text-indigo-400">{(u.credits || 0.00).toFixed(0)} credits</span>
                           </td>
                           <td className="py-3.5 text-right space-x-2">
                             <button 
@@ -818,20 +788,6 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                               className="px-3 py-1.5 bg-indigo-650 hover:bg-slate-800 text-indigo-300 hover:text-white border border-indigo-500/10 rounded-xl text-[10px] transition-colors cursor-pointer"
                             >
                               Bal +/-
-                            </button>
-                            <button 
-                              onClick={() => {
-                                setCreditsModal({
-                                  isOpen: true,
-                                  email: u.email,
-                                  currentCredits: u.trialCredits || 0,
-                                  isTrial: true
-                                });
-                                setCreditAmount(100);
-                              }}
-                              className="px-3 py-1.5 bg-yellow-600 hover:bg-slate-800 text-yellow-300 hover:text-white border border-yellow-500/10 rounded-xl text-[10px] transition-colors cursor-pointer"
-                            >
-                              Trial +/-
                             </button>
                           </td>
                         </tr>
@@ -1338,11 +1294,11 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
               </div>
 
               {/* Credits & General Card */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
                   <div>
                     <p className="text-[10px] text-slate-500 font-extrabold uppercase">Standard Wallet</p>
-                    <p className="text-lg font-black text-white mt-1">${(selectedUser.credits || 0.00).toFixed(2)}</p>
+                    <p className="text-lg font-black text-white mt-1">{(selectedUser.credits || 0.00).toFixed(0)} credits</p>
                   </div>
                   <button
                     onClick={() => {
@@ -1355,27 +1311,6 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       setCreditAmount(100);
                     }}
                     className="px-2 py-1 bg-indigo-605/15 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
-                  >
-                    Adjust
-                  </button>
-                </div>
-
-                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-slate-500 font-extrabold uppercase">Trial Wallet</p>
-                    <p className="text-lg font-black text-yellow-500 mt-1">${(selectedUser.trialCredits || 0.00).toFixed(2)}</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setCreditsModal({
-                        isOpen: true,
-                        email: selectedUser.email,
-                        currentCredits: selectedUser.trialCredits || 0,
-                        isTrial: true
-                      });
-                      setCreditAmount(100);
-                    }}
-                    className="px-2 py-1 bg-yellow-605/15 hover:bg-yellow-600 text-yellow-300 hover:text-white border border-yellow-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
                   >
                     Adjust
                   </button>

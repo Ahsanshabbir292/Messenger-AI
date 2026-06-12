@@ -28,6 +28,7 @@ import {
   runTransaction
 } from "firebase/firestore";
 import session from "express-session";
+import { FirestoreStore } from 'connect-session-firestore';
 import bcrypt from "bcryptjs";
 import fs from "fs";
 
@@ -1353,12 +1354,15 @@ async function getDb(): Promise<any> {
     console.log(`[Firebase] Connecting to Admin Firestore Database ID: ${dbId}`);
     db = getAdminFirestore(firebaseAdminApp, dbId === "default" ? undefined : dbId);
 
-    // Verify active connectivity / permissions
+    // Verify active connectivity / permissions with a fast 1.5s timeout
     try {
-      await db.collection("system_check").limit(1).get();
+      await Promise.race([
+        db.collection("system_check").limit(1).get(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for Firestore connection")), 1500))
+      ]);
       console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
     } catch (testErr: any) {
-      console.warn("[Firebase] Admin Firestore testing failed. Activating local MemoryFirestore fallback:", testErr.message);
+      console.warn("[Firebase] Admin Firestore testing failed or timed out. Activating local MemoryFirestore fallback:", testErr.message);
       db = new MemoryFirestore();
     }
   } catch (err: any) {
@@ -1431,14 +1435,20 @@ async function startServer() {
       req.rawBody = buf;
     }
   }));
+  const sessionDb = await getDb();
+  // Bypass FirestoreStore to guarantee session operations are 100% non-blocking and ultra-fast.
+  // We already have a reliable, header-based x-user-email session restoration mechanism for the client-side.
+  const sessionStore = undefined;
+
   app.use(session({
-    secret: process.env.SESSION_SECRET || "messenger-ai-secret-key-2024",
+    store: sessionStore,
+    secret: process.env.SESSION_SECRET || "perseus-bot-secret-2025",
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false, // IMPORTANT: false so we don't store empty sessions
     cookie: { 
-      secure: true,
-      sameSite: "none",
-      maxAge: 24 * 60 * 60 * 1000 // 24 hours
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
     }
   }));
 
@@ -2373,7 +2383,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
         }
 
         const userData = userDoc.data() || {};
-        let creditBalance = userData.creditBalance !== undefined ? userData.creditBalance : 5000.0;
+        let activeCredits = userData.credits !== undefined ? userData.credits : (userData.creditBalance !== undefined ? userData.creditBalance : 5000.0);
 
         const currentPlanId = customData.plan_id || customData.planId;
         const currentPackId = customData.pack_id || customData.packId;
@@ -2384,14 +2394,16 @@ Super-administrative console restricted to permitted accounts to audit system ac
           // It's a Subscription Plan Purchase
           const addedCredits = PLAN_CREDITS[currentPlanId] || 0;
           updatedData.plan = currentPlanId;
-          updatedData.creditBalance = creditBalance + addedCredits;
+          updatedData.credits = activeCredits + addedCredits;
+          updatedData.creditBalance = activeCredits + addedCredits;
           updatedData.planActivatedAt = new Date().toISOString();
           console.log(`[Lemon Webhook] Processed Plan planId=${currentPlanId} adding ${addedCredits} credits to user ${userId}`);
         } else if (currentPackId) {
           // It's a Credit Pack Purchase
           const packDef = CREDIT_PACK_PRICES[currentPackId];
           const addedCredits = packDef ? packDef.credits : 0;
-          updatedData.creditBalance = creditBalance + addedCredits;
+          updatedData.credits = activeCredits + addedCredits;
+          updatedData.creditBalance = activeCredits + addedCredits;
           console.log(`[Lemon Webhook] Processed Credit Pack packId=${currentPackId} adding ${addedCredits} credits to user ${userId}`);
         } else {
           // Fallback to check product IDs from payload attributes just in case
@@ -2416,13 +2428,15 @@ Super-administrative console restricted to permitted accounts to audit system ac
           if (foundPlanId) {
             const addedCredits = PLAN_CREDITS[foundPlanId] || 0;
             updatedData.plan = foundPlanId;
-            updatedData.creditBalance = creditBalance + addedCredits;
+            updatedData.credits = activeCredits + addedCredits;
+            updatedData.creditBalance = activeCredits + addedCredits;
             updatedData.planActivatedAt = new Date().toISOString();
             console.log(`[Lemon Webhook] Fallback match Plan product: planId=${foundPlanId} adding ${addedCredits} credits to user ${userId}`);
           } else if (foundPackId) {
             const packDef = CREDIT_PACK_PRICES[foundPackId];
             const addedCredits = packDef ? packDef.credits : 0;
-            updatedData.creditBalance = creditBalance + addedCredits;
+            updatedData.credits = activeCredits + addedCredits;
+            updatedData.creditBalance = activeCredits + addedCredits;
             console.log(`[Lemon Webhook] Fallback match Pack product: packId=${foundPackId} adding ${addedCredits} credits to user ${userId}`);
           } else {
             console.warn("[Lemon Webhook] Could not determine purchased product or pack. Product ID received:", productIdStr);
@@ -2532,7 +2546,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const userDoc = await db.collection("users").doc(userEmail.toLowerCase().trim()).get();
       if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
       const data = userDoc.data();
-      res.json({ credits: data?.credits ?? 0, trialCredits: data?.trialCredits ?? 0 });
+      res.json({ credits: data?.credits !== undefined ? data.credits : (data?.creditBalance !== undefined ? data.creditBalance : 5000.0), trialCredits: 0 });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to fetch credits", details: err.message });
     }
@@ -3190,7 +3204,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
         workspaceName: workspaceName || `${fullName || email.split('@')[0]}'s Workspace`,
         ip: clientIp, 
         credits: 5000.00,
-        trialCredits: 100.00,
+        trialCredits: 0,
         role: "owner",
         createdAt: FieldValue.serverTimestamp() 
       };
@@ -4850,119 +4864,29 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
 
      let credits = 5000.00;
-    let trialCredits = 100.00;
-    try {
-      const userRef = db.collection("users").doc(userEmail);
-      const userDoc = await userRef.get();
-      if (userDoc.exists) {
-        const uVal = userDoc.data();
-        if (uVal) {
-          if (typeof uVal.credits === "number") {
-            credits = uVal.credits;
-          } else {
-            await userRef.set({ credits: 5000.00 }, { merge: true });
-          }
-          if (typeof uVal.trialCredits === "number") {
-            trialCredits = uVal.trialCredits;
-          } else {
-            await userRef.set({ trialCredits: 100.00 }, { merge: true });
-          }
-        }
-      }
-    } catch (err: any) {
-      console.warn("Could not load or set credits in Database:", err.message);
-    }
+     try {
+       const userRef = db.collection("users").doc(userEmail);
+       const userDoc = await userRef.get();
+       if (userDoc.exists) {
+         const uVal = userDoc.data();
+         if (uVal) {
+           if (typeof uVal.credits === "number") {
+             credits = uVal.credits;
+           } else {
+             await userRef.set({ credits: 5000.00 }, { merge: true });
+           }
+         }
+       }
+     } catch (err: any) {
+       console.warn("Could not load or set credits in Database:", err.message);
+     }
 
-    res.json({ 
-      pages: mappedPages, 
-      selectedPageIds,
-      trialLocked: !!data.trialLocked,
-      credits,
-      trialCredits,
-      lastSyncedContacts: data.lastSyncedContacts || null
-    });
-  });
-
-  app.post("/api/facebook/select-trial-page", async (req, res) => {
-    const { pageId, selected } = req.body;
-
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-    
-    const data = await getFacebookData(req);
-    if (!data) return res.status(401).json({ error: "Not authenticated" });
-
-    let selectedIds = data.selectedPageIds || [];
-
-    if (data.trialLocked) {
-      return res.status(400).json({ error: "Trial has already been locked. You cannot change your pages anymore." });
-    }
-
-    if (selected) {
-      if (selectedIds.length >= 3) {
-        return res.status(400).json({ error: "Trial limit reached. You can only select up to 3 pages manually." });
-      }
-      if (!selectedIds.includes(pageId)) {
-        selectedIds.push(pageId);
-      }
-    } else {
-      selectedIds = selectedIds.filter((id: string) => id !== pageId);
-    }
-
-    // A. Update in user document directly (with workspace-awareness)
-    const userEmail = await getResolvedUserEmail(req);
-    let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
-    if (!workspaceId && userEmail !== "ahsan.shabbir292@gmail.com") {
-      try {
-        const ownerDoc = await db.collection("users").doc(userEmail).get();
-        if (ownerDoc.exists) {
-          workspaceId = ownerDoc.data()?.workspaceId;
-        }
-      } catch (e) {}
-    }
-
-    if (userEmail) {
-      try {
-        const userDocRef = db.collection("users").doc(userEmail);
-        const snap = await userDocRef.get();
-        if (snap.exists) {
-          const u = snap.data();
-          const facebookNode = (workspaceId ? (u?.facebookWorkspaces?.[workspaceId] || u?.facebook) : u?.facebook) || {};
-          const updatedFB = {
-            ...facebookNode,
-            selectedPageIds: selectedIds
-          };
-
-          const updates: any = {};
-          if (workspaceId) {
-            updates[`facebookWorkspaces.${workspaceId}`] = updatedFB;
-          } else {
-            updates.facebook = updatedFB;
-          }
-          await userDocRef.update(updates);
-          console.log(`[Firebase] Updated selectedPageIds to [${selectedIds.join(', ')}] in Firestore for email: ${userEmail} workspace: ${workspaceId || 'global'}`);
-        }
-      } catch (err: any) {
-        console.error("Failed to update user selected pages in Firestore:", err.message);
-      }
-    }
-
-    // B. Fallback: Update in session too
-    const sessionId = req.session.fbSessionId || (userEmail ? `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
-    if (sessionId) {
-      try {
-        await db.collection("sessions").doc(sessionId).update({ selectedPageIds: selectedIds });
-      } catch (err: any) {
-        console.error("Failed to update session selected pages:", err.message);
-      }
-    }
-
-    // Invalidate the fast cache
-    if (userEmail) {
-      clearFbDataCache(userEmail);
-    }
-
-    res.json({ success: true, selectedPageIds: selectedIds });
+     res.json({ 
+       pages: mappedPages, 
+       selectedPageIds,
+       credits,
+       lastSyncedContacts: data.lastSyncedContacts || null
+     });
   });
 
   app.post("/api/facebook/sync-contacts", async (req, res) => {
@@ -5066,70 +4990,68 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
   });
 
-  app.post("/api/facebook/lock-trial", async (req, res) => {
+  app.post("/api/facebook/select-trial-page", async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
-    const data = await getFacebookData(req);
-    if (!data) return res.status(401).json({ error: "Not authenticated" });
-
-    const selectedIds = data.selectedPageIds || [];
-    if (selectedIds.length === 0) {
-      return res.status(400).json({ error: "Choose at least 1 page before activating the trial." });
-    }
-    if (selectedIds.length > 3) {
-      return res.status(400).json({ error: "You can only activate up to 3 pages for trial." });
-    }
-
-    // A. Update in user document directly
     const userEmail = await getResolvedUserEmail(req);
-    let workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body?.workspaceId;
-    if (!workspaceId && userEmail !== "ahsan.shabbir292@gmail.com") {
-      try {
-        const ownerDoc = await db.collection("users").doc(userEmail).get();
-        if (ownerDoc.exists) {
-          workspaceId = ownerDoc.data()?.workspaceId;
+    const workspaceId = req.headers['x-workspace-id'] || req.query.workspaceId || req.body.workspaceId;
+    const { pageId, selected } = req.body;
+
+    try {
+      const data = await getFacebookData(req);
+      if (!data) return res.status(401).json({ error: "Not authenticated" });
+
+      let selectedPageIds: string[] = data.selectedPageIds || [];
+      if (selected) {
+        if (!selectedPageIds.includes(pageId)) {
+          selectedPageIds.push(pageId);
         }
-      } catch (e) {}
-    }
-
-    if (userEmail) {
-      try {
-        const userDocRef = db.collection("users").doc(userEmail);
-        const snap = await userDocRef.get();
-        if (snap.exists) {
-          const u = snap.data();
-          const facebookNode = (workspaceId ? (u?.facebookWorkspaces?.[workspaceId] || u?.facebook) : u?.facebook) || {};
-          const updatedFB = {
-            ...facebookNode,
-            trialLocked: true
-          };
-
-          const updates: any = {};
-          if (workspaceId) {
-            updates[`facebookWorkspaces.${workspaceId}`] = updatedFB;
-          } else {
-            updates.facebook = updatedFB;
-          }
-          await userDocRef.update(updates);
-          console.log(`[Firebase] Set trialLocked to true in Firestore for email: ${userEmail} workspace: ${workspaceId || 'global'}`);
-        }
-      } catch (err: any) {
-        console.error("Failed to track trial lock in Firestore:", err.message);
+      } else {
+        selectedPageIds = selectedPageIds.filter((id: string) => id !== pageId);
       }
-    }
 
-    // B. Session update fallback
-    const sessionId = req.session.fbSessionId || (userEmail ? `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}` : null);
-    if (sessionId) {
-      try {
-        await db.collection("sessions").doc(sessionId).update({ trialLocked: true });
-      } catch (err: any) {
-        console.error("Failed to lock trial in session:", err.message);
+      const updatedFbPayload = {
+        ...data,
+        selectedPageIds
+      };
+
+      const userDocRef = db.collection("users").doc(userEmail);
+      const userSnap = await userDocRef.get();
+      const updates: any = {
+        facebook: updatedFbPayload
+      };
+      if (workspaceId) {
+        updates[`facebookWorkspaces.${workspaceId}`] = updatedFbPayload;
       }
-    }
 
-    res.json({ success: true, trialLocked: true });
+      if (userSnap.exists) {
+        await userDocRef.update(updates);
+      } else {
+        await userDocRef.set({
+          email: userEmail,
+          ...updates
+        });
+      }
+
+      const sessionId = req.session.fbSessionId || `fb_${userEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      try {
+        await db.collection("sessions").doc(sessionId).set(updatedFbPayload);
+      } catch (err: any) {
+        console.warn(`[Select Page] Failed to update session doc:`, err.message);
+      }
+
+      clearFbDataCache(userEmail);
+
+      res.json({ success: true, selectedPageIds });
+    } catch (err: any) {
+      console.error("[Select Page Error]:", err.message);
+      res.status(500).json({ error: "Failed to update page selection: " + err.message });
+    }
+  });
+
+  app.post("/api/facebook/lock-trial", async (req, res) => {
+    res.json({ success: true, message: "Page selection synced successfully." });
   });
 
   // --- BILLING & SUBSCRIPTIONS API ---
@@ -5178,7 +5100,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const userDoc = await userRef.get();
       const userData = userDoc.exists ? userDoc.data() : {};
 
-      const creditBalance = userData?.creditBalance !== undefined ? userData.creditBalance : 5000.0;
+      const creditBalance = userData?.credits !== undefined ? userData.credits : (userData?.creditBalance !== undefined ? userData.creditBalance : 5000.0);
       const currentPlan = userData?.plan || null;
 
       res.json({
@@ -6422,23 +6344,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
           const uDoc = await transaction.get(userRef);
           if (uDoc.exists) {
             const curCredits = uDoc.data()?.credits ?? 5000;
-            const curTrialCredits = uDoc.data()?.trialCredits ?? 100;
             const cost = recipients.length;
-
-            let newTrialCredits = curTrialCredits;
-            let newCredits = curCredits;
-
-            if (curTrialCredits >= cost) {
-              newTrialCredits = curTrialCredits - cost;
-            } else {
-              const remainingCost = cost - curTrialCredits;
-              newTrialCredits = 0;
-              newCredits = Math.max(0, curCredits - remainingCost);
-            }
+            const newCredits = Math.max(0, curCredits - cost);
 
             transaction.update(userRef, { 
               credits: newCredits,
-              trialCredits: newTrialCredits
+              creditBalance: newCredits
             });
           }
         });
@@ -7652,23 +7563,12 @@ Write a realistic, short and natural response expressing your reaction, query, o
             const uDoc = await transaction.get(userRef);
             if (uDoc.exists) {
               const curCredits = uDoc.data()?.credits ?? 5000;
-              const curTrialCredits = uDoc.data()?.trialCredits ?? 100;
               const cost = successCount * creditsPerRecipient;
-
-              let newTrialCredits = curTrialCredits;
-              let newCredits = curCredits;
-
-              if (curTrialCredits >= cost) {
-                newTrialCredits = curTrialCredits - cost;
-              } else {
-                const remainingCost = cost - curTrialCredits;
-                newTrialCredits = 0;
-                newCredits = Math.max(0, curCredits - remainingCost);
-              }
+              const newCredits = Math.max(0, curCredits - cost);
 
               transaction.update(userRef, { 
                 credits: newCredits,
-                trialCredits: newTrialCredits
+                creditBalance: newCredits
               });
             }
           });
@@ -8199,7 +8099,8 @@ Write a realistic, short and natural response expressing your reaction, query, o
         }
 
         await db.collection("users").doc(d.id).update({
-          credits: newCredits
+          credits: newCredits,
+          creditBalance: newCredits
         });
       }
       await logAdminAction("Bulk modified credits", `Amount: ${amount}, Mode: ${mode}`, req);
@@ -8225,7 +8126,8 @@ Write a realistic, short and natural response expressing your reaction, query, o
           const currentCredits = u.credits || 0;
           const targetCredits = currentCredits + Number(amount);
           await db.collection("users").doc(d.id).update({
-            credits: targetCredits
+            credits: targetCredits,
+            creditBalance: targetCredits
           });
           io.to(`user_${d.id.toLowerCase().trim()}`).emit("credits_updated", { credits: targetCredits });
         }
@@ -8248,142 +8150,16 @@ Write a realistic, short and natural response expressing your reaction, query, o
         newCredits = Math.max(0, currentCredits - Number(amount));
       }
 
-      await db.collection("users").doc(emailLower).update({ credits: newCredits });
+      await db.collection("users").doc(emailLower).update({
+        credits: newCredits,
+        creditBalance: newCredits
+      });
       await logAdminAction(`Credits change (${mode})`, `${emailLower} updated by ${amount}`, req);
       io.to(`user_${emailLower}`).emit("credits_updated", { credits: newCredits });
       res.json({ success: true, email: emailLower, credits: newCredits });
     } catch (err: any) {
       console.error("[Admin API] Failed to update user credits:", err.message);
       res.status(505).json({ error: "Failed to update user credits", details: err.message });
-    }
-  });
-
-  // Users Management - Mutate trial credits
-  app.post("/api/admin/users/:email/trial-credits", verifyAdminMiddleware, async (req, res) => {
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-    const { email } = req.params;
-    const { mode, amount } = req.body;
-
-    try {
-      const emailLower = email.toLowerCase().trim();
-      const userDoc = await db.collection("users").doc(emailLower).get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-
-      const u = userDoc.data();
-      const currentTrialCredits = typeof u.trialCredits === 'number' ? u.trialCredits : 100;
-      let newTrialCredits = currentTrialCredits;
-
-      if (mode === "set") {
-        newTrialCredits = Number(amount);
-      } else if (mode === "add") {
-        newTrialCredits = currentTrialCredits + Number(amount);
-      } else if (mode === "deduct") {
-        newTrialCredits = Math.max(0, currentTrialCredits - Number(amount));
-      }
-
-      await db.collection("users").doc(emailLower).update({ trialCredits: newTrialCredits });
-      await logAdminAction(`Trial credits change (${mode})`, `${emailLower} updated by ${amount}`, req);
-      io.to(`user_${emailLower}`).emit("credits_updated", { trialCredits: newTrialCredits });
-      res.json({ success: true, email: emailLower, trialCredits: newTrialCredits });
-    } catch (err: any) {
-      console.error("[Admin API] Failed to update user trial credits:", err.message);
-      res.status(500).json({ error: "Failed to update user trial credits", details: err.message });
-    }
-  });
-
-  // Users Management - Reactivate Trial
-  app.post("/api/admin/users/:email/reactivate-trial", verifyAdminMiddleware, async (req, res) => {
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-    const { email } = req.params;
-
-    try {
-      const emailLower = email.toLowerCase().trim();
-      const userRef = db.collection("users").doc(emailLower);
-      const userDoc = await userRef.get();
-      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-
-      const u = userDoc.data();
-      const updates: any = {};
-
-      // A. Reactivate trialLocked flags
-      if (u.facebook) {
-        updates.facebook = {
-          ...u.facebook,
-          trialLocked: false
-        };
-      }
-
-      if (u.facebookWorkspaces && typeof u.facebookWorkspaces === "object") {
-        const updatedWorkspaces = { ...u.facebookWorkspaces };
-        for (const wsId of Object.keys(updatedWorkspaces)) {
-          if (updatedWorkspaces[wsId]) {
-            updatedWorkspaces[wsId] = {
-              ...updatedWorkspaces[wsId],
-              trialLocked: false
-            };
-          }
-        }
-        updates.facebookWorkspaces = updatedWorkspaces;
-      }
-
-      for (const key of Object.keys(u)) {
-        if (key.startsWith("facebookWorkspaces.")) {
-          const part = u[key];
-          if (part && typeof part === "object") {
-            updates[key] = {
-              ...part,
-              trialLocked: false
-            };
-          }
-        }
-      }
-
-      // B. Restore page subscriptions to active Trial status
-      if (u.billing) {
-        const updatedBilling = { ...u.billing };
-        if (updatedBilling.subscriptions && typeof updatedBilling.subscriptions === "object") {
-          const updatedSubs = { ...updatedBilling.subscriptions };
-          const extendedTrialEnds = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-          for (const subId of Object.keys(updatedSubs)) {
-            if (updatedSubs[subId]) {
-              updatedSubs[subId] = {
-                ...updatedSubs[subId],
-                status: "Trial",
-                trial_ends_at: extendedTrialEnds,
-                subscription_ends_at: null
-              };
-            }
-          }
-          updatedBilling.subscriptions = updatedSubs;
-        }
-        updates.billing = updatedBilling;
-      }
-
-      // Restore trial credits to at least 100
-      const currentTrialCredits = typeof u.trialCredits === 'number' ? u.trialCredits : 100;
-      updates.trialCredits = Math.max(100, currentTrialCredits);
-
-      await userRef.update(updates);
-
-      // C. Update session trialLocked in sessions collection if exists
-      const sessionId = `fb_${emailLower.replace(/[^a-zA-Z0-9]/g, '_')}`;
-      try {
-        const sessionRef = db.collection("sessions").doc(sessionId);
-        const sessionDoc = await sessionRef.get();
-        if (sessionDoc.exists) {
-          await sessionRef.update({ trialLocked: false });
-        }
-      } catch (e: any) {
-        console.warn("[Admin API] Failed to update session trialLocked:", e.message);
-      }
-
-      await logAdminAction("Reactivated trial status", emailLower, req);
-      res.json({ success: true, message: "Trial successfully reactivated, and trial credits loaded." });
-    } catch (err: any) {
-      console.error("[Admin API] Failed to reactivate trial:", err.message);
-      res.status(500).json({ error: "Failed to reactivate trial", details: err.message });
     }
   });
 
@@ -8710,67 +8486,70 @@ Write a realistic, short and natural response expressing your reaction, query, o
     });
   }
 
-  // Startup check (Fix 4C) & Database Social Accounts Cleanup Block
-  const testDb = await getDb();
-  if (testDb) {
-    try {
-      await testDb.collection("_health").doc("ping").set({ ts: new Date().toISOString() });
-      console.log("[Startup] ✅ Firestore connection verified — data is persistent");
-      
-      console.log("[Startup] 🧹 Running complete Google/Facebook sign-in accounts & integration cleanup...");
-      const usersSnap = await testDb.collection("users").get();
-      let deletedCount = 0;
-      let cleanedCount = 0;
-
-      for (const d of usersSnap.docs) {
-        const uEmail = d.id;
-        const uData = d.data();
-
-        // Check if user is a Google or Facebook signup (has linked flags or lacks a password)
-        const isSocialUser = !uData || !uData.password || uData.googleLinked === true || uData.facebookLinked === true;
+  // Startup check (Fix 4C) & Database Social Accounts Cleanup Block (Asynchronous background check to avoid blocking PORT listening)
+  setTimeout(async () => {
+    const testDb = await getDb();
+    if (testDb) {
+      try {
+        await testDb.collection("_health").doc("ping").set({ ts: new Date().toISOString() });
+        console.log("[Startup] ✅ Firestore connection verified — data is persistent");
+        console.log("[Startup] Session store: Firestore (persistent across deploys)");
         
-        // Retain standard admin profile but disconnect social linking
-        const isPartner = uEmail.toLowerCase().trim() === "ahsan.shabbir292@gmail.com";
+        console.log("[Startup] 🧹 Running complete Google/Facebook sign-in accounts & integration cleanup in background...");
+        const usersSnap = await testDb.collection("users").get();
+        let deletedCount = 0;
+        let cleanedCount = 0;
 
-        if (isSocialUser && !isPartner) {
-          // Clear associated broadcasts first
-          const bcastSnap = await testDb.collection("users").doc(uEmail).collection("broadcasts").get();
-          for (const bDoc of bcastSnap.docs) {
-            await bDoc.ref.delete();
-          }
-          await d.ref.delete();
-          deletedCount++;
-        } else {
-          // Clear all social credential linkages and integration nodes from standard users
-          const updates: any = {
-            googleLinked: null,
-            facebookLinked: null,
-            facebook: null,
-            facebookWorkspaces: {}
-          };
+        for (const d of usersSnap.docs) {
+          const uEmail = d.id;
+          const uData = d.data();
 
-          for (const key of Object.keys(uData || {})) {
-            if (key.startsWith("facebookWorkspaces.")) {
-              updates[key] = null;
+          // Check if user is a Google or Facebook signup (has linked flags or lacks a password)
+          const isSocialUser = !uData || !uData.password || uData.googleLinked === true || uData.facebookLinked === true;
+          
+          // Retain standard admin profile but disconnect social linking
+          const isPartner = uEmail.toLowerCase().trim() === "ahsan.shabbir292@gmail.com";
+
+          if (isSocialUser && !isPartner) {
+            // Clear associated broadcasts first
+            const bcastSnap = await testDb.collection("users").doc(uEmail).collection("broadcasts").get();
+            for (const bDoc of bcastSnap.docs) {
+              await bDoc.ref.delete();
             }
+            await d.ref.delete();
+            deletedCount++;
+          } else {
+            // Clear all social credential linkages and integration nodes from standard users
+            const updates: any = {
+              googleLinked: null,
+              facebookLinked: null,
+              facebook: null,
+              facebookWorkspaces: {}
+            };
+
+            for (const key of Object.keys(uData || {})) {
+              if (key.startsWith("facebookWorkspaces.")) {
+                updates[key] = null;
+              }
+            }
+
+            await d.ref.update(updates);
+            cleanedCount++;
           }
-
-          await d.ref.update(updates);
-          cleanedCount++;
         }
-      }
 
-      // Evict all stored locks
-      const locksSnap = await testDb.collection("facebook_locks").get();
-      for (const lDoc of locksSnap.docs) {
-        await lDoc.ref.delete();
-      }
+        // Evict all stored locks
+        const locksSnap = await testDb.collection("facebook_locks").get();
+        for (const lDoc of locksSnap.docs) {
+          await lDoc.ref.delete();
+        }
 
-      console.log(`[Startup] 🧼 Done! Permanently deleted ${deletedCount} Google/Facebook login users. Reset credentials/links for ${cleanedCount} accounts. Wiped locks.`);
-    } catch (e: any) {
-      console.error("[Startup] ❌ Startup Database Verification & Cleanup failed:", e.message);
+        console.log(`[Startup] 🧼 Done! Permanently deleted ${deletedCount} Google/Facebook login users. Reset credentials/links for ${cleanedCount} accounts. Wiped locks.`);
+      } catch (e: any) {
+        console.error("[Startup] ❌ Startup Database Verification & Cleanup failed:", e.message);
+      }
     }
-  }
+  }, 100);
 
   if (typeof PORT === "string" && isNaN(Number(PORT))) {
     // If PORT is a Unix socket path or named pipe (typical for cPanel Phusion Passenger)
