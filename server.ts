@@ -398,6 +398,21 @@ if (envDbId) {
   firebaseConfig.firestoreDatabaseId = "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
 }
 
+if (!firebaseConfig.projectId) {
+  if (process.env.FIREBASE_AUTH_DOMAIN) {
+    const parts = process.env.FIREBASE_AUTH_DOMAIN.split(".");
+    firebaseConfig.projectId = parts[0];
+    console.log("[Firebase] Derived missing projectId from FIREBASE_AUTH_DOMAIN:", firebaseConfig.projectId);
+  } else if (process.env.FIREBASE_STORAGE_BUCKET) {
+    const parts = process.env.FIREBASE_STORAGE_BUCKET.split(".");
+    firebaseConfig.projectId = parts[0];
+    console.log("[Firebase] Derived missing projectId from FIREBASE_STORAGE_BUCKET:", firebaseConfig.projectId);
+  } else {
+    firebaseConfig.projectId = "gen-lang-client-0784575306";
+    console.log("[Firebase] Falling back to default backup projectId:", firebaseConfig.projectId);
+  }
+}
+
 console.log("[Firebase] Final config projectId:", firebaseConfig.projectId);
 console.log("[Firebase] Final Firestore DB ID:", firebaseConfig.firestoreDatabaseId);
 
@@ -473,7 +488,10 @@ function handleFirebaseError(error: any): boolean {
 
 // Compatibility wrapper classes for Web SDK to match Firestore Admin's collection/doc API
 class CompatDocumentReference {
-  constructor(public firestore: any, public col: string, public id: string) {}
+  public path: string;
+  constructor(public firestore: any, public col: string, public id: string) {
+    this.path = `${col}/${id}`;
+  }
 
   collection(subCol: string) {
     return new CompatCollectionReference(this.firestore, `${this.col}/${this.id}/${subCol}`);
@@ -570,6 +588,7 @@ class CompatCollectionReference {
       const snap = await getDocs(c);
       const docs = snap.docs.map(d => ({
         id: d.id,
+        ref: new CompatDocumentReference(this.firestore, this.col, d.id),
         data: () => d.data()
       }));
       return {
@@ -661,7 +680,10 @@ function deepSet(obj: any, pathStr: string, value: any) {
 }
 
 class MemoryDocumentReference {
-  constructor(private col: string, private id: string) {}
+  public path: string;
+  constructor(public col: string, public id: string) {
+    this.path = `${col}/${id}`;
+  }
 
   collection(subCol: string) {
     return new MemoryCollectionReference(`${this.col}/${this.id}/${subCol}`);
@@ -786,6 +808,14 @@ class MemoryCollectionReference {
     return new MemoryDocumentReference(this.col, id);
   }
 
+  limit(n: number) {
+    return this;
+  }
+
+  orderBy(field: string, direction?: string) {
+    return this;
+  }
+
   async get() {
     try {
       const filePath = path.join(appDir, "db-fallback.json");
@@ -796,6 +826,7 @@ class MemoryCollectionReference {
       const colData = dbData[this.col] || {};
       const docs = Object.keys(colData).map(id => ({
         id,
+        ref: new MemoryDocumentReference(this.col, id),
         data: () => JSON.parse(JSON.stringify(colData[id]))
       }));
       return {
@@ -1081,6 +1112,14 @@ class RestCollectionReference {
     return new RestDocumentReference(this.path, id);
   }
 
+  limit(n: number) {
+    return this;
+  }
+
+  orderBy(field: string, direction?: string) {
+    return this;
+  }
+
   async get() {
     const cacheKey = `col:${this.path}`;
     return getCachedRestQuery(cacheKey, async () => {
@@ -1118,6 +1157,7 @@ class RestCollectionReference {
             const dataObj = fromFirestoreFields(doc.fields);
             docs.push({
               id,
+              ref: new RestDocumentReference(this.path, id),
               data: () => dataObj,
               exists: true
             });
@@ -1136,10 +1176,9 @@ class RestCollectionReference {
 }
 
 class RestDocumentReference {
-  constructor(private parentPath: string, private id: string) {}
-
-  private get path() {
-    return `${this.parentPath}/${this.id}`;
+  public path: string;
+  constructor(private parentPath: string, private id: string) {
+    this.path = `${parentPath}/${id}`;
   }
 
   collection(subCol: string) {
@@ -1385,13 +1424,35 @@ async function getDb(): Promise<any> {
       ]);
       console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
     } catch (testErr: any) {
-      console.warn("[Firebase] Admin Firestore testing failed or timed out. Activating local MemoryFirestore fallback:", testErr.message);
-      db = new MemoryFirestore();
+      console.warn("[Firebase] Admin Firestore testing failed or timed out. Trying cloud-hosted RestFirestore client next...");
+      try {
+        const restDb = new RestFirestore();
+        await Promise.race([
+          restDb.collection("system_check").limit(1).get(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for RestFirestore")), 1500))
+        ]);
+        console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
+        db = restDb;
+      } catch (restErr: any) {
+        console.warn("[Firebase] RestFirestore connection also failed. Activating local MemoryFirestore fallback:", restErr.message);
+        db = new MemoryFirestore();
+      }
     }
   } catch (err: any) {
     console.error("[Firebase] Error initializing Firebase Admin App:", err.message);
-    console.warn("[Firebase] Falling back to high-availability local MemoryFirestore!");
-    db = new MemoryFirestore();
+    console.warn("[Firebase] Trying cloud-hosted RestFirestore client fallback...");
+    try {
+      const restDb = new RestFirestore();
+      await Promise.race([
+        restDb.collection("system_check").limit(1).get(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for RestFirestore")), 1500))
+      ]);
+      console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
+      db = restDb;
+    } catch (restErr: any) {
+      console.warn("[Firebase] RestFirestore connection also failed. Falling back to local MemoryFirestore!");
+      db = new MemoryFirestore();
+    }
   }
 
   isDbInitializing = false;
