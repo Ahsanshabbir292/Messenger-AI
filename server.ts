@@ -48,12 +48,19 @@ console.log(`[DEBUG EMAIL VARIABLES]:
 `);
 
 try {
+  const firebaseKeys = Object.keys(process.env).filter(k => k.includes("FIREBASE") || k.includes("GOOGLE") || k.includes("CREDENTIALS") || k.includes("PORT"));
   fs.writeFileSync('environment_log.txt', `[DEBUG EMAIL VARIABLES]:
 - RESEND_API_KEY: exists=${!!process.env.RESEND_API_KEY}, length=${debugResendKey.length}, prefix=${debugResendKey.substring(0, 7)}...
 - SMTP_PASS: exists=${!!process.env.SMTP_PASS}, length=${debugSmtpPass.length}, prefix=${debugSmtpPass.substring(0, 5)}...
 - FROM_EMAIL: value="${debugFromEmail}"
 - SMTP_HOST: value="${cleanEnvValue(process.env.SMTP_HOST)}"
 - SMTP_USER: value="${cleanEnvValue(process.env.SMTP_USER)}"
+[DEBUG ENV KEYS]: ${JSON.stringify(firebaseKeys)}
+- FIREBASE_DATABASE_ID: "${process.env.FIREBASE_DATABASE_ID}"
+- FIREBASE_FIRESTORE_DATABASE_ID: "${process.env.FIREBASE_FIRESTORE_DATABASE_ID}"
+- FIREBASE_PROJECT_ID: "${process.env.FIREBASE_PROJECT_ID}"
+- GOOGLE_APPLICATION_CREDENTIALS: "${process.env.GOOGLE_APPLICATION_CREDENTIALS}"
+- FIREBASE_SERVICE_ACCOUNT_KEY: exists=${!!process.env.FIREBASE_SERVICE_ACCOUNT_KEY}, length=${process.env.FIREBASE_SERVICE_ACCOUNT_KEY?.length || 0}
 `);
 } catch (e) {
   console.error("Failed to write env log file", e);
@@ -1164,10 +1171,10 @@ async function getDb(): Promise<any> {
       }
     }
 
-    const dbId = firebaseConfig.firestoreDatabaseId;
-    console.log(`[Firebase] Connecting to Admin Firestore Database ID: ${dbId}`);
-    const actualDbId = (dbId === "default" || dbId === "(default)") ? undefined : dbId;
-    db = getAdminFirestore(firebaseAdminApp, actualDbId);
+    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
+    console.log(`[Firebase] Connecting to Admin Firestore with settings databaseId: ${dbId}`);
+    db = admin.firestore(firebaseAdminApp);
+    db.settings({ databaseId: dbId, ignoreUndefinedProperties: true });
 
     // Verify active connectivity / permissions with a fast 15s timeout
     try {
@@ -1231,7 +1238,7 @@ async function startServer() {
     });
   });
 
-  const PORT = process.env.PORT || 3000;
+  const PORT = 3000;
 
   app.set("trust proxy", 1);
   app.use(compression());
