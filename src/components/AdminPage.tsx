@@ -55,6 +55,15 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
   const [creditAmount, setCreditAmount] = useState<number>(100);
   const [creditMode, setCreditMode] = useState<'set' | 'add' | 'deduct'>('add');
 
+  const [planModal, setPlanModal] = useState<{ isOpen: boolean; email: string; currentPlan: string }>({
+    isOpen: false,
+    email: '',
+    currentPlan: ''
+  });
+  const [selectedPlan, setSelectedPlan] = useState<string>('trial');
+  const [planCreditMode, setPlanCreditMode] = useState<'none' | 'set_default' | 'add_default' | 'set_custom'>('none');
+  const [planCustomCredits, setPlanCustomCredits] = useState<number>(0);
+
   const [subModal, setSubModal] = useState<{ isOpen: boolean; email: string; pageId: string; pageName: string; currentEnd: string }>({
     isOpen: false,
     email: '',
@@ -253,6 +262,26 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
       handleRefresh();
     } catch (err: any) {
       addToast("Failed to run bulk credit update", "danger");
+    }
+  };
+
+  // Assign plan/package directly to user
+  const handleUpdateUserPlan = async () => {
+    if (!planModal.email) return;
+    try {
+      await axios.post(`/api/admin/users/${encodeURIComponent(planModal.email)}/plan`, {
+        plan: selectedPlan === 'trial' ? null : selectedPlan,
+        creditMode: planCreditMode,
+        customCredits: planCustomCredits
+      });
+      addToast(`Subscription package/plan successfully set to ${selectedPlan.toUpperCase()} for ${planModal.email}`, "success");
+      setPlanModal(prev => ({ ...prev, isOpen: false }));
+      handleRefresh();
+      if (selectedUser?.email === planModal.email) {
+        viewUserDetails(planModal.email);
+      }
+    } catch (err: any) {
+      addToast(err.response?.data?.error || "Failed to update package/plan", "danger");
     }
   };
 
@@ -1294,11 +1323,11 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
               </div>
 
               {/* Credits & General Card */}
-              <div className="grid grid-cols-1 gap-3">
-                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col justify-between h-24">
                   <div>
                     <p className="text-[10px] text-slate-500 font-extrabold uppercase">Standard Wallet</p>
-                    <p className="text-lg font-black text-white mt-1">{(selectedUser.credits || 0.00).toFixed(0)} credits</p>
+                    <p className="text-base font-black text-white mt-1">{(selectedUser.credits || 0.00).toFixed(0)} credits</p>
                   </div>
                   <button
                     onClick={() => {
@@ -1310,9 +1339,31 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       });
                       setCreditAmount(100);
                     }}
-                    className="px-2 py-1 bg-indigo-605/15 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/10 rounded-xl text-[10px] font-black transition-colors cursor-pointer"
+                    className="w-full text-center py-1 mt-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/20 rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer"
                   >
-                    Adjust
+                    Adjust Wallet
+                  </button>
+                </div>
+
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col justify-between h-24">
+                  <div>
+                    <p className="text-[10px] text-slate-500 font-extrabold uppercase">Billing Package</p>
+                    <p className="text-base font-black text-indigo-400 mt-1 capitalize truncate">{selectedUser.plan || 'Free / Trial'}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setPlanModal({
+                        isOpen: true,
+                        email: selectedUser.email,
+                        currentPlan: selectedUser.plan || 'trial'
+                      });
+                      setSelectedPlan(selectedUser.plan || 'trial');
+                      setPlanCreditMode('none');
+                      setPlanCustomCredits(0);
+                    }}
+                    className="w-full text-center py-1 mt-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/20 rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer"
+                  >
+                    Change Plan
                   </button>
                 </div>
               </div>
@@ -1505,6 +1556,91 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
               className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-2xl transition-all shadow-lg"
             >
               Verify & Authorize Adjustment
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* DIRECT PACKAGE / SUBSCRIPTION PLAN ASSIGNMENT MODAL */}
+      {planModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-300" onClick={() => setPlanModal(prev => ({ ...prev, isOpen: false }))}>
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl max-w-md w-full space-y-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-black text-white">Modify Billing Package</h3>
+              <button onClick={() => setPlanModal(prev => ({ ...prev, isOpen: false }))} className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-400 rounded-lg">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <p className="text-xs text-slate-300 font-bold">Assign direct subscription plan to workspace:</p>
+              <p className="text-[10px] text-indigo-400 font-mono mt-0.5">{planModal.email}</p>
+            </div>
+
+            {/* Select Plan ID option */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-extrabold text-slate-500 pl-1">Selected Package / Plan</label>
+              <select
+                value={selectedPlan}
+                onChange={(e) => {
+                  setSelectedPlan(e.target.value);
+                }}
+                className="w-full px-4 py-3 bg-slate-950 border border-slate-800 text-indigo-200 focus:border-indigo-600 rounded-2xl text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value="trial">Trial / Free Plan (0 credits default)</option>
+                <option value="starter">Starter Plan ($8/mo - 30,000 credits)</option>
+                <option value="growth">Growth Plan ($22/mo - 300,000 credits)</option>
+                <option value="pro">Pro Plan ($49/mo - 800,000 credits)</option>
+                <option value="business">Business Plan ($99/mo - 2,000,000 credits)</option>
+                <option value="enterprise">Enterprise Plan ($199/mo - 4,500,000 credits)</option>
+              </select>
+            </div>
+
+            {/* Wallet Credits adjustment synchronization options */}
+            <div className="space-y-3">
+              <label className="text-[10px] uppercase font-extrabold text-slate-500 pl-1">Credits Synced Action</label>
+              <div className="grid grid-cols-2 gap-2 bg-slate-950 p-2 rounded-2xl border border-slate-800">
+                {[
+                  { label: "Keep current wallet", val: "none" },
+                  { label: "Set plan default credits", val: "set_default" },
+                  { label: "Add plan credits to wallet", val: "add_default" },
+                  { label: "Set specific custom credits", val: "set_custom" }
+                ].map((option) => (
+                  <button
+                    key={option.val}
+                    type="button"
+                    onClick={() => setPlanCreditMode(option.val as any)}
+                    className={`p-2 text-[9px] uppercase tracking-wider font-extrabold rounded-xl transition-all cursor-pointer ${
+                      planCreditMode === option.val 
+                        ? 'bg-indigo-600 text-white shadow-md' 
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-900/40'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom credits input field if Custom is active */}
+            {planCreditMode === 'set_custom' && (
+              <div className="space-y-1.5 animate-in slide-in-from-top-2 duration-200">
+                <label className="text-[10px] uppercase font-extrabold text-slate-500 pl-1">Specify Custom Credits amount</label>
+                <input
+                  type="number"
+                  value={planCustomCredits}
+                  onChange={(e) => setPlanCustomCredits(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-full px-4 py-3 bg-slate-950 border border-slate-800 focus:border-indigo-600 rounded-2xl text-xs font-bold focus:outline-none"
+                  placeholder="e.g. 500000"
+                />
+              </div>
+            )}
+
+            <button
+              onClick={handleUpdateUserPlan}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-2xl transition-all shadow-lg select-none cursor-pointer uppercase tracking-wider"
+            >
+              Confirm and Grant Package
             </button>
           </div>
         </div>

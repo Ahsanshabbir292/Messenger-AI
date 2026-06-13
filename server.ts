@@ -8408,6 +8408,50 @@ Write a realistic, short and natural response expressing your reaction, query, o
     }
   });
 
+  // Users Management - Update Subscription Plan / Package
+  app.post("/api/admin/users/:email/plan", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    const { plan, creditMode, customCredits } = req.body;
+
+    try {
+      const userDocRef = db.collection("users").doc(emailLower);
+      const userDoc = await userDocRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const userData = userDoc.data() || {};
+      const updates: any = {
+        plan: plan || null,
+        planActivatedAt: new Date().toISOString()
+      };
+
+      let activeCredits = userData.credits !== undefined ? userData.credits : (userData.creditBalance !== undefined ? userData.creditBalance : 5000.0);
+
+      if (creditMode === 'set_default') {
+        const defaultCredits = PLAN_CREDITS[plan] || 0;
+        updates.credits = defaultCredits;
+        updates.creditBalance = defaultCredits;
+      } else if (creditMode === 'add_default') {
+        const defaultCredits = PLAN_CREDITS[plan] || 0;
+        updates.credits = activeCredits + defaultCredits;
+        updates.creditBalance = activeCredits + defaultCredits;
+      } else if (creditMode === 'set_custom') {
+        const amt = parseFloat(customCredits) || 0;
+        updates.credits = amt;
+        updates.creditBalance = amt;
+      }
+
+      await userDocRef.update(updates);
+      await logAdminAction(`Updated subscription plan to ${plan || 'Free/Trial'} (${creditMode || 'no-credit-change'})`, emailLower, req);
+
+      res.json({ success: true, plan: updates.plan, credits: updates.credits !== undefined ? updates.credits : activeCredits });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to update user plan:", err.message);
+      res.status(500).json({ error: "Failed to update user plan", details: err.message });
+    }
+  });
+
   // Lists connected pages across clients
   app.get("/api/admin/pages", verifyAdminMiddleware, async (req, res) => {
     const db = await getDb();
