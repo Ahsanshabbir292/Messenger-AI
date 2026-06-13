@@ -436,53 +436,7 @@ function formatDbError(error: any): string {
 let db: any = null;
 
 function handleFirebaseError(error: any): boolean {
-  if (!error) return false;
-  const msg = error.message || String(error);
-  const msgLower = msg.toLowerCase();
-  const code = error.code || "";
-  const codeStr = String(code).toLowerCase();
-  
-  if (
-    msgLower.includes("permission") ||
-    msgLower.includes("denied") ||
-    msgLower.includes("insufficient") ||
-    msgLower.includes("firestore.googleapis.com") ||
-    msgLower.includes("7") ||
-    msgLower.includes("8") ||
-    msgLower.includes("exhausted") ||
-    msgLower.includes("resource-exhausted") ||
-    msgLower.includes("resource_exhausted") ||
-    msgLower.includes("limit") ||
-    msgLower.includes("offline") ||
-    msgLower.includes("reach") ||
-    msgLower.includes("quota") ||
-    codeStr.includes("permission-denied") ||
-    codeStr.includes("resource-exhausted") ||
-    codeStr.includes("unauthenticated") ||
-    codeStr.includes("unavailable")
-  ) {
-    console.warn("[Firebase-Fallback] Firestore operation failed or denied:", msg);
-    console.warn("[Firebase-Fallback] Activating high-availability local JSON database on-the-fly!");
-    
-    // Persist fallback activation flag so restarts/future sessions immediately bypass real SDK
-    try {
-      const flagPath = path.join(appDir, ".firestore_fallback_active");
-      fs.writeFileSync(flagPath, "true", "utf8");
-    } catch (fsErr) {
-      console.warn("[Firebase-Fallback] Failed to persist fallback flag to disk:", fsErr);
-    }
-
-    // Proactively clean up current Web SDK instance's streaming background routines to prevent background warning prints
-    if (db && db.firestore) {
-      console.log("[Firebase-Fallback] Terminating active Firestore streams/listeners cleanly to prevent further background retry warnings...");
-      const activeFires = db.firestore;
-      disableNetwork(activeFires).catch(() => {});
-      terminate(activeFires).catch(() => {});
-    }
-
-    db = new MemoryFirestore();
-    return true;
-  }
+  // Disable all on-the-fly local db fallback
   return false;
 }
 
@@ -679,206 +633,7 @@ function deepSet(obj: any, pathStr: string, value: any) {
   current[parts[parts.length - 1]] = value;
 }
 
-class MemoryDocumentReference {
-  public path: string;
-  constructor(public col: string, public id: string) {
-    this.path = `${col}/${id}`;
-  }
-
-  collection(subCol: string) {
-    return new MemoryCollectionReference(`${this.col}/${this.id}/${subCol}`);
-  }
-
-  private getFilePath() {
-    return path.join(appDir, "db-fallback.json");
-  }
-
-  private readDb() {
-    try {
-      const filePath = this.getFilePath();
-      if (!fs.existsSync(filePath)) {
-        return {};
-      }
-      return JSON.parse(fs.readFileSync(filePath, "utf8"));
-    } catch (e) {
-      return {};
-    }
-  }
-
-  private writeDb(dbData: any) {
-    try {
-      fs.writeFileSync(this.getFilePath(), JSON.stringify(dbData, null, 2), "utf8");
-    } catch (e) {
-      console.error("[MemoryDB] Error writing to disk:", e);
-    }
-  }
-
-  async get() {
-    try {
-      const dbData = this.readDb();
-      const colData = dbData[this.col] || {};
-      const docData = colData[this.id];
-      return {
-        exists: docData !== undefined,
-        data: () => docData ? JSON.parse(JSON.stringify(docData)) : null
-      };
-    } catch (e: any) {
-      console.error(`[MemoryDB] Error get() for ${this.col}/${this.id}:`, e.message);
-      return { exists: false, data: () => null };
-    }
-  }
-
-  async set(data: any, options?: { merge?: boolean }) {
-    try {
-      const dbData = this.readDb();
-      if (!dbData[this.col]) dbData[this.col] = {};
-      const processed = this.replaceServerTimestamp(data);
-      
-      if (options?.merge === true) {
-        const existing = dbData[this.col][this.id] || {};
-        const updated = JSON.parse(JSON.stringify(existing));
-        for (const key of Object.keys(processed)) {
-          if (key.includes(".")) {
-            deepSet(updated, key, processed[key]);
-          } else {
-            updated[key] = processed[key];
-          }
-        }
-        dbData[this.col][this.id] = updated;
-      } else {
-        dbData[this.col][this.id] = processed;
-      }
-      
-      this.writeDb(dbData);
-    } catch (e: any) {
-      console.error(`[MemoryDB] Error set() for ${this.col}/${this.id}:`, e.message);
-    }
-  }
-
-  async update(data: any) {
-    try {
-      const dbData = this.readDb();
-      if (!dbData[this.col]) dbData[this.col] = {};
-      const existing = dbData[this.col][this.id] || {};
-      const processed = this.replaceServerTimestamp(data);
-      
-      const updated = JSON.parse(JSON.stringify(existing));
-      for (const key of Object.keys(processed)) {
-        if (key.includes(".")) {
-          deepSet(updated, key, processed[key]);
-        } else {
-          updated[key] = processed[key];
-        }
-      }
-      dbData[this.col][this.id] = updated;
-      this.writeDb(dbData);
-    } catch (e: any) {
-      console.error(`[MemoryDB] Error update() for ${this.col}/${this.id}:`, e.message);
-    }
-  }
-
-  async delete() {
-    try {
-      const dbData = this.readDb();
-      if (dbData[this.col] && dbData[this.col][this.id] !== undefined) {
-        delete dbData[this.col][this.id];
-        this.writeDb(dbData);
-      }
-    } catch (e: any) {
-      console.error(`[MemoryDB] Error delete() for ${this.col}/${this.id}:`, e.message);
-    }
-  }
-
-  private replaceServerTimestamp(input: any): any {
-    if (!input) return input;
-    const cloned = { ...input };
-    for (const key of Object.keys(cloned)) {
-      if (cloned[key] && typeof cloned[key] === "object" && cloned[key]._sv) {
-        cloned[key] = new Date().toISOString();
-      }
-    }
-    return cloned;
-  }
-}
-
-class MemoryCollectionReference {
-  constructor(private col: string) {}
-
-  doc(id: string) {
-    return new MemoryDocumentReference(this.col, id);
-  }
-
-  limit(n: number) {
-    return this;
-  }
-
-  orderBy(field: string, direction?: string) {
-    return this;
-  }
-
-  async get() {
-    try {
-      const filePath = path.join(appDir, "db-fallback.json");
-      if (!fs.existsSync(filePath)) {
-        return { docs: [] };
-      }
-      const dbData = JSON.parse(fs.readFileSync(filePath, "utf8"));
-      const colData = dbData[this.col] || {};
-      const docs = Object.keys(colData).map(id => ({
-        id,
-        ref: new MemoryDocumentReference(this.col, id),
-        data: () => JSON.parse(JSON.stringify(colData[id]))
-      }));
-      return {
-        docs
-      };
-    } catch (e) {
-      return { docs: [] };
-    }
-  }
-}
-
-class MemoryTransaction {
-  async get(compatDocRef: any) {
-    return compatDocRef.get();
-  }
-
-  update(compatDocRef: any, data: any) {
-    compatDocRef.update(data);
-    return this;
-  }
-
-  set(compatDocRef: any, data: any) {
-    compatDocRef.set(data);
-    return this;
-  }
-
-  delete(compatDocRef: any) {
-    compatDocRef.delete();
-    return this;
-  }
-}
-
-class MemoryFirestore {
-  collection(col: string) {
-    return new MemoryCollectionReference(col);
-  }
-
-  collectionGroup(colId: string) {
-    return {
-      get: async () => ({ docs: [] })
-    };
-  }
-
-  async runTransaction(updateFn: (transaction: any) => Promise<any>) {
-    const tx = new MemoryTransaction();
-    return updateFn(tx);
-  }
-}
-
-const FieldValue = {
-  serverTimestamp: () => ({ _sv: true })
-};
+const FieldValue = admin.firestore.FieldValue;
 
 function toFirestoreValue(val: any): any {
   if (val === null || val === undefined) return { nullValue: null };
@@ -1352,18 +1107,9 @@ class RestCollectionGroupReference {
   }
 }
 
-class RestFirestore {
-  collection(col: string) {
-    return new RestCollectionReference(col);
-  }
-  collectionGroup(colId: string) {
-    return new RestCollectionGroupReference(colId);
-  }
-  async runTransaction(updateFn: (transaction: any) => Promise<any>) {
-    const tx = new RestTransaction();
-    return updateFn(tx);
-  }
-}
+
+// RestFirestore class and REST fallback capabilities have been fully removed under production rules.
+
 
 let dbDiagnosticInfo = {
   dbType: "uninitialized",
@@ -1379,15 +1125,6 @@ let firebaseAdminApp: admin.app.App | null = null;
 async function getDb(): Promise<any> {
   if (db) return db;
   isDbInitializing = true;
-
-  const flagPath = path.join(appDir, ".firestore_fallback_active");
-  if (fs.existsSync(flagPath)) {
-    console.warn("[Firebase] Local JSON database fallback is active. Initializing MemoryFirestore!");
-    db = new MemoryFirestore();
-    isDbInitializing = false;
-    dbDiagnosticInfo.dbType = "MemoryFirestore (Fallback File Active Flag)";
-    return db;
-  }
 
   dbDiagnosticInfo.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
   dbDiagnosticInfo.projectId = firebaseConfig.projectId || "gen-lang-client-0784575306";
@@ -1429,75 +1166,29 @@ async function getDb(): Promise<any> {
 
     const dbId = firebaseConfig.firestoreDatabaseId;
     console.log(`[Firebase] Connecting to Admin Firestore Database ID: ${dbId}`);
-    db = getAdminFirestore(firebaseAdminApp, dbId === "default" ? undefined : dbId);
+    const actualDbId = (dbId === "default" || dbId === "(default)") ? undefined : dbId;
+    db = getAdminFirestore(firebaseAdminApp, actualDbId);
 
-    // Verify active connectivity / permissions with a fast 10s timeout
+    // Verify active connectivity / permissions with a fast 15s timeout
     try {
       await Promise.race([
         db.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for Firestore connection")), 10000))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (15s) waiting for Firestore connection")), 15000))
       ]);
       console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
       dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
     } catch (testErr: any) {
-      dbDiagnosticInfo.errorTrace.push(`Custom DB '${dbId}' Failed: ` + testErr.message);
-      // SMART AUTO-RECONCILE: If custom database failed, try the (default) database!
-      if (dbId !== "default" && dbId !== "(default)") {
-        console.warn(`[Firebase] Connection to custom DB ID '${dbId}' failed. Attempting fallback to '(default)' database...`);
-        try {
-          const defaultDb = getAdminFirestore(firebaseAdminApp, undefined);
-          await Promise.race([
-            defaultDb.collection("system_check").limit(1).get(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for default Firestore connection")), 10000))
-          ]);
-          console.log("[Firebase] Successfully connected to default '(default)' Firestore database! Using default.");
-          firebaseConfig.firestoreDatabaseId = "default";
-          db = defaultDb;
-          isDbInitializing = false;
-          dbDiagnosticInfo.dbType = "Firebase Admin Firestore (Fallback to (default) Database)";
-          return db;
-        } catch (defaultDbErr: any) {
-          dbDiagnosticInfo.errorTrace.push(`Fallback Default DB Failed: ` + defaultDbErr.message);
-          console.warn("[Firebase] Parallel connection to default '(default)' database also failed:", defaultDbErr.message);
-        }
-      }
-
-      console.warn("[Firebase] Admin Firestore testing failed or timed out. Trying cloud-hosted RestFirestore client next...");
-      try {
-        const restDb = new RestFirestore();
-        await Promise.race([
-          restDb.collection("system_check").limit(1).get(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for RestFirestore")), 10000))
-        ]);
-        console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
-        db = restDb;
-        dbDiagnosticInfo.dbType = "RestFirestore (Persistent Web Client)";
-      } catch (restErr: any) {
-        dbDiagnosticInfo.errorTrace.push(`RestFirestore Failed: ` + restErr.message);
-        console.warn("[Firebase] RestFirestore connection also failed. Activating local MemoryFirestore fallback:", restErr.message);
-        db = new MemoryFirestore();
-        dbDiagnosticInfo.dbType = "MemoryFirestore (Local fallback file due to all failures)";
-      }
+      console.error("[Firebase] Connection verification to Admin Firestore failed or timed out:", testErr.message);
+      dbDiagnosticInfo.errorTrace.push(`Connection test failed: ${testErr.message}`);
+      throw testErr;
     }
   } catch (err: any) {
-    dbDiagnosticInfo.errorTrace.push(`Init App Failed: ` + err.message);
-    console.error("[Firebase] Error initializing Firebase Admin App:", err.message);
-    console.warn("[Firebase] Trying cloud-hosted RestFirestore client fallback...");
-    try {
-      const restDb = new RestFirestore();
-      await Promise.race([
-        restDb.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for RestFirestore")), 10000))
-      ]);
-      console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
-      db = restDb;
-      dbDiagnosticInfo.dbType = "RestFirestore (Persistent Web Client from root error)";
-    } catch (restErr: any) {
-      dbDiagnosticInfo.errorTrace.push(`Fallback RestFirestore Failed: ` + restErr.message);
-      console.warn("[Firebase] RestFirestore connection also failed. Falling back to local MemoryFirestore!");
-      db = new MemoryFirestore();
-      dbDiagnosticInfo.dbType = "MemoryFirestore (Local fallback file from root error)";
-    }
+    console.error(`[Firebase] Database Connection/Init Failed: ${err.message}. Local fallback is Disabled.`);
+    dbDiagnosticInfo.errorTrace.push(`Init App Failed: ${err.message}`);
+    dbDiagnosticInfo.dbType = "failed";
+    db = null;
+    isDbInitializing = false;
+    throw err;
   }
 
   isDbInitializing = false;
@@ -1564,7 +1255,6 @@ async function startServer() {
       req.rawBody = buf;
     }
   }));
-  const sessionDb = await getDb();
   // Bypass FirestoreStore to guarantee session operations are 100% non-blocking and ultra-fast.
   // We already have a reliable, header-based x-user-email session restoration mechanism for the client-side.
   const sessionStore = undefined;
@@ -8700,66 +8390,70 @@ Write a realistic, short and natural response expressing your reaction, query, o
 
   // Startup check (Fix 4C) & Database Social Accounts Cleanup Block (Asynchronous background check to avoid blocking PORT listening)
   setTimeout(async () => {
-    const testDb = await getDb();
-    if (testDb) {
-      try {
-        await testDb.collection("_health").doc("ping").set({ ts: new Date().toISOString() });
-        console.log("[Startup] ✅ Firestore connection verified — data is persistent");
-        console.log("[Startup] Session store: Firestore (persistent across deploys)");
-        
-        console.log("[Startup] 🧹 Running complete Google/Facebook sign-in accounts & integration cleanup in background...");
-        const usersSnap = await testDb.collection("users").get();
-        let deletedCount = 0;
-        let cleanedCount = 0;
-
-        for (const d of usersSnap.docs) {
-          const uEmail = d.id;
-          const uData = d.data();
-
-          // Check if user is a Google or Facebook signup (has linked flags or lacks a password)
-          const isSocialUser = !uData || !uData.password || uData.googleLinked === true || uData.facebookLinked === true;
+    try {
+      const testDb = await getDb();
+      if (testDb) {
+        try {
+          await testDb.collection("_health").doc("ping").set({ ts: new Date().toISOString() });
+          console.log("[Startup] ✅ Firestore connection verified — data is persistent");
+          console.log("[Startup] Session store: Firestore (persistent across deploys)");
           
-          // Retain standard admin profile but disconnect social linking
-          const isPartner = uEmail.toLowerCase().trim() === "ahsan.shabbir292@gmail.com";
+          console.log("[Startup] 🧹 Running complete Google/Facebook sign-in accounts & integration cleanup in background...");
+          const usersSnap = await testDb.collection("users").get();
+          let deletedCount = 0;
+          let cleanedCount = 0;
 
-          if (isSocialUser && !isPartner) {
-            // Clear associated broadcasts first
-            const bcastSnap = await testDb.collection("users").doc(uEmail).collection("broadcasts").get();
-            for (const bDoc of bcastSnap.docs) {
-              await bDoc.ref.delete();
-            }
-            await d.ref.delete();
-            deletedCount++;
-          } else {
-            // Clear all social credential linkages and integration nodes from standard users
-            const updates: any = {
-              googleLinked: null,
-              facebookLinked: null,
-              facebook: null,
-              facebookWorkspaces: {}
-            };
+          for (const d of usersSnap.docs) {
+            const uEmail = d.id;
+            const uData = d.data();
 
-            for (const key of Object.keys(uData || {})) {
-              if (key.startsWith("facebookWorkspaces.")) {
-                updates[key] = null;
+            // Check if user is a Google or Facebook signup (has linked flags or lacks a password)
+            const isSocialUser = !uData || !uData.password || uData.googleLinked === true || uData.facebookLinked === true;
+            
+            // Retain standard admin profile but disconnect social linking
+            const isPartner = uEmail.toLowerCase().trim() === "ahsan.shabbir292@gmail.com";
+
+            if (isSocialUser && !isPartner) {
+              // Clear associated broadcasts first
+              const bcastSnap = await testDb.collection("users").doc(uEmail).collection("broadcasts").get();
+              for (const bDoc of bcastSnap.docs) {
+                await bDoc.ref.delete();
               }
+              await d.ref.delete();
+              deletedCount++;
+            } else {
+              // Clear all social credential linkages and integration nodes from standard users
+              const updates: any = {
+                googleLinked: null,
+                facebookLinked: null,
+                facebook: null,
+                facebookWorkspaces: {}
+              };
+
+              for (const key of Object.keys(uData || {})) {
+                if (key.startsWith("facebookWorkspaces.")) {
+                  updates[key] = null;
+                }
+              }
+
+              await d.ref.update(updates);
+              cleanedCount++;
             }
-
-            await d.ref.update(updates);
-            cleanedCount++;
           }
-        }
 
-        // Evict all stored locks
-        const locksSnap = await testDb.collection("facebook_locks").get();
-        for (const lDoc of locksSnap.docs) {
-          await lDoc.ref.delete();
-        }
+          // Evict all stored locks
+          const locksSnap = await testDb.collection("facebook_locks").get();
+          for (const lDoc of locksSnap.docs) {
+            await lDoc.ref.delete();
+          }
 
-        console.log(`[Startup] 🧼 Done! Permanently deleted ${deletedCount} Google/Facebook login users. Reset credentials/links for ${cleanedCount} accounts. Wiped locks.`);
-      } catch (e: any) {
-        console.error("[Startup] ❌ Startup Database Verification & Cleanup failed:", e.message);
+          console.log(`[Startup] 🧼 Done! Permanently deleted ${deletedCount} Google/Facebook login users. Reset credentials/links for ${cleanedCount} accounts. Wiped locks.`);
+        } catch (e: any) {
+          console.error("[Startup] ❌ Startup Database Verification & Cleanup failed:", e.message);
+        }
       }
+    } catch (startupErr: any) {
+      console.error("[Startup] ❌ Database Pre-initialization Failed during startup background timeout check:", startupErr.message);
     }
   }, 100);
 

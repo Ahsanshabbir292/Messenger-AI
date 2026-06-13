@@ -15,6 +15,6 @@ const firebaseConfig = (importMetaAny.env && importMetaAny.env.VITE_FIREBASE_CON
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 const configAny = firebaseConfig;
-export const db = configAny.firestoreDatabaseId && configAny.firestoreDatabaseId !== "(default)"
+export const db = configAny.firestoreDatabaseId && configAny.firestoreDatabaseId !== "(default)" && configAny.firestoreDatabaseId !== "default"
   ? getFirestore(app, configAny.firestoreDatabaseId)
   : getFirestore(app);
