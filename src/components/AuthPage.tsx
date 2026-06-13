@@ -307,6 +307,7 @@ export default function AuthPage({
         setSuccessMessage(res.data.message || "Your password has been successfully reset!");
         
         // Reset flows and return to signin
+        const finishedEmail = forgotEmail;
         setForgotEmail('');
         setForgotCode('');
         setForgotNewPassword('');
@@ -314,6 +315,7 @@ export default function AuthPage({
         setSessionCode(null);
         setIsSimulatedReset(false);
         setForgotStep('request');
+        setFormData(prev => ({ ...prev, email: finishedEmail, password: '' }));
         setMode('signin');
       } catch (err: any) {
         const errMsg = err.response?.data?.error || err.message || String(err);

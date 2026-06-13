@@ -1513,9 +1513,6 @@ async function startServer() {
     if (!userEmail || userEmail === "anonymous") {
       return "anonymous";
     }
-    if (userEmail === "ahsan.shabbir292@gmail.com") {
-      return "ahsan.shabbir292@gmail.com";
-    }
 
     // 1. Check if caller explicitly requested their separate personal workspace
     let reqWorkspaceId = req?.headers?.['x-workspace-id'] || req?.query?.workspaceId || req?.body?.workspaceId;
@@ -2918,7 +2915,8 @@ Super-administrative console restricted to permitted accounts to audit system ac
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
     try {
-      const inviteDoc = await db.collection("invitations").doc(email.toLowerCase()).get();
+      const emailLower = email.toLowerCase().trim();
+      const inviteDoc = await db.collection("invitations").doc(emailLower).get();
       if (!inviteDoc.exists) {
         return res.status(400).json({ error: "No invitation was found for this email address." });
       }
@@ -2929,7 +2927,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       }
 
       // Check if user already exists
-      const userDoc = await db.collection("users").doc(email.toLowerCase()).get();
+      const userDoc = await db.collection("users").doc(emailLower).get();
       if (userDoc.exists) {
         return res.status(400).json({ error: "User already exists with this email." });
       }
@@ -2939,9 +2937,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
       // Create user within inviter's workspace
       const userData = {
-        email: email.toLowerCase(),
+        email: emailLower,
         password: hashedPassword,
-        fullName: fullName || inviteData.name || email.split('@')[0],
+        fullName: fullName || inviteData.name || emailLower.split('@')[0],
         workspaceId: inviteData.inviterWorkspaceId || inviteData.workspaceId || "ws_default",
         role: role || inviteData.role || inviteData.role || "member",
         assignedPages: assignedPages || inviteData.assignedPages || [],
@@ -2950,10 +2948,10 @@ Super-administrative console restricted to permitted accounts to audit system ac
         createdAt: new Date().toISOString()
       };
 
-      await db.collection("users").doc(email.toLowerCase()).set(userData);
+      await db.collection("users").doc(emailLower).set(userData);
 
       // Mark invitation as accepted
-      await db.collection("invitations").doc(email.toLowerCase()).update({
+      await db.collection("invitations").doc(emailLower).update({
         status: "accepted",
         acceptedAt: new Date().toISOString()
       });
@@ -2965,7 +2963,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
         if (inviterDoc.exists) {
           const inviterData = inviterDoc.data();
           const team = inviterData.teamMembers || [];
-          const idx = team.findIndex((m: any) => m.email.toLowerCase() === email.toLowerCase());
+          const idx = team.findIndex((m: any) => m.email.toLowerCase() === emailLower);
           if (idx > -1) {
             team[idx].status = "active";
             team[idx].joined_at = new Date().toISOString();
@@ -3001,23 +2999,24 @@ Super-administrative console restricted to permitted accounts to audit system ac
     if (!db) return res.status(500).json({ error: "Database not initialized" });
 
     try {
+      const emailLower = email.toLowerCase().trim();
       const adminDoc = await db.collection("users").doc(userEmail).get();
       if (!adminDoc.exists) return res.status(404).json({ error: "Profile not found." });
 
       const adminData = adminDoc.data();
       const teamMembers = adminData.teamMembers || [];
-      const updatedList = teamMembers.filter((m: any) => m.email.toLowerCase() !== email.toLowerCase());
+      const updatedList = teamMembers.filter((m: any) => m.email.toLowerCase() !== emailLower);
 
       await db.collection("users").doc(userEmail).update({ teamMembers: updatedList });
       
       // Also delete invitation
       try {
-        await db.collection("invitations").doc(email.toLowerCase()).delete();
+        await db.collection("invitations").doc(emailLower).delete();
       } catch (err) {}
 
       // Reset the deleted team member's user document so they can have independent owner access
       try {
-        await db.collection("users").doc(email.toLowerCase()).update({
+        await db.collection("users").doc(emailLower).update({
           inviterEmail: null,
           role: "owner",
           workspaceId: "personal"
@@ -3032,15 +3031,17 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
   // Signup Phase 1: Request Signup Code
   app.post("/api/auth/signup/request-code", async (req, res) => {
-    const { email } = req.body;
-    console.log(`[AUTH] Signup verification code request for: ${email}`);
+    const { email: rawEmail } = req.body;
+    console.log(`[AUTH] Signup verification code request for: ${rawEmail}`);
 
-    if (!email) {
+    if (!rawEmail) {
       return res.status(400).json({ error: "Email address is required." });
     }
 
+    const emailLower = rawEmail.toLowerCase().trim();
+
     // Check for Temp Mail
-    const domain = email.split('@')[1];
+    const domain = emailLower.split('@')[1];
     if (TEMP_MAIL_DOMAINS.includes(domain)) {
       return res.status(400).json({ error: "Temporary emails are not allowed for registration." });
     }
@@ -3051,7 +3052,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
 
     try {
-      const emailLower = email.toLowerCase().trim();
       
       // Check if user already exists
       const userDoc = await db.collection("users").doc(emailLower).get();
@@ -3129,7 +3129,8 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
   // Direct Auth Routes (Enforced Verification Code System)
   app.post("/api/auth/signup", async (req, res) => {
-    const { email, password, fullName, workspaceName, turnstileToken, code } = req.body;
+    const { email: rawEmail, password, fullName, workspaceName, turnstileToken, code } = req.body;
+    const email = rawEmail ? rawEmail.toLowerCase().trim() : "";
     console.log(`[AUTH] Enforced OTP signup request for: ${email}`);
     
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -3251,12 +3252,14 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
   // Password Reset Phase 1: Request Reset Code
   app.post("/api/auth/forgot-password/request", async (req, res) => {
-    const { email } = req.body;
-    console.log(`[AUTH] Forgot password code request for: ${email}`);
+    const { email: rawEmail } = req.body;
+    console.log(`[AUTH] Forgot password code request for: ${rawEmail}`);
 
-    if (!email) {
+    if (!rawEmail) {
       return res.status(400).json({ error: "Email address is required." });
     }
+
+    const emailLower = rawEmail.toLowerCase().trim();
 
     const db = await getDb();
     if (!db) {
@@ -3264,7 +3267,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
 
     try {
-      const emailLower = email.toLowerCase().trim();
       const userDoc = await db.collection("users").doc(emailLower).get();
 
       if (!userDoc.exists) {
@@ -3953,6 +3955,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
     if (!userEmail) {
       userEmail = req.session?.user?.email || "sandbox_user@gmail.com";
     }
+    userEmail = userEmail.toLowerCase().trim();
     
     // Read selected checkboxes
     const activeConfigs = req.body.pages;
@@ -4280,6 +4283,8 @@ Super-administrative console restricted to permitted accounts to audit system ac
       if (!userEmail) {
         return res.status(400).send("Authentication state expired or missing user context.");
       }
+
+      userEmail = userEmail.toLowerCase().trim();
 
       // Check duplicates for real Facebook User ID
       if (fbUserId) {
@@ -5899,9 +5904,6 @@ Write a realistic, short and natural response expressing your reaction, query, o
     };
 
     const isScheduled = !!(scheduleDate && scheduleTime);
-    if (!isScheduled) {
-      activeBroadcastThreads.add(broadcastId);
-    }
 
     const bcastDocRef = db.collection("users").doc(userEmail).collection("broadcasts").doc(broadcastId);
     await bcastDocRef.set(broadcastRecord);
