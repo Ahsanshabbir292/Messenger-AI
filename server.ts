@@ -1172,30 +1172,16 @@ async function getDb(): Promise<any> {
     }
 
     const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    console.log(`[Firebase] Connecting to Admin Firestore with settings databaseId: ${dbId}`);
+    console.log(`[Firebase] Lazily connecting to Admin Firestore with databaseId: ${dbId}`);
     db = admin.firestore(firebaseAdminApp);
     db.settings({ databaseId: dbId, ignoreUndefinedProperties: true });
 
-    // Verify active connectivity / permissions with a fast 15s timeout
-    try {
-      await Promise.race([
-        db.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (15s) waiting for Firestore connection")), 15000))
-      ]);
-      console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
-      dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
-    } catch (testErr: any) {
-      console.error("[Firebase] Connection verification to Admin Firestore failed or timed out:", testErr.message);
-      dbDiagnosticInfo.errorTrace.push(`Connection test failed: ${testErr.message}`);
-      throw testErr;
-    }
+    dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
   } catch (err: any) {
-    console.error(`[Firebase] Database Connection/Init Failed: ${err.message}. Local fallback is Disabled.`);
+    console.error(`[Firebase] Database Initialization Failed: ${err.message}`);
     dbDiagnosticInfo.errorTrace.push(`Init App Failed: ${err.message}`);
     dbDiagnosticInfo.dbType = "failed";
     db = null;
-    isDbInitializing = false;
-    throw err;
   }
 
   isDbInitializing = false;
