@@ -1431,11 +1431,11 @@ async function getDb(): Promise<any> {
     console.log(`[Firebase] Connecting to Admin Firestore Database ID: ${dbId}`);
     db = getAdminFirestore(firebaseAdminApp, dbId === "default" ? undefined : dbId);
 
-    // Verify active connectivity / permissions with a fast 1.5s timeout
+    // Verify active connectivity / permissions with a fast 10s timeout
     try {
       await Promise.race([
         db.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for Firestore connection")), 1500))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for Firestore connection")), 10000))
       ]);
       console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
       dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
@@ -1448,7 +1448,7 @@ async function getDb(): Promise<any> {
           const defaultDb = getAdminFirestore(firebaseAdminApp, undefined);
           await Promise.race([
             defaultDb.collection("system_check").limit(1).get(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for default Firestore connection")), 1500))
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for default Firestore connection")), 10000))
           ]);
           console.log("[Firebase] Successfully connected to default '(default)' Firestore database! Using default.");
           firebaseConfig.firestoreDatabaseId = "default";
@@ -1467,7 +1467,7 @@ async function getDb(): Promise<any> {
         const restDb = new RestFirestore();
         await Promise.race([
           restDb.collection("system_check").limit(1).get(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for RestFirestore")), 1500))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for RestFirestore")), 10000))
         ]);
         console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
         db = restDb;
@@ -1487,7 +1487,7 @@ async function getDb(): Promise<any> {
       const restDb = new RestFirestore();
       await Promise.race([
         restDb.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for RestFirestore")), 1500))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for RestFirestore")), 10000))
       ]);
       console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
       db = restDb;
