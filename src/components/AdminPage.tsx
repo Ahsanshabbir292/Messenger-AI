@@ -22,6 +22,7 @@ type AdminTab = 'dashboard' | 'users' | 'credits' | 'subscriptions' | 'pages' | 
 export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPageProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [stats, setStats] = useState<any>(null);
+  const [dbDiag, setDbDiag] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
   const [pages, setPages] = useState<any[]>([]);
@@ -114,13 +115,14 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
         }
 
         // Parallel retrieval of stats and details
-        const [statsRes, usersRes, broadcastsRes, pagesRes, announcementsRes, logsRes] = await Promise.all([
+        const [statsRes, usersRes, broadcastsRes, pagesRes, announcementsRes, logsRes, dbDiagRes] = await Promise.all([
           axios.get('/api/admin/stats'),
           axios.get('/api/admin/users'),
           axios.get('/api/admin/broadcasts'),
           axios.get('/api/admin/pages'),
           axios.get('/api/announcements').catch(() => ({ data: { announcements: [] } })),
-          axios.get('/api/admin/logs').catch(() => ({ data: { logs: [] } }))
+          axios.get('/api/admin/logs').catch(() => ({ data: { logs: [] } })),
+          axios.get('/api/admin/db-diagnostic').catch(() => ({ data: { success: false, diagnostic: { dbType: "Error loading diagnostics api" } } }))
         ]);
 
         setStats(statsRes.data);
@@ -130,6 +132,9 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
         setOrders(statsRes.data.orders || []);
         setAnnouncements(announcementsRes.data.announcements || []);
         setAdminLogs(logsRes.data.logs || []);
+        if (dbDiagRes && dbDiagRes.data) {
+          setDbDiag(dbDiagRes.data);
+        }
       } catch (err: any) {
         console.error("Failed to load administrative overview:", err);
         addToast(err.response?.data?.error || "Error fetching admin data", "danger");
@@ -523,6 +528,77 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
           {/* TAB 1: OVERVIEW PANEL */}
           {activeTab === 'dashboard' && (
             <div className="space-y-8 animate-in fade-in duration-300">
+
+              {/* Database Connection & Health Diagnostics */}
+              {dbDiag && dbDiag.diagnostic && (
+                <div id="db-diagnostic-panel" className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-xl">
+                  <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
+                  
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Activity className="w-4 h-4 text-indigo-400" />
+                        <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">
+                          Firebase & Firestore Database Connection Diagnostic
+                        </h4>
+                      </div>
+                      
+                      <div className="flex flex-wrap items-center gap-3 mt-2">
+                        <span className={`px-3 py-1 rounded-full text-xs font-black tracking-wide uppercase ${
+                          dbDiag.diagnostic.dbType?.includes("Admin Firestore") || dbDiag.diagnostic.dbType?.includes("GRP-Firestore")
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : dbDiag.diagnostic.dbType?.includes("RestFirestore")
+                            ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                            : "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"
+                        }`}>
+                          Mode: {dbDiag.diagnostic.dbType || "Unknown"}
+                        </span>
+                        
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                          Project: {dbDiag.diagnostic.projectId}
+                        </span>
+
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                          DB ID: {dbDiag.diagnostic.firestoreDatabaseId}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col text-left md:text-right">
+                      <span className="text-[10px] text-slate-500 uppercase tracking-wider font-extrabold">Active SA Key on Server:</span>
+                      <span className={`text-xs font-mono font-bold mt-1 ${dbDiag.hasServiceAccountEnvSet || dbDiag.diagnostic.hasServiceAccount ? "text-emerald-400" : "text-rose-400"}`}>
+                        {dbDiag.hasServiceAccountEnvSet || dbDiag.diagnostic.hasServiceAccount ? "✓ SERVICE_ACCOUNT_KEY Configured" : "✗ MISSING SERVICE_ACCOUNT_KEY"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {dbDiag.diagnostic.dbType?.includes("MemoryFirestore") && (
+                    <div className="mt-4 p-3 bg-rose-950/20 border border-rose-800/30 rounded-xl flex items-start gap-2 text-rose-200">
+                      <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-bold text-rose-300">Ephemeral Storage Warning (Render Deploy Mode)</p>
+                        <p className="text-[10px] text-rose-400 leading-relaxed mt-1">
+                          You are currently running on a local JSON disk file database fallback because the system timed out or failed to connect with the cloud Firestore. 
+                          Since Render's servers run using <strong>ephemeral filesystems</strong>, whenever you make a push to GitHub or Render updates/deploys, your container 
+                          is completely destroyed and recreated, causing any accounts or packages you set here to be <strong>instantly wiped</strong>.
+                        </p>
+                        <p className="text-[10px] text-rose-500 font-extrabold mt-1">
+                          Action required: Make sure your Render environment variables include `FIREBASE_SERVICE_ACCOUNT_KEY` filled with the actual JSON string from your Google Firebase key file.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {dbDiag.diagnostic.errorTrace && dbDiag.diagnostic.errorTrace.length > 0 && (
+                    <div className="mt-4 bg-slate-950/70 border border-slate-800/80 p-3 rounded-xl font-mono text-[9px] text-slate-400 max-h-24 overflow-y-auto">
+                      <p className="font-extrabold text-indigo-400 mb-1 uppercase tracking-wider text-[10px]">Startup Connection Trace & Error Logs:</p>
+                      {dbDiag.diagnostic.errorTrace.map((err: string, i: number) => (
+                        <div key={i} className="text-rose-400/80 mt-0.5">{`[Trace ${i + 1}] ${err}`}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               
               {/* Metric stats card deck */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -688,6 +764,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                       <tr>
                         <th className="py-3">Email Address</th>
                         <th className="py-3">Workspace name</th>
+                        <th className="py-3">Package / Plan</th>
                         <th className="py-3">Join Date</th>
                         <th className="py-3">Last Login</th>
                         <th className="py-3">Broadcasts</th>
@@ -706,6 +783,18 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                             </div>
                           </td>
                           <td className="py-3.5 font-bold text-slate-300">{u.workspaceName || `${u.fullName}'s Workspace`}</td>
+                          <td className="py-3.5">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold capitalize ${
+                              u.plan === 'starter' ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/20' :
+                              u.plan === 'growth' ? 'bg-amber-500/15 text-amber-300 border border-amber-500/20' :
+                              u.plan === 'pro' ? 'bg-purple-500/15 text-purple-300 border border-purple-500/20' :
+                              u.plan === 'business' ? 'bg-pink-500/15 text-pink-300 border border-pink-500/20' :
+                              u.plan === 'enterprise' ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/20' :
+                              'bg-amber-500/15 text-amber-400 border border-amber-500/20'
+                            }`}>
+                              {u.plan ? `${u.plan}` : '3-Day Trial'}
+                            </span>
+                          </td>
                           <td className="py-3.5 font-semibold text-slate-400">
                             {u.createdAt ? (
                               typeof u.createdAt === 'string' ? new Date(u.createdAt).toLocaleDateString() : 'Active Member'

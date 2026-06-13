@@ -1365,6 +1365,14 @@ class RestFirestore {
   }
 }
 
+let dbDiagnosticInfo = {
+  dbType: "uninitialized",
+  firestoreDatabaseId: "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac",
+  projectId: "gen-lang-client-0784575306",
+  hasServiceAccount: false,
+  errorTrace: [] as string[]
+};
+
 let isDbInitializing = false;
 let firebaseAdminApp: admin.app.App | null = null;
 
@@ -1377,8 +1385,12 @@ async function getDb(): Promise<any> {
     console.warn("[Firebase] Local JSON database fallback is active. Initializing MemoryFirestore!");
     db = new MemoryFirestore();
     isDbInitializing = false;
+    dbDiagnosticInfo.dbType = "MemoryFirestore (Fallback File Active Flag)";
     return db;
   }
+
+  dbDiagnosticInfo.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+  dbDiagnosticInfo.projectId = firebaseConfig.projectId || "gen-lang-client-0784575306";
 
   try {
     console.log(`[Firebase] Initializing official Firebase Admin SDK for high-performance Firestore!`);
@@ -1386,12 +1398,14 @@ async function getDb(): Promise<any> {
       const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
       if (serviceAccountPath && fs.existsSync(serviceAccountPath)) {
         console.log("[Firebase] Initializing using GOOGLE_APPLICATION_CREDENTIALS path.");
+        dbDiagnosticInfo.hasServiceAccount = true;
         firebaseAdminApp = admin.initializeApp({
           credential: admin.credential.cert(serviceAccountPath),
           projectId: firebaseConfig.projectId
         });
       } else if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
         console.log("[Firebase] Initializing using FIREBASE_SERVICE_ACCOUNT_KEY env var.");
+        dbDiagnosticInfo.hasServiceAccount = true;
         try {
           const saKey = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
           firebaseAdminApp = admin.initializeApp({
@@ -1400,6 +1414,7 @@ async function getDb(): Promise<any> {
           });
         } catch (saErr: any) {
           console.error("[Firebase] Error parsing FIREBASE_SERVICE_ACCOUNT_KEY JSON:", saErr.message);
+          dbDiagnosticInfo.errorTrace.push("SA_JSON_PARSE_ERROR: " + saErr.message);
           firebaseAdminApp = admin.initializeApp({
             projectId: firebaseConfig.projectId
           });
@@ -1416,42 +1431,72 @@ async function getDb(): Promise<any> {
     console.log(`[Firebase] Connecting to Admin Firestore Database ID: ${dbId}`);
     db = getAdminFirestore(firebaseAdminApp, dbId === "default" ? undefined : dbId);
 
-    // Verify active connectivity / permissions with a fast 1.5s timeout
+    // Verify active connectivity / permissions with a fast 10s timeout
     try {
       await Promise.race([
         db.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for Firestore connection")), 1500))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for Firestore connection")), 10000))
       ]);
       console.log("[Firebase] Official Firebase Admin GRPB-Firestore connected successfully!");
+      dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
     } catch (testErr: any) {
+      dbDiagnosticInfo.errorTrace.push(`Custom DB '${dbId}' Failed: ` + testErr.message);
+      // SMART AUTO-RECONCILE: If custom database failed, try the (default) database!
+      if (dbId !== "default" && dbId !== "(default)") {
+        console.warn(`[Firebase] Connection to custom DB ID '${dbId}' failed. Attempting fallback to '(default)' database...`);
+        try {
+          const defaultDb = getAdminFirestore(firebaseAdminApp, undefined);
+          await Promise.race([
+            defaultDb.collection("system_check").limit(1).get(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for default Firestore connection")), 10000))
+          ]);
+          console.log("[Firebase] Successfully connected to default '(default)' Firestore database! Using default.");
+          firebaseConfig.firestoreDatabaseId = "default";
+          db = defaultDb;
+          isDbInitializing = false;
+          dbDiagnosticInfo.dbType = "Firebase Admin Firestore (Fallback to (default) Database)";
+          return db;
+        } catch (defaultDbErr: any) {
+          dbDiagnosticInfo.errorTrace.push(`Fallback Default DB Failed: ` + defaultDbErr.message);
+          console.warn("[Firebase] Parallel connection to default '(default)' database also failed:", defaultDbErr.message);
+        }
+      }
+
       console.warn("[Firebase] Admin Firestore testing failed or timed out. Trying cloud-hosted RestFirestore client next...");
       try {
         const restDb = new RestFirestore();
         await Promise.race([
           restDb.collection("system_check").limit(1).get(),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for RestFirestore")), 1500))
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for RestFirestore")), 10000))
         ]);
         console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
         db = restDb;
+        dbDiagnosticInfo.dbType = "RestFirestore (Persistent Web Client)";
       } catch (restErr: any) {
+        dbDiagnosticInfo.errorTrace.push(`RestFirestore Failed: ` + restErr.message);
         console.warn("[Firebase] RestFirestore connection also failed. Activating local MemoryFirestore fallback:", restErr.message);
         db = new MemoryFirestore();
+        dbDiagnosticInfo.dbType = "MemoryFirestore (Local fallback file due to all failures)";
       }
     }
   } catch (err: any) {
+    dbDiagnosticInfo.errorTrace.push(`Init App Failed: ` + err.message);
     console.error("[Firebase] Error initializing Firebase Admin App:", err.message);
     console.warn("[Firebase] Trying cloud-hosted RestFirestore client fallback...");
     try {
       const restDb = new RestFirestore();
       await Promise.race([
         restDb.collection("system_check").limit(1).get(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (1.5s) waiting for RestFirestore")), 1500))
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout (10s) waiting for RestFirestore")), 10000))
       ]);
       console.log("[Firebase] RestFirestore client connected successfully! Staying persistent in the cloud!");
       db = restDb;
+      dbDiagnosticInfo.dbType = "RestFirestore (Persistent Web Client from root error)";
     } catch (restErr: any) {
+      dbDiagnosticInfo.errorTrace.push(`Fallback RestFirestore Failed: ` + restErr.message);
       console.warn("[Firebase] RestFirestore connection also failed. Falling back to local MemoryFirestore!");
       db = new MemoryFirestore();
+      dbDiagnosticInfo.dbType = "MemoryFirestore (Local fallback file from root error)";
     }
   }
 
@@ -5091,9 +5136,32 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const data = await getFacebookData(req);
       if (!data) return res.status(401).json({ error: "Not authenticated" });
 
+      const userDocRef = db.collection("users").doc(userEmail);
+      const userSnap = await userDocRef.get();
+      const userData = userSnap.exists ? userSnap.data() : {};
+      
+      // Determine active package limits on backend to ensure secure restrictions
+      const currentPlan = userData?.plan || null;
+      let limit = 3; // default for 3-Day Free Trial
+      let planName = "3-Day Free Trial";
+
+      if (currentPlan) {
+        const lowerPlan = currentPlan.toLowerCase().trim();
+        if (lowerPlan === "starter") { limit = 1; planName = "Starter Package"; }
+        else if (lowerPlan === "growth") { limit = 3; planName = "Growth Package"; }
+        else if (lowerPlan === "pro") { limit = 10; planName = "Pro Package"; }
+        else if (lowerPlan === "business") { limit = 9999; planName = "Business Package"; }
+        else if (lowerPlan === "enterprise") { limit = 9999; planName = "Enterprise Package"; }
+      }
+
       let selectedPageIds: string[] = data.selectedPageIds || [];
       if (selected) {
         if (!selectedPageIds.includes(pageId)) {
+          if (selectedPageIds.length >= limit) {
+            return res.status(400).json({ 
+              error: `You cannot connect more pages. Your current plan (${planName}) allows connecting up to ${limit} page${limit > 1 ? 's' : ''} only. Please upgrade your active plan in the Billing section.` 
+            });
+          }
           selectedPageIds.push(pageId);
         }
       } else {
@@ -5105,8 +5173,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
         selectedPageIds
       };
 
-      const userDocRef = db.collection("users").doc(userEmail);
-      const userSnap = await userDocRef.get();
       const updates: any = {
         facebook: updatedFbPayload
       };
@@ -7971,6 +8037,18 @@ Write a realistic, short and natural response expressing your reaction, query, o
   }
 
   // Verification
+  app.get("/api/admin/db-diagnostic", (req, res) => {
+    res.json({
+      success: true,
+      diagnostic: dbDiagnosticInfo,
+      serverTime: new Date().toISOString(),
+      nodeEnv: process.env.NODE_ENV || "development",
+      hasServiceAccountEnvSet: !!process.env.FIREBASE_SERVICE_ACCOUNT_KEY,
+      envProjectId: process.env.FIREBASE_PROJECT_ID || "not_set",
+      configuredDbId: firebaseConfig.firestoreDatabaseId
+    });
+  });
+
   app.post("/api/admin/verify", verifyAdminMiddleware, (req, res) => {
     res.json({ success: true, email: "ahsan.shabbir292@gmail.com" });
   });

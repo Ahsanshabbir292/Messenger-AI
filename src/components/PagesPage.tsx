@@ -23,7 +23,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
   trialLocked,
   handleSyncPages,
   handleSelectTrialPage,
-  currentPlan = 'trial',
+  currentPlan = null,
   onUpgrade,
   onLockTrial,
   lastSyncedContacts = null,
@@ -32,6 +32,40 @@ export const PagesPage: React.FC<PagesPageProps> = ({
 }) => {
   // Sync states for each individual page
   const [pageSyncStates, setPageSyncStates] = useState<Record<string, { status: 'idle' | 'syncing' | 'completed'; stageText: string }>>({});
+
+  // Helper function to resolve dynamic subscription and page constraints
+  const getPlanDetails = (planId: string | null) => {
+    const defaultTrial = {
+      name: "3-Day Free Trial",
+      limit: 3,
+      isTrial: true,
+      color: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+    };
+
+    if (!planId || planId === 'trial') {
+      return defaultTrial;
+    }
+
+    const lowerId = planId.toLowerCase().trim();
+    switch (lowerId) {
+      case "starter":
+        return { name: "Starter Package", limit: 1, isTrial: false, color: "text-indigo-600 bg-indigo-55/10 border-indigo-500/20" };
+      case "growth":
+        return { name: "Growth Package", limit: 3, isTrial: false, color: "text-amber-600 bg-amber-55/10 border-amber-500/20" };
+      case "pro":
+        return { name: "Pro Package", limit: 10, isTrial: false, color: "text-purple-600 bg-purple-55/10 border-purple-500/20" };
+      case "business":
+        return { name: "Business Package", limit: 9999, isTrial: false, color: "text-pink-600 bg-pink-55/10 border-pink-500/20" };
+      case "enterprise":
+        return { name: "Enterprise Package", limit: 9999, isTrial: false, color: "text-emerald-600 bg-emerald-55/10 border-emerald-500/20" };
+      default:
+        return defaultTrial;
+    }
+  };
+
+  const planDetails = getPlanDetails(currentPlan);
+  const pageLimit = planDetails.limit;
+  const isTrial = planDetails.isTrial;
 
   const handleSinglePageSync = async (pageId: string, pageName: string) => {
     if (pageSyncStates[pageId]?.status === 'syncing') return;
@@ -96,9 +130,19 @@ export const PagesPage: React.FC<PagesPageProps> = ({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         {[
           { label: 'Total Pages', value: pages.length, icon: <Globe />, color: 'bg-indigo-600' },
-          { label: 'Active Bots', value: pages.filter(p => p.isSynced).length, icon: <Zap />, color: 'bg-emerald-500' },
-          { label: 'Trial Mode', value: pages.length, icon: <Clock />, color: 'bg-amber-500' },
-          { label: 'Inactive', value: 0, icon: <Power />, color: 'bg-slate-400' }
+          { label: 'Active Bots', value: pages.filter(p => selectedPageIds.includes(p.id)).length, icon: <Zap />, color: 'bg-emerald-500' },
+          { 
+            label: isTrial ? 'Active License' : 'Active Package', 
+            value: planDetails.name, 
+            icon: <Clock />, 
+            color: isTrial ? 'bg-amber-500' : 'bg-indigo-600' 
+          },
+          { 
+            label: 'Connection Limit', 
+            value: pageLimit >= 9999 ? 'Unlimited' : `${selectedPageIds.length} / ${pageLimit} Pages`, 
+            icon: <Power />, 
+            color: selectedPageIds.length >= pageLimit ? 'bg-amber-600' : 'bg-slate-400' 
+          }
         ].map((stat, i) => (
           <div key={i} className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-4">
             <div className={`w-10 h-10 sm:w-12 sm:h-12 ${stat.color} rounded-xl flex items-center justify-center text-white shadow-md`}>
@@ -106,7 +150,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
             </div>
             <div>
               <p className="text-slate-500 text-[10px] sm:text-xs font-semibold">{stat.label}</p>
-              <h4 className="text-xl sm:text-2xl font-black text-slate-900 mt-0.5">{stat.value}</h4>
+              <h4 className="text-lg sm:text-xl font-black text-slate-900 mt-0.5">{stat.value}</h4>
             </div>
           </div>
         ))}
@@ -127,12 +171,12 @@ export const PagesPage: React.FC<PagesPageProps> = ({
             </p>
           </div>
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            {selectedPageIds.length > 0 && !trialLocked && onLockTrial && (
+            {selectedPageIds.length > 0 && !trialLocked && onLockTrial && isTrial && (
               <button 
                 onClick={onLockTrial}
                 className="w-full sm:w-auto justify-center bg-emerald-600 hover:bg-emerald-700 text-white px-6 sm:px-8 py-3.5 sm:py-4.5 rounded-xl sm:rounded-[1.25rem] font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center gap-3 shrink-0 cursor-pointer border-none"
               >
-                <Lock className="w-4 h-4" /> Activate & Lock Pages ({selectedPageIds.length}/3)
+                <Lock className="w-4 h-4" /> Activate & Lock Pages ({selectedPageIds.length}/{pageLimit})
               </button>
             )}
             <button 
@@ -256,7 +300,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                         selectedPageIds.includes(p.id) ? (
                           <>
                             <span className="inline-flex px-3 py-1 bg-rose-50 border border-rose-100 rounded-full text-[9px] font-black text-rose-600 uppercase tracking-widest animate-pulse">
-                              🚫 Expired / Trial Ended
+                              🚫 Expired / Plan Ended
                             </span>
                             <p className="text-[9px] font-bold text-rose-500 flex items-center gap-1.5 mt-1">
                               <Clock className="w-3 h-3" /> Connection Suspended
@@ -265,7 +309,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                         ) : (
                           <>
                             <span className="inline-flex px-3 py-1 bg-slate-100 border border-slate-200 rounded-full text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                              Trial Expired
+                              Plan Expired
                             </span>
                             <p className="text-[9px] font-bold text-slate-400 flex items-center gap-1.5 mt-1">
                               <Lock className="w-2.5 h-2.5 text-slate-400" /> Upgrade required
@@ -273,20 +317,31 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                           </>
                         )
                       ) : selectedPageIds.includes(p.id) ? (
-                        <>
-                          <span className="inline-flex px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-[9px] font-black text-emerald-600 uppercase tracking-widest">
-                            {trialLocked ? 'Trial Active' : 'Selected for Trial'}
-                          </span>
-                          <p className="text-[9px] font-bold text-amber-500 flex items-center gap-1.5 mt-1">
-                            <Clock className="w-3 h-3" /> 3 days left
-                          </p>
-                        </>
+                        isTrial ? (
+                          <>
+                            <span className="inline-flex px-3 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-[9px] font-black text-emerald-600 uppercase tracking-widest">
+                              {trialLocked ? 'Trial Active' : 'Selected for Trial'}
+                            </span>
+                            <p className="text-[9px] font-bold text-amber-500 flex items-center gap-1.5 mt-1">
+                              <Clock className="w-3 h-3" /> 3 days left
+                            </p>
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-flex px-3 py-1 bg-indigo-50 border border-indigo-150 rounded-full text-[9px] font-black text-indigo-600 uppercase tracking-wide">
+                              ✓ {planDetails.name} active
+                            </span>
+                            <p className="text-[9px] font-semibold text-slate-500 flex items-center gap-1.5 mt-1">
+                              <Check className="w-3 h-3 text-emerald-500 stroke-[3]" /> Connection Unlocked
+                            </p>
+                          </>
+                        )
                       ) : (
                         <span className="inline-flex px-3 py-1 bg-slate-100 border border-slate-200 rounded-full text-[9px] font-black text-slate-400 uppercase tracking-widest">Ready</span>
                       )}
                     </div>
                   </td>
-                  <td className="px-4 sm:px-10 py-4 sm:py-8">
+                  <td className="px-4 sm:px-10 py-4 sm:py-8 font-semibold text-[10px]">
                     <div className="flex items-center gap-4">
                       {currentPlan === 'expired' ? (
                         <button 
@@ -295,7 +350,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                         >
                           <Zap className="w-3 h-3 text-amber-300 fill-amber-300 shrink-0" /> Upgrade & Reactivate
                         </button>
-                      ) : trialLocked ? (
+                      ) : (trialLocked && isTrial) ? (
                         <span className={`px-4 py-2 border rounded-xl font-black text-[9px] uppercase tracking-wider flex items-center gap-1.5 ${
                           selectedPageIds.includes(p.id)
                             ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
@@ -306,14 +361,15 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                       ) : (
                         <button 
                           onClick={() => handleSelectTrialPage(p.id, !selectedPageIds.includes(p.id))}
-                          disabled={!selectedPageIds.includes(p.id) && selectedPageIds.length >= 3}
+                          disabled={!selectedPageIds.includes(p.id) && selectedPageIds.length >= pageLimit}
                           className={`px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-sm ${
                             selectedPageIds.includes(p.id) 
                               ? 'bg-rose-50 text-rose-500 hover:bg-rose-100 cursor-pointer' 
-                              : selectedPageIds.length >= 3
+                              : selectedPageIds.length >= pageLimit
                                 ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-none'
                                 : 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95 cursor-pointer border-none'
                           }`}
+                          title={!selectedPageIds.includes(p.id) && selectedPageIds.length >= pageLimit ? `Page count limit reached for your ${planDetails.name}` : ""}
                         >
                           {selectedPageIds.includes(p.id) ? 'Remove Page' : 'Add Page'}
                         </button>
@@ -322,11 +378,13 @@ export const PagesPage: React.FC<PagesPageProps> = ({
                   </td>
                 </tr>
               ))}
-              {pages.length > 3 && selectedPageIds.length < 3 && !trialLocked && (
-                <tr className="bg-indigo-50/20">
-                  <td colSpan={5} className="px-10 py-8">
+              {pages.length > pageLimit && selectedPageIds.length < pageLimit && (isTrial ? !trialLocked : true) && (
+                <tr className="bg-indigo-50/10">
+                  <td colSpan={5} className="px-10 py-6">
                     <div className="text-center">
-                      <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em]">Select up to {3 - selectedPageIds.length} more pages for your free trial</p>
+                      <p className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em]">
+                        Select up to {pageLimit - selectedPageIds.length} more page{pageLimit - selectedPageIds.length > 1 ? "s" : ""} on your {planDetails.name}
+                      </p>
                     </div>
                   </td>
                 </tr>
