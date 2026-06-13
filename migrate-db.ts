@@ -28,7 +28,7 @@ async function migrate() {
     }
   }
 
-  const TARGET_PROJECT_ID = saProjectId || process.env.FIREBASE_PROJECT_ID || "gen-lang-client-0784575306";
+  const TARGET_PROJECT_ID = saProjectId || process.env.FIREBASE_PROJECT_ID || "";
   console.log(`Resolved Target Project ID: ${TARGET_PROJECT_ID}`);
 
   // Initialize Firebase Admin

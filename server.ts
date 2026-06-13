@@ -398,6 +398,19 @@ if (process.env.FIREBASE_STORAGE_BUCKET) firebaseConfig.storageBucket = process.
 if (process.env.FIREBASE_MESSAGING_SENDER_ID) firebaseConfig.messagingSenderId = process.env.FIREBASE_MESSAGING_SENDER_ID;
 if (process.env.FIREBASE_MEASUREMENT_ID) firebaseConfig.measurementId = process.env.FIREBASE_MEASUREMENT_ID;
 
+// Prefer project ID from service account key if present
+if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
+  try {
+    const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
+    if (sa && sa.project_id) {
+      console.log("[Firebase] Using project_id from Service Account Key:", sa.project_id);
+      firebaseConfig.projectId = sa.project_id;
+    }
+  } catch (e) {
+    console.error("[Firebase] Error parsing Service Account Key for project_id", e);
+  }
+}
+
 const envDbId = process.env.FIREBASE_DATABASE_ID || process.env.FIREBASE_FIRESTORE_DATABASE_ID;
 if (envDbId) {
   firebaseConfig.firestoreDatabaseId = envDbId;
@@ -415,8 +428,8 @@ if (!firebaseConfig.projectId) {
     firebaseConfig.projectId = parts[0];
     console.log("[Firebase] Derived missing projectId from FIREBASE_STORAGE_BUCKET:", firebaseConfig.projectId);
   } else {
-    firebaseConfig.projectId = "gen-lang-client-0784575306";
-    console.log("[Firebase] Falling back to default backup projectId:", firebaseConfig.projectId);
+    firebaseConfig.projectId = process.env.FIREBASE_PROJECT_ID || "";
+    console.log("[Firebase] Falling back to default backup projectId from env:", firebaseConfig.projectId);
   }
 }
 
@@ -427,7 +440,7 @@ console.log("[Firebase] Final Firestore DB ID:", firebaseConfig.firestoreDatabas
 function formatDbError(error: any): string {
   const msg = error?.message || String(error);
   if (msg.includes("PERMISSION_DENIED") || msg.includes("firestore.googleapis.com") || msg.toLowerCase().includes("permission-denied") || msg.includes("7")) {
-    const projId = firebaseConfig.projectId || "messengerai-a87aa";
+    const projId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
     return `Firebase Firestore Setup Error (API Disabled or Database Missing):\n` +
            `1. Enable the Firestore API: https://console.cloud.google.com/apis/library/firestore.googleapis.com?project=${projId}\n` +
            `2. Create a Cloud Firestore Database in Native/Test mode: https://console.firebase.google.com/project/${projId}/firestore\n\n` +
@@ -885,7 +898,7 @@ class RestCollectionReference {
   async get() {
     const cacheKey = `col:${this.path}`;
     return getCachedRestQuery(cacheKey, async () => {
-      const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+      const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
       const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
       const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
       
@@ -950,7 +963,7 @@ class RestDocumentReference {
   async get() {
     const cacheKey = `doc:${this.parentPath}/${this.id}`;
     return getCachedRestQuery(cacheKey, async () => {
-      const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+      const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
       const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
       const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
       const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
@@ -982,7 +995,7 @@ class RestDocumentReference {
 
   async set(data: any) {
     invalidateRestQueryCache(this.parentPath, this.id, data);
-    const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+    const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
     const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
@@ -1004,7 +1017,7 @@ class RestDocumentReference {
     invalidateRestQueryCache(this.parentPath, this.id, data);
     const keys = Object.keys(data);
     if (keys.length === 0) return;
-    const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+    const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
     const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
@@ -1025,7 +1038,7 @@ class RestDocumentReference {
 
   async delete() {
     invalidateRestQueryCache(this.parentPath, this.id);
-    const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+    const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
     const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
@@ -1066,7 +1079,7 @@ class RestCollectionGroupReference {
   async get() {
     const cacheKey = `colgroup:${this.collectionId}`;
     return getCachedRestQuery(cacheKey, async () => {
-      const pId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+      const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
       const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
       const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
       const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
@@ -1120,8 +1133,8 @@ class RestCollectionGroupReference {
 
 let dbDiagnosticInfo = {
   dbType: "uninitialized",
-  firestoreDatabaseId: "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac",
-  projectId: "gen-lang-client-0784575306",
+  firestoreDatabaseId: firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac",
+  projectId: firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "",
   hasServiceAccount: false,
   errorTrace: [] as string[]
 };
@@ -1134,7 +1147,7 @@ async function getDb(): Promise<any> {
   isDbInitializing = true;
 
   dbDiagnosticInfo.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
-  dbDiagnosticInfo.projectId = firebaseConfig.projectId || "gen-lang-client-0784575306";
+  dbDiagnosticInfo.projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
 
   try {
     console.log(`[Firebase] Initializing official Firebase Admin SDK for high-performance Firestore!`);
