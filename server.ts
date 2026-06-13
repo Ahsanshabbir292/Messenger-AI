@@ -415,7 +415,18 @@ const envDbId = process.env.FIREBASE_DATABASE_ID || process.env.FIREBASE_FIRESTO
 if (envDbId) {
   firebaseConfig.firestoreDatabaseId = envDbId;
 } else if (!firebaseConfig.firestoreDatabaseId) {
-  firebaseConfig.firestoreDatabaseId = "(default)";
+  firebaseConfig.firestoreDatabaseId = "default";
+}
+
+// Normalize databaseId: if it is (default), default, empty or equal to the project ID,
+// map it to "default" (without parenthesis) to avoid the NOT_FOUND error on GCP.
+if (
+  firebaseConfig.firestoreDatabaseId === "(default)" ||
+  firebaseConfig.firestoreDatabaseId === "default" ||
+  !firebaseConfig.firestoreDatabaseId ||
+  firebaseConfig.firestoreDatabaseId === firebaseConfig.projectId
+) {
+  firebaseConfig.firestoreDatabaseId = "default";
 }
 
 if (!firebaseConfig.projectId) {
@@ -1185,15 +1196,15 @@ async function getDb(): Promise<any> {
     }
 
     let dbId = firebaseConfig.firestoreDatabaseId;
-    if (dbId === "(default)" || dbId === "default" || dbId === "") {
-      dbId = undefined;
+    if (dbId === "(default)" || dbId === "default" || !dbId || dbId === firebaseConfig.projectId) {
+      dbId = "default";
     }
 
-    console.log(`[Firebase] Lazily connecting to Admin Firestore with databaseId: ${dbId || "(default)"}`);
+    console.log(`[Firebase] Lazily connecting to Admin Firestore with databaseId: ${dbId}`);
     db = getAdminFirestore(firebaseAdminApp, dbId);
     db.settings({ ignoreUndefinedProperties: true });
 
-    dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId || "(default)"})`;
+    dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
   } catch (err: any) {
     console.error(`[Firebase] Database Initialization Failed: ${err.message}`);
     dbDiagnosticInfo.errorTrace.push(`Init App Failed: ${err.message}`);
