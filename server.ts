@@ -415,7 +415,7 @@ const envDbId = process.env.FIREBASE_DATABASE_ID || process.env.FIREBASE_FIRESTO
 if (envDbId) {
   firebaseConfig.firestoreDatabaseId = envDbId;
 } else if (!firebaseConfig.firestoreDatabaseId) {
-  firebaseConfig.firestoreDatabaseId = "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+  firebaseConfig.firestoreDatabaseId = "(default)";
 }
 
 if (!firebaseConfig.projectId) {
@@ -899,7 +899,7 @@ class RestCollectionReference {
     const cacheKey = `col:${this.path}`;
     return getCachedRestQuery(cacheKey, async () => {
       const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
-      const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+      const dId = firebaseConfig.firestoreDatabaseId || "(default)";
       const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
       
       const parts = this.path.split("/");
@@ -964,7 +964,7 @@ class RestDocumentReference {
     const cacheKey = `doc:${this.parentPath}/${this.id}`;
     return getCachedRestQuery(cacheKey, async () => {
       const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
-      const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+      const dId = firebaseConfig.firestoreDatabaseId || "(default)";
       const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
       const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
       const url = `${BASE_URL}/${this.path}?key=${key}`;
@@ -996,7 +996,7 @@ class RestDocumentReference {
   async set(data: any) {
     invalidateRestQueryCache(this.parentPath, this.id, data);
     const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
-    const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+    const dId = firebaseConfig.firestoreDatabaseId || "(default)";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
     const url = `${BASE_URL}/${this.path}?key=${key}`;
@@ -1018,7 +1018,7 @@ class RestDocumentReference {
     const keys = Object.keys(data);
     if (keys.length === 0) return;
     const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
-    const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+    const dId = firebaseConfig.firestoreDatabaseId || "(default)";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
     const queryParams = keys.map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join("&");
@@ -1039,7 +1039,7 @@ class RestDocumentReference {
   async delete() {
     invalidateRestQueryCache(this.parentPath, this.id);
     const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
-    const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+    const dId = firebaseConfig.firestoreDatabaseId || "(default)";
     const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
     const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
     const url = `${BASE_URL}/${this.path}?key=${key}`;
@@ -1080,7 +1080,7 @@ class RestCollectionGroupReference {
     const cacheKey = `colgroup:${this.collectionId}`;
     return getCachedRestQuery(cacheKey, async () => {
       const pId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
-      const dId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+      const dId = firebaseConfig.firestoreDatabaseId || "(default)";
       const key = firebaseConfig.apiKey || "AIzaSyDFqdglwzOsl6su0tYbBMcib7NM69925TA";
       const BASE_URL = `https://firestore.googleapis.com/v1/projects/${pId}/databases/${dId}/documents`;
       const url = `${BASE_URL}:runQuery?key=${key}`;
@@ -1133,7 +1133,7 @@ class RestCollectionGroupReference {
 
 let dbDiagnosticInfo = {
   dbType: "uninitialized",
-  firestoreDatabaseId: firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac",
+  firestoreDatabaseId: firebaseConfig.firestoreDatabaseId || "(default)",
   projectId: firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "",
   hasServiceAccount: false,
   errorTrace: [] as string[]
@@ -1146,7 +1146,7 @@ async function getDb(): Promise<any> {
   if (db) return db;
   isDbInitializing = true;
 
-  dbDiagnosticInfo.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || "ai-studio-29c3908b-22bc-437d-90bc-108c053233ac";
+  dbDiagnosticInfo.firestoreDatabaseId = firebaseConfig.firestoreDatabaseId || "(default)";
   dbDiagnosticInfo.projectId = firebaseConfig.projectId || process.env.FIREBASE_PROJECT_ID || "";
 
   try {
@@ -1184,12 +1184,16 @@ async function getDb(): Promise<any> {
       }
     }
 
-    const dbId = firebaseConfig.firestoreDatabaseId || "(default)";
-    console.log(`[Firebase] Lazily connecting to Admin Firestore with databaseId: ${dbId}`);
-    db = admin.firestore(firebaseAdminApp);
-    db.settings({ databaseId: dbId, ignoreUndefinedProperties: true });
+    let dbId = firebaseConfig.firestoreDatabaseId;
+    if (dbId === "(default)" || dbId === "default" || dbId === "") {
+      dbId = undefined;
+    }
 
-    dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId})`;
+    console.log(`[Firebase] Lazily connecting to Admin Firestore with databaseId: ${dbId || "(default)"}`);
+    db = getAdminFirestore(firebaseAdminApp, dbId);
+    db.settings({ ignoreUndefinedProperties: true });
+
+    dbDiagnosticInfo.dbType = `Firebase Admin Firestore (Database ID: ${dbId || "(default)"})`;
   } catch (err: any) {
     console.error(`[Firebase] Database Initialization Failed: ${err.message}`);
     dbDiagnosticInfo.errorTrace.push(`Init App Failed: ${err.message}`);
