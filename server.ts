@@ -497,16 +497,20 @@ class CompatDocumentReference {
     }
   }
 
-  async set(data: any) {
+  async set(data: any, options?: { merge?: boolean }) {
     try {
       const r = doc(this.firestore, this.col, this.id);
       const processedData = this.replaceServerTimestamp(data);
-      await setDoc(r, processedData);
+      if (options) {
+        await setDoc(r, processedData, options);
+      } else {
+        await setDoc(r, processedData);
+      }
     } catch (e: any) {
       console.error(`Error in doc.set() for ${this.col}/${this.id}:`, e.message);
       if (handleFirebaseError(e)) {
         console.log(`[Firebase-Fallback] Retrying doc.set() via MemoryDB for ${this.col}/${this.id}`);
-        return db.collection(this.col).doc(this.id).set(data);
+        return db.collection(this.col).doc(this.id).set(data, options);
       }
       throw e;
     }
@@ -601,10 +605,14 @@ class CompatTransaction {
     return this;
   }
 
-  set(compatDocRef: any, data: any) {
+  set(compatDocRef: any, data: any, options?: { merge?: boolean }) {
     const webDocRef = doc(this.firestore, compatDocRef.col, compatDocRef.id);
     const processedData = compatDocRef.replaceServerTimestamp ? compatDocRef.replaceServerTimestamp(data) : data;
-    this.webTransaction.set(webDocRef, processedData);
+    if (options) {
+      this.webTransaction.set(webDocRef, processedData, options);
+    } else {
+      this.webTransaction.set(webDocRef, processedData);
+    }
     return this;
   }
 
@@ -698,12 +706,27 @@ class MemoryDocumentReference {
     }
   }
 
-  async set(data: any) {
+  async set(data: any, options?: { merge?: boolean }) {
     try {
       const dbData = this.readDb();
       if (!dbData[this.col]) dbData[this.col] = {};
       const processed = this.replaceServerTimestamp(data);
-      dbData[this.col][this.id] = processed;
+      
+      if (options?.merge === true) {
+        const existing = dbData[this.col][this.id] || {};
+        const updated = JSON.parse(JSON.stringify(existing));
+        for (const key of Object.keys(processed)) {
+          if (key.includes(".")) {
+            deepSet(updated, key, processed[key]);
+          } else {
+            updated[key] = processed[key];
+          }
+        }
+        dbData[this.col][this.id] = updated;
+      } else {
+        dbData[this.col][this.id] = processed;
+      }
+      
       this.writeDb(dbData);
     } catch (e: any) {
       console.error(`[MemoryDB] Error set() for ${this.col}/${this.id}:`, e.message);
