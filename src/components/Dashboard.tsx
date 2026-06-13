@@ -466,13 +466,16 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
   const [creditBalance, setCreditBalance] = useState(5000.00);
 
-  // Poll for credits in real-time (Fix 1 Part B)
+  // Poll for credits and active plan in real-time
   useEffect(() => {
     const pollCredits = async () => {
       try {
         const res = await axios.get('/api/user/credits');
         if (typeof res.data.credits === 'number') {
           setCreditBalance(res.data.credits);
+        }
+        if (res.data.plan !== undefined) {
+          setCurrentPlan(res.data.plan);
         }
       } catch (e) {}
     };

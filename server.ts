@@ -2672,7 +2672,11 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const userDoc = await db.collection("users").doc(userEmail.toLowerCase().trim()).get();
       if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
       const data = userDoc.data();
-      res.json({ credits: data?.credits !== undefined ? data.credits : (data?.creditBalance !== undefined ? data.creditBalance : 5000.0), trialCredits: 0 });
+      res.json({ 
+        credits: data?.credits !== undefined ? data.credits : (data?.creditBalance !== undefined ? data.creditBalance : 5000.0), 
+        trialCredits: 0,
+        plan: data?.plan || null
+      });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to fetch credits", details: err.message });
     }

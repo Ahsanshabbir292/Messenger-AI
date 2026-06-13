@@ -202,114 +202,126 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           <div className="bg-white rounded-2xl sm:rounded-[1.5rem] border border-slate-100 shadow-sm overflow-hidden h-fit">
             <div className="p-5 sm:p-6 md:p-8 border-b border-slate-50 flex items-center justify-between gap-4">
               <h3 className="text-base sm:text-lg font-bold text-slate-900">Page Status</h3>
-              {setCurrentPlan && (
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
-                  <span className="text-[10px] font-black tracking-widest text-slate-400 uppercase">Preview State:</span>
-                  <select
-                    value={currentPlan || ""}
-                    onChange={(e) => {
-                      setCurrentPlan(e.target.value as any);
-                      addToast(`Switched page status preview to: ${e.target.value.toUpperCase()}`, "info");
-                    }}
-                    className="text-[10px] font-black text-slate-700 bg-transparent border-none outline-none cursor-pointer focus:ring-0 p-0"
-                  >
-                    <option value="" disabled>Select plan...</option>
-                    <option value="trial">Free Trial</option>
-                    <option value="architect">Architect Plan</option>
-                    <option value="empire">Empire Plan</option>
-                    <option value="expired">Expired State</option>
-                  </select>
-                </div>
-              )}
             </div>
             
-            {currentPlan === 'expired' ? (
-              <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6 animate-in fade-in zoom-in-95 duration-500">
-                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-rose-50 border border-rose-100 text-rose-500 flex items-center justify-center shrink-0">
-                  <AlertCircle className="w-6 sm:w-7 sm:h-7 stroke-[2]" />
-                </div>
-                <div className="flex-1 text-center sm:text-left">
-                  <div className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 sm:gap-3 mb-2">
-                    <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
-                      No Active Pages
-                    </h4>
-                    <span className="inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider bg-red-100 text-red-600 border border-red-200">
-                      Expired
-                    </span>
+            {(() => {
+              const getPlanDetails = (planId: string | null) => {
+                const defaultTrial = {
+                  name: "3-Day Free Trial",
+                  isTrial: true,
+                  color: "bg-amber-50 text-amber-600",
+                  badgeClass: "bg-amber-100 text-amber-700",
+                  icon: <Clock className="w-6 sm:w-7 sm:h-7" />,
+                  desc: "Your pages have up to 3 days remaining in trial."
+                };
+
+                if (!planId || planId === 'trial') {
+                  return defaultTrial;
+                }
+
+                const lowerId = planId.toLowerCase().trim();
+                switch (lowerId) {
+                  case "starter":
+                    return { name: "Starter Package", isTrial: false, color: "bg-indigo-50 text-indigo-600", badgeClass: "bg-indigo-100 text-indigo-700", icon: <Zap className="w-6 sm:w-7 sm:h-7" />, desc: "You are currently on the Starter Plan. 1 Synced Page authorized." };
+                  case "growth":
+                    return { name: "Growth Package", isTrial: false, color: "bg-blue-50 text-blue-600", badgeClass: "bg-blue-100 text-blue-700", icon: <Zap className="w-6 sm:w-7 sm:h-7" />, desc: "You are currently on the Growth Plan. Up to 3 Synced Pages authorized." };
+                  case "pro":
+                    return { name: "Pro Package", isTrial: false, color: "bg-purple-50 text-purple-600", badgeClass: "bg-purple-100 text-purple-700", icon: <Layers className="w-6 sm:w-7 sm:h-7" />, desc: "You are currently on the Pro Plan. Up to 10 Synced Pages authorized." };
+                  case "business":
+                    return { name: "Business Package", isTrial: false, color: "bg-pink-50 text-pink-600", badgeClass: "bg-pink-100 text-pink-700", icon: <Sparkles className="w-6 sm:w-7 sm:h-7" />, desc: "You are currently on the Business Plan. Unlimited Synced Pages authorized." };
+                  case "enterprise":
+                    return { name: "Enterprise Package", isTrial: false, color: "bg-emerald-50 text-emerald-600", badgeClass: "bg-emerald-100 text-emerald-700", icon: <Layers className="w-6 sm:w-7 sm:h-7" />, desc: "You are currently on the Enterprise Plan. Unlimited Synced Pages authorized." };
+                  default:
+                    return defaultTrial;
+                }
+              };
+
+              const planDetails = getPlanDetails(currentPlan);
+
+              if (currentPlan === 'expired') {
+                return (
+                  <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6 animate-in fade-in zoom-in-95 duration-500">
+                    <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-rose-50 border border-rose-100 text-rose-500 flex items-center justify-center shrink-0">
+                      <AlertCircle className="w-6 sm:w-7 sm:h-7 stroke-[2]" />
+                    </div>
+                    <div className="flex-1 text-center sm:text-left">
+                      <div className="flex flex-col sm:flex-row items-center justify-center sm:justify-start gap-2 sm:gap-3 mb-2">
+                        <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
+                          No Active Pages
+                        </h4>
+                        <span className="inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider bg-red-100 text-red-600 border border-red-200">
+                          Expired
+                        </span>
+                      </div>
+                      <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
+                        All page trials/subscriptions have expired. Subscribe to regain access to your inbox.
+                      </p>
+                      <button 
+                        onClick={() => {
+                          if (onUpgradePlan) {
+                            onUpgradePlan();
+                          } else {
+                            setActiveTab('billing');
+                            setBillingSubView('buy');
+                            addToast("Opening billing subscriptions setup...", "info");
+                          }
+                        }}
+                        className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-750 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg hover:shadow-blue-200 active:scale-95 cursor-pointer border-none"
+                      >
+                        <Sparkles className="w-4 h-4" /> Subscribe Now
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
-                    All page trials/subscriptions have expired. Subscribe to regain access to your inbox.
-                  </p>
-                  <button 
-                    onClick={() => {
-                      if (onUpgradePlan) {
-                        onUpgradePlan();
-                      } else {
-                        setActiveTab('billing');
-                        setBillingSubView('buy');
-                        addToast("Opening billing subscriptions setup...", "info");
-                      }
-                    }}
-                    className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-750 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg hover:shadow-blue-200 active:scale-95 cursor-pointer border-none"
-                  >
-                    <Sparkles className="w-4 h-4" /> Subscribe Now
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6">
-                <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 ${
-                  currentPlan === 'empire' ? 'bg-purple-50 text-purple-600' :
-                  currentPlan === 'architect' ? 'bg-emerald-50 text-emerald-600' :
-                  'bg-indigo-50 text-indigo-600'
-                }`}>
-                  {currentPlan === 'empire' ? <Sparkles className="w-6 sm:w-7 sm:h-7" /> :
-                   currentPlan === 'architect' ? <Zap className="w-6 sm:w-7 sm:h-7" /> :
-                   <Clock className="w-6 sm:w-7 sm:h-7" />}
-                </div>
-                <div className="flex-1">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2">
-                    <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
-                      {currentPlan === 'empire' ? 'Empire Plan' :
-                       currentPlan === 'architect' ? 'Architect Plan' :
-                       'Free Trial'}
-                    </h4>
-                    <span className={`inline-block self-center text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                      currentPlan === 'empire' ? 'bg-purple-100 text-purple-700' :
-                      currentPlan === 'architect' ? 'bg-emerald-100 text-emerald-700' :
-                      'bg-[#E9EFFF] text-[#4F46E5]'
-                    }`}>
-                      {currentPlan === 'empire' ? 'Premium Enterprise' :
-                       currentPlan === 'architect' ? 'Active Subscription' :
-                       '3 pages on trial'}
-                    </span>
+                );
+              }
+
+              return (
+                <div className="p-5 sm:p-6 md:p-8 flex flex-col sm:flex-row items-center sm:items-start text-center sm:text-left gap-4 sm:gap-6">
+                  <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-full flex items-center justify-center shrink-0 ${planDetails.color}`}>
+                    {planDetails.icon}
                   </div>
-                  <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
-                    {currentPlan === 'empire' ? (
-                      <span>You are currently on the supreme <strong className="text-slate-800">Empire Plan</strong> ($199/mo). Unlimited Facebook pages authorized.</span>
-                    ) : currentPlan === 'architect' ? (
-                      <span>You have upgraded to the <strong className="text-slate-800">Architect Plan</strong> ($49/mo). 10 Synced Pages authorized under your subscription.</span>
-                    ) : (
-                      <span>Your pages have up to <span className="font-bold text-slate-700">3 days</span> remaining in trial.</span>
-                    )}
-                  </p>
-                  <button 
-                    onClick={() => {
-                      if (onUpgradePlan) {
-                        onUpgradePlan();
-                      } else {
-                        setActiveTab('billing');
-                        setBillingSubView('buy');
-                        addToast("Navigated to secure prepaid billing gateway", "info");
-                      }
-                    }}
-                    className="mt-5 w-full sm:w-auto justify-center bg-[#2563EB] hover:bg-blue-750 text-white px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-lg shadow-blue-100 cursor-pointer border-none"
-                  >
-                    <Sparkles className="w-4 h-4" /> {currentPlan === 'trial' ? 'Upgrade Now' : 'Change Plan'}
-                  </button>
+                  <div className="flex-1">
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 mb-2 justify-center sm:justify-start">
+                      <h4 className="text-xl sm:text-2xl font-bold text-slate-900">
+                        {planDetails.name}
+                      </h4>
+                      <span className={`inline-block self-center text-[9px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${planDetails.badgeClass}`}>
+                        {planDetails.isTrial ? 'Trial Mode' : 'Active Subscription'}
+                      </span>
+                    </div>
+                    <p className="text-slate-500 text-sm sm:text-base leading-relaxed">
+                      {planDetails.desc}
+                    </p>
+                    <button 
+                      onClick={() => {
+                        if (onUpgradePlan) {
+                          onUpgradePlan();
+                        } else {
+                          setActiveTab('billing');
+                          setBillingSubView('buy');
+                          addToast("Navigated to secure prepaid billing gateway", "info");
+                        }
+                      }}
+                      className={`mt-6 w-full sm:w-auto justify-center px-6 sm:px-8 py-3 rounded-xl font-bold text-xs sm:text-sm tracking-wide flex items-center gap-2 transition-all shadow-sm active:scale-95 cursor-pointer ${
+                        planDetails.isTrial
+                          ? 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white border-none'
+                          : 'bg-[#2563EB] hover:bg-blue-750 text-white border-none'
+                      }`}
+                    >
+                      {planDetails.isTrial ? (
+                        <>
+                          <Zap className="w-4 h-4 text-amber-100 fill-amber-100" /> Unlock Connection Limit
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4 opacity-80" /> Change Plan
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 
