@@ -4529,28 +4529,50 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                               </div>
 
                               <div className="flex items-center gap-3">
-                                {/* Badge on Right Side */}
-                                <span className={`px-3 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg border shrink-0 ${
-                                  member.role === 'owner' ? 'bg-purple-50 text-purple-700 border-purple-100' :
-                                  member.role === 'admin' ? 'bg-sky-50 text-sky-700 border-sky-100' :
-                                  member.role === 'agent' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
-                                  'bg-amber-50 text-amber-700 border-amber-100'
-                                }`}>
-                                  {member.role}
-                                </span>
-
-                                {/* Owner Only: Change Role Trigger Button */}
-                                {currentActiveRole === 'owner' && member.role !== 'owner' && !isCurrentUser && (
-                                  <button
-                                    onClick={() => {
-                                      setRoleChangeMember(member);
-                                      setRoleChangeNewRole(member.role);
-                                    }}
-                                    title="Modify this team member's role"
-                                    className="px-2.5 py-1.5 bg-indigo-50/50 hover:bg-indigo-600 hover:text-white text-indigo-600 border border-indigo-150 rounded-xl text-[9.5px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1"
-                                  >
-                                    Change Role
-                                  </button>
+                                {/* Badge or Inline Select Role Option */}
+                                {((currentActiveRole === "owner" || currentActiveRole === "admin") && member.role !== "owner" && !isCurrentUser) ? (
+                                  <div className="relative">
+                                    <select
+                                      value={member.role}
+                                      onChange={async (e) => {
+                                        const newRole = e.target.value;
+                                        try {
+                                          const res = await axios.post("/api/team/change-role", {
+                                            email: member.email,
+                                            newRole: newRole
+                                          });
+                                          if (res.data.success) {
+                                            setTeamMembers(res.data.teamMembers);
+                                            addToast(`Successfully updated ${member.name}'s role to ${newRole.toUpperCase()}`, "success");
+                                          } else {
+                                            addToast(res.data.error || "Failed to update role.", "error");
+                                          }
+                                        } catch (err: any) {
+                                          console.error("Change role error:", err);
+                                          addToast(err.response?.data?.error || err.message || "Failed to update role.", "error");
+                                        }
+                                      }}
+                                      className={`px-3 py-1.5 pr-7 text-[9px] font-black uppercase tracking-widest rounded-lg border shrink-0 cursor-pointer focus:outline-none appearance-none transition-all active:scale-95 ${
+                                        member.role === "admin" ? "bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100" :
+                                        member.role === "agent" ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" :
+                                        "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                                      }`}
+                                    >
+                                      <option value="admin">Admin</option>
+                                      <option value="agent">Agent</option>
+                                      <option value="support">Support</option>
+                                    </select>
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 text-[8px] font-bold">▼</span>
+                                  </div>
+                                ) : (
+                                  <span className={`px-3 py-1.5 text-[9px] font-black uppercase tracking-widest rounded-lg border shrink-0 ${
+                                    member.role === "owner" ? "bg-purple-50 text-purple-700 border-purple-100" :
+                                    member.role === "admin" ? "bg-sky-50 text-sky-700 border-sky-100" :
+                                    member.role === "agent" ? "bg-emerald-50 text-emerald-700 border-emerald-100" :
+                                    "bg-amber-50 text-amber-700 border-amber-100"
+                                  }`}>
+                                    {member.role}
+                                  </span>
                                 )}
 
                                 {/* Remove Button (if not owner and not current workspace user) */}

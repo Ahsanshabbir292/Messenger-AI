@@ -3001,24 +3001,36 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const ownerEmail = await getWorkspaceOwnerEmail(req, db, userEmail);
       const currentWorkspaceOwner = (ownerEmail || userEmail).toLowerCase().trim();
 
-      if (userEmail !== currentWorkspaceOwner) {
-        return res.status(403).json({ error: "Only the account owner is authorized to change roles." });
-      }
-
       const ownerDoc = await db.collection("users").doc(currentWorkspaceOwner).get();
       if (!ownerDoc.exists) return res.status(404).json({ error: "Workspace owner profile not found." });
 
-      const ownerData = ownerDoc.data();
+      const ownerData = ownerDoc.data() || {};
       const teamMembers = ownerData.teamMembers || [];
+
+      // Determine the initiator's role in this active workspace
+      let initiatorRole = "owner";
+      if (userEmail !== currentWorkspaceOwner) {
+        const matchingTeamMember = teamMembers.find((m: any) => m.email && m.email.toLowerCase() === userEmail);
+        if (matchingTeamMember) {
+          initiatorRole = matchingTeamMember.role;
+        } else {
+          initiatorRole = "none";
+        }
+      }
+
+      if (initiatorRole !== "owner" && initiatorRole !== "admin") {
+        return res.status(403).json({ error: "Only the account owner or admins are authorized to change roles." });
+      }
+
       const targetEmailLower = email.toLowerCase().trim();
 
-      const memberExists = teamMembers.some((m: any) => m.email.toLowerCase() === targetEmailLower);
+      const memberExists = teamMembers.some((m: any) => m.email && m.email.toLowerCase() === targetEmailLower);
       if (!memberExists) {
         return res.status(404).json({ error: "Member not found in current workspace." });
       }
 
       const updatedList = teamMembers.map((m: any) => {
-        if (m.email.toLowerCase() === targetEmailLower) {
+        if (m.email && m.email.toLowerCase() === targetEmailLower) {
           return { ...m, role: newRole };
         }
         return m;
