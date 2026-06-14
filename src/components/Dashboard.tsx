@@ -421,6 +421,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   }, [selectedPageIds]);
   const [isUpgradeModalOpen, setIsUpgradeModalOpen] = useState(false);
   const [currentPlan, setCurrentPlan] = useState<string | null>(null);
+  const [planExpiresAt, setPlanExpiresAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!selectedPage && pages.length > 0 && selectedPageIds.length > 0) {
@@ -476,6 +477,9 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
         }
         if (res.data.plan !== undefined) {
           setCurrentPlan(res.data.plan);
+        }
+        if (res.data.planExpiresAt !== undefined) {
+          setPlanExpiresAt(res.data.planExpiresAt);
         }
       } catch (e) {}
     };
@@ -1027,6 +1031,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       if (res.data) {
         setCreditBalance(res.data.creditBalance !== undefined ? res.data.creditBalance : 0);
         setCurrentPlan(res.data.currentPlan || null);
+        setPlanExpiresAt(res.data.planExpiresAt || null);
       }
     } catch (err) {
       console.error("Failed to fetch billing data", err);
@@ -2049,8 +2054,12 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     return checkIfConversationIsUnread(c, activePageId);
   }).length;
 
+  const isPlanExpired = !!planExpiresAt && new Date(planExpiresAt).getTime() < Date.now();
+  const showBlockingModal = isPlanExpired && activeTab !== 'billing';
+
   return (
     <div className={`min-h-screen bg-[#F0F2F5] flex font-sans overflow-x-hidden ${theme === 'dark' ? 'dark bg-[#0b0f19]' : ''}`}>
+      <div className={`flex-1 flex min-w-0 min-h-screen relative ${showBlockingModal ? 'blur-md pointer-events-none select-none filter' : ''}`}>
       {/* Mobile Sidebar Overlay */}
       {isMobileMenuOpen && (
         <div 
@@ -2313,7 +2322,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                   conversations={conversations}
                   creditBalance={creditBalance}
                   currentWorkspaceId={currentWorkspaceId}
-                  currentPlan={currentPlan}
+                  currentPlan={isPlanExpired ? 'expired' : currentPlan}
                   userProfile={userProfile}
                   appUser={appUser}
                   syncing={syncing}
@@ -2333,7 +2342,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
               trialLocked={trialLocked}
               handleSyncPages={handleSyncPages}
               handleSelectTrialPage={handleSelectTrialPage}
-              currentPlan={currentPlan}
+              currentPlan={isPlanExpired ? 'expired' : currentPlan}
               onUpgrade={() => setActiveTab('billing')}
               lastSyncedContacts={lastSyncedContacts}
               isSyncingContacts={isSyncingContacts}
@@ -6056,6 +6065,32 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
           </div>
         )}
 
+
+      </div>
+
+      {showBlockingModal && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-md">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-sm p-8 sm:p-10 shadow-2xl text-center space-y-6 border border-rose-100 animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-red-100/80 text-red-600 rounded-full flex items-center justify-center mx-auto ring-8 ring-red-50">
+              <ShieldAlert className="w-8 h-8" />
+            </div>
+            <div className="space-y-3">
+              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                {currentPlan === 'trial' ? "Your free trial has ended" : "Your plan has expired"}
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-500 font-semibold leading-relaxed">
+                Purchase a plan to continue using <strong className="text-slate-900 font-bold">Perseus Bot</strong>. Your pages and audience data are safe — pick up right where you left off.
+              </p>
+            </div>
+            <button
+              onClick={() => setActiveTab('billing')}
+              className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-black text-xs sm:text-sm uppercase tracking-wider transition-all cursor-pointer border-none shadow-lg shadow-blue-100 flex items-center justify-center gap-1.5 active:scale-[0.98]"
+            >
+              View Plans →
+            </button>
+          </div>
+        </div>
+      )}
 
     </div>
   );

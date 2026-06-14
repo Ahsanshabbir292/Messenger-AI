@@ -2342,13 +2342,34 @@ Super-administrative console restricted to permitted accounts to audit system ac
     const userEmail = await getResolvedUserEmail(req);
     if (!userEmail) return res.status(401).json({ error: "Not authenticated" });
     try {
-      const userDoc = await db.collection("users").doc(userEmail.toLowerCase().trim()).get();
+      const userRef = db.collection("users").doc(userEmail.toLowerCase().trim());
+      const userDoc = await userRef.get();
       if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
-      const data = userDoc.data();
+      let data = userDoc.data() || {};
+
+      // Auto-initialize billing details if not defined to ensure a live sandbox experience
+      if (!data.plan) {
+        const now = new Date();
+        const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+        const defaultInit = {
+          plan: "trial",
+          planActivatedAt: now.toISOString(),
+          planExpiresAt: threeDaysFromNow,
+          subscriptionStatus: "active",
+          paymentSourceType: "card",
+          paymentSourceDetails: "Visa ****4242",
+          credits: data.credits !== undefined ? data.credits : 10000
+        };
+        await userRef.set(defaultInit, { merge: true });
+        const updatedDoc = await userRef.get();
+        data = updatedDoc.data() || {};
+      }
+
       res.json({ 
-        credits: data?.credits !== undefined ? data.credits : (data?.creditBalance !== undefined ? data.creditBalance : 5000.0), 
+        credits: data.credits !== undefined ? data.credits : (data.creditBalance !== undefined ? data.creditBalance : 5000.0), 
         trialCredits: 0,
-        plan: data?.plan || null
+        plan: data.plan || null,
+        planExpiresAt: data.planExpiresAt || null
       });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to fetch credits", details: err.message });
@@ -2604,17 +2625,25 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
   app.post("/api/team/invite", async (req, res) => {
     const { email, name, role, assignedPages } = req.body;
-    const userEmail = await getResolvedUserEmail(req);
-    if (!userEmail || userEmail === "anonymous") {
+    
+    // Explicitly determine initiating user's email (never falling back to target's body email)
+    const initiatorEmail = req.session?.user?.email || req.headers['x-user-email'] || req.query?.email;
+    if (!initiatorEmail || initiatorEmail === "anonymous" || initiatorEmail === "undefined" || initiatorEmail === "null") {
       return res.status(401).json({ error: "Unauthorized. Please log in first." });
-    }
-
-    if (!email || !role || !name) {
-      return res.status(400).json({ error: "Email, name and role are required." });
     }
 
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+    let userEmail = initiatorEmail.toLowerCase().trim();
+    try {
+      const ownerEmail = await getWorkspaceOwnerEmail(req, db, userEmail);
+      userEmail = (ownerEmail || userEmail).toLowerCase().trim();
+    } catch(e) {}
+
+    if (!email || !role || !name) {
+      return res.status(400).json({ error: "Email, name and role are required." });
+    }
 
     let inviteLink = "";
     let emailHtml = "";
@@ -2839,7 +2868,12 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
   app.post("/api/team/delete", async (req, res) => {
     const { email } = req.body;
-    const userEmail = await getResolvedUserEmail(req);
+    
+    // Explicitly determine initiating user's email (never falling back to target's body email)
+    const initiatorEmail = req.session?.user?.email || req.headers['x-user-email'] || req.query?.email;
+    if (!initiatorEmail || initiatorEmail === "anonymous" || initiatorEmail === "undefined" || initiatorEmail === "null") {
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
+    }
 
     if (!email) {
       return res.status(400).json({ error: "Email is required." });
@@ -2847,6 +2881,12 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+    let userEmail = initiatorEmail.toLowerCase().trim();
+    try {
+      const ownerEmail = await getWorkspaceOwnerEmail(req, db, userEmail);
+      userEmail = (ownerEmail || userEmail).toLowerCase().trim();
+    } catch (e) {}
 
     try {
       const emailLower = email.toLowerCase().trim();
@@ -4956,6 +4996,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
   // --- BILLING & SUBSCRIPTIONS API ---
 
   const PLAN_CREDITS: Record<string, number> = {
+    trial: 10000,
     starter: 30000,
     growth: 300000,
     pro: 800000,
@@ -4988,6 +5029,120 @@ Super-administrative console restricted to permitted accounts to audit system ac
   app.get("/api/billing/data", async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
+ 
+    const userEmail = await getResolvedUserEmail(req);
+    if (!userEmail || userEmail === "anonymous") {
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
+    }
+ 
+    try {
+      const userRef = db.collection("users").doc(userEmail);
+      const userDoc = await userRef.get();
+      let userData = userDoc.exists ? userDoc.data() : {};
+ 
+      // Auto-initialize billing details if not defined to ensure a live sandbox experience
+      if (!userData?.plan) {
+        const now = new Date();
+        const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000).toISOString();
+        const defaultInit = {
+          plan: "trial",
+          planActivatedAt: now.toISOString(),
+          planExpiresAt: threeDaysFromNow,
+          subscriptionStatus: "active",
+          paymentSourceType: "card",
+          paymentSourceDetails: "Visa ****4242",
+          credits: userData?.credits !== undefined ? userData.credits : 10000
+        };
+        await userRef.set(defaultInit, { merge: true });
+        const updatedDoc = await userRef.get();
+        userData = updatedDoc.data() || {};
+      }
+ 
+      const creditBalance = userData?.credits !== undefined ? userData.credits : (userData?.creditBalance !== undefined ? userData.creditBalance : 5000.0);
+      const currentPlan = userData?.plan || null;
+      const planActivatedAt = userData?.planActivatedAt || null;
+      const planExpiresAt = userData?.planExpiresAt || null;
+      const subscriptionStatus = userData?.subscriptionStatus || "active";
+      const paymentSourceType = userData?.paymentSourceType || "card";
+      const paymentSourceDetails = userData?.paymentSourceDetails || "Visa ****4242";
+      const paymentSourceAdminName = userData?.paymentSourceAdminName || null;
+ 
+      res.json({
+        creditBalance,
+        currentPlan,
+        planActivatedAt,
+        planExpiresAt,
+        subscriptionStatus,
+        paymentSourceType,
+        paymentSourceDetails,
+        paymentSourceAdminName
+      });
+    } catch (err: any) {
+      console.error("[Billing API] Error getting billing details:", err.message);
+      res.status(500).json({ error: "Failed to fetch billing data", details: err.message });
+    }
+  });
+
+  app.post("/api/billing/switch-plan", async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+    const userEmail = await getResolvedUserEmail(req);
+    if (!userEmail || userEmail === "anonymous") {
+      return res.status(401).json({ error: "Unauthorized. Please log in first." });
+    }
+
+    const { planId, paymentMethod } = req.body;
+    if (!planId) {
+      return res.status(400).json({ error: "Plan ID is required" });
+    }
+
+    const allowedPlans = ["trial", "starter", "growth", "pro", "business", "enterprise"];
+    if (!allowedPlans.includes(planId)) {
+      return res.status(400).json({ error: "Invalid plan selected" });
+    }
+
+    try {
+      const userRef = db.collection("users").doc(userEmail);
+      const userDoc = await userRef.get();
+      const userData = userDoc.exists ? userDoc.data() : {};
+
+      const now = new Date();
+      const planActivatedAt = now.toISOString();
+      const durationDays = planId === "trial" ? 3 : 30;
+      const planExpiresAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+      
+      const newCredits = PLAN_CREDITS[planId] || 30000;
+      const cardLastFour = Math.floor(1000 + Math.random() * 9000);
+      const cardType = paymentMethod === "paypal" ? "PayPal" : "Visa";
+
+      const updates: any = {
+        plan: planId,
+        planActivatedAt,
+        planExpiresAt,
+        subscriptionStatus: "active",
+        paymentSourceType: paymentMethod === "paypal" ? "paypal" : "card",
+        paymentSourceDetails: paymentMethod === "paypal" ? `PayPal Account` : `${cardType} ****${cardLastFour}`,
+        credits: newCredits,
+        creditBalance: newCredits
+      };
+
+      await userRef.update(updates);
+
+      res.json({
+        success: true,
+        message: `Plan switched successfully to ${planId}`,
+        billing: updates
+      });
+    } catch (err: any) {
+      console.error("[Billing API] Error switching plan:", err.message);
+      res.status(500).json({ error: "Failed to switch plan", details: err.message });
+    }
+  });
+
+  app.post("/api/billing/cancel-subscription", async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
 
     const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
@@ -4996,19 +5151,17 @@ Super-administrative console restricted to permitted accounts to audit system ac
 
     try {
       const userRef = db.collection("users").doc(userEmail);
-      const userDoc = await userRef.get();
-      const userData = userDoc.exists ? userDoc.data() : {};
-
-      const creditBalance = userData?.credits !== undefined ? userData.credits : (userData?.creditBalance !== undefined ? userData.creditBalance : 5000.0);
-      const currentPlan = userData?.plan || null;
+      await userRef.update({
+        subscriptionStatus: "cancelled"
+      });
 
       res.json({
-        creditBalance,
-        currentPlan
+        success: true,
+        message: "Subscription cancelled successfully."
       });
     } catch (err: any) {
-      console.error("[Billing API] Error getting billing details:", err.message);
-      res.status(500).json({ error: "Failed to fetch billing data", details: err.message });
+      console.error("[Billing API] Error cancelling subscription:", err.message);
+      res.status(500).json({ error: "Failed to cancel subscription", details: err.message });
     }
   });
 
