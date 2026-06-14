@@ -1491,28 +1491,32 @@ async function startServer() {
             if (ownerData) {
               userObj.workspaceName = ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`;
               
-              // Resolve owner's active workspace ID reliably
-              let ownerWsId = ownerData.workspaceId;
-              if (!ownerWsId || ownerWsId === "ws_default") {
-                if (ownerData.facebookWorkspaces && typeof ownerData.facebookWorkspaces === "object") {
-                  const keys = Object.keys(ownerData.facebookWorkspaces);
-                  if (keys.length > 0) {
-                    ownerWsId = keys[0];
-                  }
-                }
-                ownerWsId = ownerWsId || "1";
-              }
-
-              const personalWorkspace = { id: "personal", name: "My Personal Workspace" };
-              const inviterWorkspace = { id: ownerWsId, name: userObj.workspaceName };
-
-              // Crucial: copy the owner's configured workspaces list to this team member's session so the UI matches perfectly!
+              // Resolve owner's workspace list
               let ownerWSList: any[] = [];
               if (ownerData.workspaces && Array.isArray(ownerData.workspaces) && ownerData.workspaces.length > 0) {
                 ownerWSList = ownerData.workspaces;
               } else {
-                ownerWSList = [inviterWorkspace];
+                let defaultOwnerWsId = ownerData.workspaceId || "1";
+                ownerWSList = [{ id: defaultOwnerWsId, name: userObj.workspaceName }];
               }
+
+              // The active workspace to use should be (in preference):
+              // 1. selectedWsId (if valid inside owner's workspaces)
+              // 2. dbUserData.workspaceId (which represents the workspace they were invited to / are assigned to)
+              // 3. ownerData.workspaceId (owner's active workspace)
+              let activeWsId = selectedWsId || dbUserData.workspaceId;
+              let isValidWs = ownerWSList.some((w: any) => String(w.id) === String(activeWsId));
+              if (!isValidWs) {
+                // Fallback to dbUserData.workspaceId
+                activeWsId = dbUserData.workspaceId;
+                isValidWs = ownerWSList.some((w: any) => String(w.id) === String(activeWsId));
+                if (!isValidWs) {
+                  // Fallback to owner's active workspace ID
+                  activeWsId = ownerData.workspaceId || ownerWSList[0]?.id || "1";
+                }
+              }
+
+              const personalWorkspace = { id: "personal", name: "My Personal Workspace" };
 
               // Include B's personal workspace as well so B can switch easily!
               userObj.workspaces = [
@@ -1521,11 +1525,19 @@ async function startServer() {
               ];
               
               // Align active workspaceId
-              userObj.workspaceId = ownerWsId;
+              userObj.workspaceId = activeWsId;
               userObj.role = dbUserData.role || "member"; // Maintain assigned role context
 
-              // Auto-heal member's workspaceId to always point directly to the owner's resolved workspace key
-              await db.collection("users").doc(emailLower).set({ workspaceId: ownerWsId }, { merge: true });
+              // Update the display workspaceName matching the active workspace
+              const matchedWs = ownerWSList.find((w: any) => String(w.id) === String(activeWsId));
+              if (matchedWs) {
+                userObj.workspaceName = matchedWs.name;
+              }
+
+              // Auto-heal member's workspaceId in DB to match activeWsId if it was changed
+              if (dbUserData.workspaceId !== activeWsId) {
+                await db.collection("users").doc(emailLower).set({ workspaceId: activeWsId }, { merge: true });
+              }
             }
           }
         } else {

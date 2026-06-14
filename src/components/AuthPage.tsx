@@ -195,13 +195,28 @@ export default function AuthPage({
     }
     setLoading(true);
     try {
-      await axios.post('/api/team/verify-and-register', { 
+      const res = await axios.post('/api/team/verify-and-register', { 
         email: formData.email,
         password: formData.password,
         fullName: formData.fullName,
         token: inviteData.token,
         role: inviteData.role
       });
+      
+      const loggedUser = res.data.user;
+      const finalEmail = loggedUser?.email || formData.email || "";
+      const appUserObj = {
+        email: finalEmail,
+        fullName: loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User"),
+        workspaceId: loggedUser?.workspaceId,
+        workspaceName: loggedUser?.workspaceName || `${loggedUser?.fullName || (finalEmail ? finalEmail.split('@')[0] : "User")}'s Workspace`,
+        workspaces: loggedUser?.workspaces || (loggedUser?.workspaceId ? [{ id: loggedUser.workspaceId, name: loggedUser?.workspaceName || "My Workspace" }] : []),
+        role: loggedUser?.role || "member"
+      };
+
+      localStorage.setItem('current_app_user', JSON.stringify(appUserObj));
+      axios.defaults.headers.common['x-user-email'] = finalEmail;
+
       if (onClearInvite) onClearInvite();
       onLoginSuccess();
     } catch (error: any) {
