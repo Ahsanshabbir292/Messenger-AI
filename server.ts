@@ -1392,7 +1392,7 @@ async function startServer() {
           if (db) {
             await db.collection("users").doc(userEmail).set({
               inviterEmail: inviteData.inviterEmail,
-              workspaceId: inviteData.inviterWorkspaceId || "ws_default"
+              workspaceId: (inviteData.inviterWorkspaceId && inviteData.inviterWorkspaceId !== "ws_default") ? inviteData.inviterWorkspaceId : "1"
             }, { merge: true });
           }
           if (req.session?.user && req.session.user.email === userEmail) {
@@ -1409,7 +1409,8 @@ async function startServer() {
         if (u.teamMembers && Array.isArray(u.teamMembers)) {
           if (u.teamMembers.some((m: any) => m.email && m.email.toLowerCase() === userEmail.toLowerCase())) {
             const ownerEmail = doc.id;
-            const wsId = u.workspaceId || "ws_default";
+            let wsId = u.workspaceId || "1";
+            if (wsId === "ws_default") wsId = "1";
             
             // Auto-heal
             if (db) {
@@ -1446,7 +1447,8 @@ async function startServer() {
         const uData = userDoc.data();
         if (uData) {
           dbUserData = uData;
-          userObj.workspaceId = uData.workspaceId || userObj.workspaceId || "ws_default";
+          userObj.workspaceId = uData.workspaceId || userObj.workspaceId || "1";
+          if (userObj.workspaceId === "ws_default") userObj.workspaceId = "1";
           userObj.inviterEmail = uData.inviterEmail || userObj.inviterEmail || null;
           userObj.role = uData.role || userObj.role || "member";
           userObj.assignedPages = uData.assignedPages || userObj.assignedPages || [];
@@ -1502,8 +1504,18 @@ async function startServer() {
                 ];
               }
 
+              // Normalize any "ws_default" IDs inside the list to "1"
+              ownerWSList = ownerWSList.map((w: any) => {
+                if (String(w.id) === "ws_default" || !w.id) {
+                  return { ...w, id: "1" };
+                }
+                return w;
+              });
+
               // Ensure team member's invited workspace is always present in their accessible list
-              const invitedWsId = dbUserData.workspaceId || "1";
+              let invitedWsId = dbUserData.workspaceId || "1";
+              if (invitedWsId === "ws_default") invitedWsId = "1";
+              
               if (!ownerWSList.some((w: any) => String(w.id) === String(invitedWsId))) {
                 ownerWSList.push({
                   id: invitedWsId,
@@ -1512,26 +1524,41 @@ async function startServer() {
               }
 
               // Ensure owner's current workspace is also present in list
-              if (ownerData.workspaceId && !ownerWSList.some((w: any) => String(w.id) === String(ownerData.workspaceId))) {
+              let ownerActiveWsId = ownerData.workspaceId || "1";
+              if (ownerActiveWsId === "ws_default") ownerActiveWsId = "1";
+
+              if (ownerActiveWsId && !ownerWSList.some((w: any) => String(w.id) === String(ownerActiveWsId))) {
                 ownerWSList.push({
-                  id: ownerData.workspaceId,
+                  id: ownerActiveWsId,
                   name: ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`
                 });
               }
+
+              // Prevent duplicate workspaces with same ID
+              const uniqueWorkspaceMap = new Map();
+              ownerWSList.forEach(w => {
+                uniqueWorkspaceMap.set(String(w.id), w);
+              });
+              ownerWSList = Array.from(uniqueWorkspaceMap.values());
 
               // The active workspace to use should be (in preference):
               // 1. selectedWsId (if valid inside accessible workspaces)
               // 2. dbUserData.workspaceId (which represents the workspace they were invited to / are assigned to)
               // 3. ownerData.workspaceId (owner's active workspace)
-              let activeWsId = selectedWsId || dbUserData.workspaceId;
+              let normalizedSelectedWsId = selectedWsId;
+              if (normalizedSelectedWsId === "ws_default") normalizedSelectedWsId = "1";
+
+              let activeWsId = normalizedSelectedWsId || invitedWsId;
+              if (activeWsId === "ws_default") activeWsId = "1";
+
               let isValidWs = ownerWSList.some((w: any) => String(w.id) === String(activeWsId));
               if (!isValidWs) {
-                // Fallback to dbUserData.workspaceId
-                activeWsId = dbUserData.workspaceId;
+                // Fallback to team member's assigned workspace
+                activeWsId = invitedWsId;
                 isValidWs = ownerWSList.some((w: any) => String(w.id) === String(activeWsId));
                 if (!isValidWs) {
                   // Fallback to owner's active workspace ID
-                  activeWsId = ownerData.workspaceId || ownerWSList[0]?.id || "1";
+                  activeWsId = ownerActiveWsId || ownerWSList[0]?.id || "1";
                 }
               }
 
@@ -1540,7 +1567,7 @@ async function startServer() {
               // Include B's personal workspace as well so B can switch easily!
               userObj.workspaces = [
                 personalWorkspace,
-                ...ownerWSList.filter((w: any) => w.id !== 'personal')
+                ...ownerWSList.filter((w: any) => w.id !== 'personal' && w.id !== 'ws_default')
               ];
               
               // Align active workspaceId
@@ -1567,8 +1594,8 @@ async function startServer() {
             if (uCurrent) {
               userObj.workspaceName = uCurrent.workspaceName || `${uCurrent.fullName || emailLower}'s Workspace`;
               
-              let activeWsId = uCurrent.workspaceId;
-              if (!activeWsId || activeWsId === "ws_default") {
+              let activeWsId = uCurrent.workspaceId || "1";
+              if (activeWsId === "ws_default") {
                 if (uCurrent.facebookWorkspaces && typeof uCurrent.facebookWorkspaces === "object") {
                   const keys = Object.keys(uCurrent.facebookWorkspaces);
                   if (keys.length > 0) {
@@ -1628,11 +1655,25 @@ async function startServer() {
               req.body.email = ownerEmail;
             }
 
-            // Load and rewrite workspace ID to owner's workspace ID
+            // Load and rewrite workspace ID - respect the team member's requested workspace ID if specified, fallback to team member's database workspaceId, then to owner's active workspace
             const ownerDoc = await db.collection("users").doc(ownerEmail).get();
             if (ownerDoc.exists) {
               const ownerData = ownerDoc.data();
-              let wsId = ownerData?.workspaceId;
+              
+              // Get the requested workspace ID from headers/query/body/session before we override
+              let requestedWsId = req.headers['x-workspace-id'] || req.query?.workspaceId || req.body?.workspaceId || req.session?.user?.workspaceId;
+              
+              // Look up the team member's database record to find their assigned workspaceId
+              const memberDoc = await db.collection("users").doc(headerEmail.toLowerCase().trim()).get();
+              const memberData = memberDoc.exists ? memberDoc.data() : null;
+              const memberAssignedWsId = memberData?.workspaceId;
+
+              let wsId = requestedWsId || memberAssignedWsId || ownerData?.workspaceId;
+              
+              if (!wsId || wsId === "ws_default" || wsId === "personal") {
+                wsId = memberAssignedWsId || ownerData?.workspaceId;
+              }
+
               if (!wsId || wsId === "ws_default") {
                 if (ownerData?.facebookWorkspaces && typeof ownerData.facebookWorkspaces === "object") {
                   const keys = Object.keys(ownerData.facebookWorkspaces);
@@ -1642,11 +1683,12 @@ async function startServer() {
                 }
                 wsId = wsId || "1";
               }
+
               req.headers['x-workspace-id'] = wsId;
-              if (req.query.workspaceId) {
+              if (req.query) {
                 req.query.workspaceId = wsId;
               }
-              if (req.body && 'workspaceId' in req.body) {
+              if (req.body) {
                 req.body.workspaceId = wsId;
               }
             }
@@ -2516,8 +2558,8 @@ Super-administrative console restricted to permitted accounts to audit system ac
             email: emailLower,
             fullName: "Ahsan Shabbir",
             password: hashedPassword,
-            workspaceId: "ws_default",
-            workspaceName: "Default Workspace",
+            workspaceId: "1",
+            workspaceName: "Khaadi",
             role: "owner",
             isAdmin: true,
             createdAt: new Date().toISOString()
@@ -2654,13 +2696,13 @@ Super-administrative console restricted to permitted accounts to audit system ac
       
       // Determine the active workspace of the inviter (prefer header, fallback to DB)
       const headerWsId = req.headers['x-workspace-id'] || req.body.workspaceId || req.query.workspaceId;
-      let inviterWorkspaceId = headerWsId ? String(headerWsId) : "ws_default";
+      let inviterWorkspaceId = (headerWsId && headerWsId !== "ws_default") ? String(headerWsId) : "1";
       
       if (adminDoc.exists) {
         const adminData = adminDoc.data();
         teamMembers = adminData.teamMembers || [];
         if (!headerWsId) {
-          inviterWorkspaceId = adminData.workspaceId || "ws_default";
+          inviterWorkspaceId = (adminData.workspaceId && adminData.workspaceId !== "ws_default") ? adminData.workspaceId : "1";
         }
       }
 
@@ -2815,7 +2857,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
         email: emailLower,
         password: hashedPassword,
         fullName: fullName || inviteData.name || emailLower.split('@')[0],
-        workspaceId: inviteData.inviterWorkspaceId || inviteData.workspaceId || "ws_default",
+        workspaceId: (inviteData.inviterWorkspaceId && inviteData.inviterWorkspaceId !== "ws_default") ? inviteData.inviterWorkspaceId : "1",
         role: role || inviteData.role || inviteData.role || "member",
         assignedPages: assignedPages || inviteData.assignedPages || [],
         invited: true,

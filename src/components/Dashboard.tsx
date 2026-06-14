@@ -847,6 +847,16 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
 
   // --- TEAM STATE / ACCESS CONTROL STATE ---
   const [currentActiveRole, setCurrentActiveRole] = useState<'owner' | 'admin' | 'agent' | 'support'>('owner');
+
+  useEffect(() => {
+    if (appUser?.role) {
+      if (appUser.role === 'member') {
+        setCurrentActiveRole('agent');
+      } else if (['owner', 'admin', 'agent', 'support'].includes(appUser.role)) {
+        setCurrentActiveRole(appUser.role as any);
+      }
+    }
+  }, [appUser?.role]);
   const [teamSubMode, setTeamSubMode] = useState<'list' | 'add'>('list');
   const [memberToRemove, setMemberToRemove] = useState<any | null>(null);
 
