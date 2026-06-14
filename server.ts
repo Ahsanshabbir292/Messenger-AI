@@ -1418,9 +1418,9 @@ async function startServer() {
             list.push({
               id: workspaceId,
               name: workspaceName,
-              role: userData.role || match?.role || "member",
+              role: match?.role || userData.role || "member",
               ownerEmail: inviterEmail,
-              assignedPages: userData.assignedPages || match?.assigned_pages || match?.assignedPages || []
+              assignedPages: match?.assigned_pages || match?.assignedPages || userData.assignedPages || []
             });
           }
         }
