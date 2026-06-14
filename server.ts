@@ -1348,7 +1348,7 @@ async function startServer() {
         if (u.teamMembers && Array.isArray(u.teamMembers)) {
           const match = u.teamMembers.find((m: any) => m.email && m.email.toLowerCase() === emailLower);
           if (match) {
-            const workspaceId = u.workspaceId && u.workspaceId !== "ws_default" ? String(u.workspaceId) : "1";
+            const workspaceId = u.workspaceId && u.workspaceId !== "ws_default" && u.workspaceId !== "personal" ? String(u.workspaceId) : "1";
             const workspaceName = u.workspaceName || `${u.fullName || ownerEmail}'s Workspace`;
             list.push({
               id: workspaceId,
@@ -1371,7 +1371,7 @@ async function startServer() {
         const data = inviteDoc.data();
         if (data?.inviterEmail) {
           const inviterEmail = data.inviterEmail.toLowerCase().trim();
-          const workspaceId = data.inviterWorkspaceId && data.inviterWorkspaceId !== "ws_default" ? String(data.inviterWorkspaceId) : "1";
+          const workspaceId = data.inviterWorkspaceId && data.inviterWorkspaceId !== "ws_default" && data.inviterWorkspaceId !== "personal" ? String(data.inviterWorkspaceId) : "1";
           const role = data.role || "member";
 
           if (!list.some(w => String(w.id) === String(workspaceId))) {
@@ -1408,7 +1408,7 @@ async function startServer() {
   // Helper to resolve the main workspace owner's email
   async function getWorkspaceOwnerEmail(req: any, db: any, rawUserEmail: string): Promise<string> {
     const userEmail = rawUserEmail ? rawUserEmail.toLowerCase().trim() : "";
-    if (!userEmail || userEmail === "anonymous") {
+    if (!userEmail || userEmail === "anonymous" || userEmail === "undefined" || userEmail === "null") {
       return "anonymous";
     }
 
@@ -1418,32 +1418,18 @@ async function startServer() {
       return userEmail;
     }
 
-    // Fast track using session if already resolved to ownerEmail
-    if (req.session?.user && req.session.user.email === userEmail && req.session.ownerEmail) {
-      if (req.session.user.workspaceId === 'personal') {
-        return userEmail;
-      }
-      return String(req.session.ownerEmail).toLowerCase().trim();
-    }
-
     try {
       const accessible = await getUserAccessibleWorkspaces(db, userEmail);
       let activeWsId = reqWorkspaceId || req.session?.user?.workspaceId;
       if (activeWsId && activeWsId !== "personal") {
         const match = accessible.find(w => String(w.id) === String(activeWsId));
         if (match) {
-          if (req.session?.user && req.session.user.email === userEmail) {
-            req.session.ownerEmail = match.ownerEmail;
-          }
           return match.ownerEmail;
         }
       }
 
       const firstInvited = accessible.find(w => w.id !== "personal");
       if (firstInvited) {
-        if (req.session?.user && req.session.user.email === userEmail) {
-          req.session.ownerEmail = firstInvited.ownerEmail;
-        }
         return firstInvited.ownerEmail;
       }
     } catch (e: any) {
