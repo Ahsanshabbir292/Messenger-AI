@@ -1494,14 +1494,33 @@ async function startServer() {
               // Resolve owner's workspace list
               let ownerWSList: any[] = [];
               if (ownerData.workspaces && Array.isArray(ownerData.workspaces) && ownerData.workspaces.length > 0) {
-                ownerWSList = ownerData.workspaces;
+                ownerWSList = [...ownerData.workspaces];
               } else {
-                let defaultOwnerWsId = ownerData.workspaceId || "1";
-                ownerWSList = [{ id: defaultOwnerWsId, name: userObj.workspaceName }];
+                ownerWSList = [
+                  { id: "1", name: "Khaadi" },
+                  { id: "2", name: "Microphone Hub" }
+                ];
+              }
+
+              // Ensure team member's invited workspace is always present in their accessible list
+              const invitedWsId = dbUserData.workspaceId || "1";
+              if (!ownerWSList.some((w: any) => String(w.id) === String(invitedWsId))) {
+                ownerWSList.push({
+                  id: invitedWsId,
+                  name: ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`
+                });
+              }
+
+              // Ensure owner's current workspace is also present in list
+              if (ownerData.workspaceId && !ownerWSList.some((w: any) => String(w.id) === String(ownerData.workspaceId))) {
+                ownerWSList.push({
+                  id: ownerData.workspaceId,
+                  name: ownerData.workspaceName || `${ownerData.fullName || ownerDoc.id}'s Workspace`
+                });
               }
 
               // The active workspace to use should be (in preference):
-              // 1. selectedWsId (if valid inside owner's workspaces)
+              // 1. selectedWsId (if valid inside accessible workspaces)
               // 2. dbUserData.workspaceId (which represents the workspace they were invited to / are assigned to)
               // 3. ownerData.workspaceId (owner's active workspace)
               let activeWsId = selectedWsId || dbUserData.workspaceId;
@@ -2632,11 +2651,17 @@ Super-administrative console restricted to permitted accounts to audit system ac
       // 2. Fetch admin user profile to update teamMembers array and resolve workspaceId
       const adminDoc = await db.collection("users").doc(userEmail).get();
       let teamMembers = [];
-      let inviterWorkspaceId = "ws_default";
+      
+      // Determine the active workspace of the inviter (prefer header, fallback to DB)
+      const headerWsId = req.headers['x-workspace-id'] || req.body.workspaceId || req.query.workspaceId;
+      let inviterWorkspaceId = headerWsId ? String(headerWsId) : "ws_default";
+      
       if (adminDoc.exists) {
         const adminData = adminDoc.data();
         teamMembers = adminData.teamMembers || [];
-        inviterWorkspaceId = adminData.workspaceId || "ws_default";
+        if (!headerWsId) {
+          inviterWorkspaceId = adminData.workspaceId || "ws_default";
+        }
       }
 
       // Check if already in the roster, if not, add/update
