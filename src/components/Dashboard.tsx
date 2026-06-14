@@ -968,9 +968,14 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     return [];
   };
 
-  const currentUserAssignedPageIds = currentActiveRole === 'support' 
-    ? getSimulatedAssignedPages() 
-    : [];
+  const currentUserAssignedPageIds = useMemo(() => {
+    if (currentActiveRole !== 'support') return [];
+    const dbAssigned = appUser?.assignedPages || appUser?.assigned_pages;
+    if (dbAssigned && Array.isArray(dbAssigned) && dbAssigned.length > 0) {
+      return dbAssigned;
+    }
+    return getSimulatedAssignedPages();
+  }, [currentActiveRole, appUser?.assignedPages, appUser?.assigned_pages, pages, selectedPageIds]);
 
   const [workspaceCredits, setWorkspaceCredits] = useState<Record<string, number>>({
     '1': 0.00,
@@ -1302,7 +1307,16 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       // When we query a single page, we can optimize by query-limiting to 25.
       // If of type "all", we can fetch the top 20 for each page to keep initial loads instant.
       if (pageId === "all") {
-        const activePages = pagesRef.current.filter(p => selectedPageIdsRef.current.includes(p.id));
+        const isSupport = currentActiveRole === 'support';
+        const assigned = appUser?.assignedPages || appUser?.assigned_pages || [];
+        const activePages = pagesRef.current.filter(p => {
+          const isSelected = selectedPageIdsRef.current.includes(p.id);
+          if (!isSelected) return false;
+          if (isSupport) {
+            return assigned.includes(p.id);
+          }
+          return true;
+        });
         const promises = activePages.map(page => 
           axios.get(`/api/facebook/conversations/${page.id}${urlSuffix}`, { params: { limit: 20 } })
             .then(res => (res.data.conversations || []).map((c: any) => ({
@@ -2202,10 +2216,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
             </div>
             <div className="truncate">
               <p className="text-xs font-black text-slate-900 truncate">
-                {currentActiveRole === 'owner' 
-                  ? (userProfile?.name || appUser?.fullName || "Ahsan Shabbir") 
-                  : (currentActiveRole === 'admin' ? 'Zain Ul Abideen' :
-                     currentActiveRole === 'agent' ? 'Sara Khan' : 'Bilal Ahmed')}
+                {userProfile?.name || appUser?.fullName || "Ahsan Shabbir"}
               </p>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest truncate">Role: {currentActiveRole}</p>
             </div>

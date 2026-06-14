@@ -1732,7 +1732,7 @@ async function startServer() {
       workspaceId = "1";
     }
 
-    const cacheKey = `${resolvedUserEmail || "anon"}_${workspaceId || "global"}`;
+    const cacheKey = `${resolvedUserEmail || "anon"}_${workspaceId || "global"}_${realUserEmail || "anon"}`;
     const cached = fbDataCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < FB_DATA_CACHE_TTL)) {
       console.log(`[Cache Hit] Serving FB data for ${cacheKey} from memory cache`);
@@ -1814,15 +1814,29 @@ async function startServer() {
 
     // 6. Intelligently merge so active selected page configurations are retained without hiding connected pages array or tokens
     let result = null;
+    let finalSelectedPageIds: string[] = [];
+
     if (baseFbData) {
+      finalSelectedPageIds = (workspaceConfig && Array.isArray(workspaceConfig.selectedPageIds) && workspaceConfig.selectedPageIds.length > 0)
+          ? workspaceConfig.selectedPageIds
+          : (baseFbData.selectedPageIds || []);
+      
       result = {
         ...baseFbData,
-        selectedPageIds: (workspaceConfig && Array.isArray(workspaceConfig.selectedPageIds) && workspaceConfig.selectedPageIds.length > 0)
-          ? workspaceConfig.selectedPageIds
-          : (baseFbData.selectedPageIds || [])
+        selectedPageIds: finalSelectedPageIds
       };
     } else if (workspaceConfig) {
-      result = workspaceConfig;
+      finalSelectedPageIds = workspaceConfig.selectedPageIds || [];
+      result = { ...workspaceConfig, selectedPageIds: finalSelectedPageIds };
+    }
+
+    // Apply strict access control for 'support' role directly at the root data retrieval
+    if (result && req.session?.user?.role === 'support') {
+      const assigned = req.session.user.assignedPages || req.session.user.assigned_pages || [];
+      result.selectedPageIds = result.selectedPageIds.filter((id: string) => assigned.includes(id));
+      if (result.pages && Array.isArray(result.pages)) {
+        result.pages = result.pages.filter((p: any) => assigned.includes(p.id) || result.selectedPageIds.includes(p.id));
+      }
     }
 
     if (result) {
@@ -2497,23 +2511,21 @@ Super-administrative console restricted to permitted accounts to audit system ac
     const rawEmail = req.headers['x-user-email'] as string || req.query.email as string;
     const headerEmail = (rawEmail && rawEmail !== "undefined" && rawEmail !== "null") ? rawEmail.toLowerCase().trim() : undefined;
     
-    if (!req.session.user && headerEmail && db) {
+    // Always load or refresh req.session.user from the database on every auth check to ensure instant visibility of role changes, suspensions, name updates, etc.
+    const activeEmail = req.session?.user?.email || headerEmail;
+    if (activeEmail && db) {
       try {
-        const userDoc = await db.collection("users").doc(headerEmail).get();
+        const userDoc = await db.collection("users").doc(activeEmail.toLowerCase().trim()).get();
         if (userDoc.exists) {
           const u = userDoc.data();
           if (u) {
             const { password, ...userWithoutPassword } = u;
-            req.session.user = { email: headerEmail, ...userWithoutPassword };
-            console.log(`[AUTH] Restored session from header/query email for ${headerEmail}`);
+            req.session.user = { email: activeEmail.toLowerCase().trim(), ...userWithoutPassword };
+            console.log(`[AUTH] Refreshed active session context from database for: ${activeEmail}`);
           }
         }
       } catch (err: any) {
-        console.error("Failed to restore session via header email:", err.message);
-        if (err.response && err.response.status === 429) {
-          return res.status(429).json({ error: "Database rate limit exceeded. Please wait a moment." });
-        }
-        return res.status(500).json({ error: "Database error during session recovery" });
+        console.error("Failed to sync session with database:", err.message);
       }
     }
 
