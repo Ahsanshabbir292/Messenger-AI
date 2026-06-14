@@ -1277,6 +1277,24 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
     }
   }, [appUser?.email, currentWorkspaceId, onUserUpdate]);
 
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleRoleUpdate = (data: any) => {
+      console.log("[Socket Realtime] User Access / Role Update received:", data);
+      if (data && data.message) {
+        addToast(data.message, "info");
+      }
+      validateWorkspaceMembership();
+    };
+
+    socket.on("role_updated", handleRoleUpdate);
+
+    return () => {
+      socket.off("role_updated", handleRoleUpdate);
+    };
+  }, [socket, validateWorkspaceMembership]);
+
   const getConversations = async (pageId: string, forceRefresh: boolean = false, showLoader: boolean = true) => {
     if (showLoader) setIsLoading(true);
     try {

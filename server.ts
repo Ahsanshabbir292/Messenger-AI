@@ -2970,6 +2970,18 @@ Super-administrative console restricted to permitted accounts to audit system ac
         });
       } catch (err) {}
 
+      // Emit realtime websocket event to user room so their frontend syncs instantly and revokes active workspace
+      try {
+        io.to(`user_${emailLower}`).emit("role_updated", {
+          newRole: "owner",
+          workspaceId: "personal",
+          message: "Your membership in this workspace has been revoked."
+        });
+        console.log(`[Socket Realtime] Emitted team member removal (role_updated) to user_${emailLower}`);
+      } catch (wsErr: any) {
+        console.error("[Socket Realtime] Failed to emit role update event on deletion:", wsErr.message);
+      }
+
       res.json({ success: true, teamMembers: updatedList });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -3042,6 +3054,18 @@ Super-administrative console restricted to permitted accounts to audit system ac
       try {
         await db.collection("users").doc(targetEmailLower).update({ role: newRole });
       } catch (err) {}
+
+      // Emit realtime websocket event to user room so their frontend syncs instantly
+      try {
+        io.to(`user_${targetEmailLower}`).emit("role_updated", {
+          newRole,
+          workspaceId: ownerData.workspaceId || "1",
+          message: `Your membership role has been updated to "${newRole.toUpperCase()}" in real-time!`
+        });
+        console.log(`[Socket Realtime] Emitted role_updated to user_${targetEmailLower}`);
+      } catch (wsErr: any) {
+        console.error("[Socket Realtime] Failed to emit role update event:", wsErr.message);
+      }
 
       res.json({ success: true, teamMembers: updatedList });
     } catch (err: any) {
