@@ -1324,8 +1324,65 @@ async function startServer() {
     }
   });
 
+  // Fast in-memory caching to shield the Firestore database from 429 rate limits under high request volume
+  const userWorkspaceCache = new Map<string, { timestamp: number; data: any[] }>();
+  const workspaceOwnerCache = new Map<string, { timestamp: number; data: string }>();
+
+  function invalidateWorkspaceCaches() {
+    userWorkspaceCache.clear();
+    workspaceOwnerCache.clear();
+    console.log("[Cache Invalidation] Successfully cleared workspace access and owner resolution cache.");
+  }
+
+  // Start dynamic Firestore real-time listener on the "users" collection to synchronize active roles and permissions across sessions instantly
+  getDb().then((databaseInstance) => {
+    if (databaseInstance && typeof databaseInstance.collection === "function") {
+      console.log("[Firestore Listener] Starting live real-time users observer...");
+      databaseInstance.collection("users").onSnapshot((snapshot: any) => {
+        snapshot.docChanges().forEach((change: any) => {
+          if (change.type === "modified") {
+            const emailLower = change.doc.id.toLowerCase().trim();
+            const targetData = change.doc.data();
+            const newRole = targetData?.role || "member";
+            const workspaceId = targetData?.workspaceId || "personal";
+            
+            console.log(`[Firestore Live System] Detected updated user document for ${emailLower} (New Role: ${newRole.toUpperCase()})`);
+            
+            // Invalidate resolution cache immediately
+            invalidateWorkspaceCaches();
+            
+            // Emit realtime websocket event so their frontend syncs instantly and has fresh permissions
+            try {
+              io.to(`user_${emailLower}`).emit("role_updated", {
+                newRole,
+                workspaceId,
+                message: `Your system authorization role has been updated to "${newRole.toUpperCase()}" in real-time!`
+              });
+              console.log(`[Firestore Live System] Real-time role_updated event emitted to room 'user_${emailLower}' successfully.`);
+            } catch (wsErr: any) {
+              console.error("[Firestore Live System] Failed to emit role update event:", wsErr.message);
+            }
+          }
+        });
+      }, (error: any) => {
+        console.error("[Firestore Listener] Error in users snapshot listener:", error.message);
+      });
+    }
+  }).catch((err) => {
+    console.error("[Firestore Listener] Could not resolve database for snapshot initialization:", err.message);
+  });
+
   // Helper to retrieve all workspaces a user has access to (personal + invited)
   async function getUserAccessibleWorkspaces(db: any, emailLower: string): Promise<any[]> {
+    const freshEmail = String(emailLower).toLowerCase().trim();
+    const cached = userWorkspaceCache.get(freshEmail);
+    const now = Date.now();
+    
+    // 15 seconds Cache TTL to handle rapid parallel or cyclical requests perfectly
+    if (cached && (now - cached.timestamp < 15000)) {
+      return cached.data;
+    }
+
     const list: any[] = [];
     
     // 1. Personal Workspace (The user's own home)
@@ -1333,24 +1390,24 @@ async function startServer() {
       id: "personal",
       name: "My Personal Workspace",
       role: "owner",
-      ownerEmail: emailLower,
+      ownerEmail: freshEmail,
       assignedPages: []
     });
 
     try {
       // 2. Fast direct lookup of this user's profile to discover their inviter owner and workspace context (O(1))
-      const userDoc = await db.collection("users").doc(emailLower).get();
+      const userDoc = await db.collection("users").doc(freshEmail).get();
       if (userDoc.exists) {
         const userData = userDoc.data();
         const inviterEmail = userData?.inviterEmail ? userData.inviterEmail.toLowerCase().trim() : null;
         
-        if (inviterEmail && inviterEmail !== emailLower) {
+        if (inviterEmail && inviterEmail !== freshEmail) {
           // Fetch the inviter's workspace details directly (O(1))
           const inviterDoc = await db.collection("users").doc(inviterEmail).get();
           if (inviterDoc.exists) {
             const inviterData = inviterDoc.data() || {};
             const teamMembers = inviterData.teamMembers || [];
-            const match = teamMembers.find((m: any) => m.email && m.email.toLowerCase() === emailLower);
+            const match = teamMembers.find((m: any) => m.email && m.email.toLowerCase() === freshEmail);
             
             const workspaceId = userData.workspaceId && userData.workspaceId !== "ws_default" && userData.workspaceId !== "personal" 
               ? String(userData.workspaceId) 
@@ -1374,7 +1431,7 @@ async function startServer() {
 
     try {
       // 3. Scan invitations collection for any pending or accepted invitation (O(1))
-      const inviteDoc = await db.collection("invitations").doc(emailLower).get();
+      const inviteDoc = await db.collection("invitations").doc(freshEmail).get();
       if (inviteDoc.exists) {
         const data = inviteDoc.data();
         if (data?.inviterEmail) {
@@ -1410,6 +1467,8 @@ async function startServer() {
         uniqueList.push(item);
       }
     }
+
+    userWorkspaceCache.set(freshEmail, { timestamp: now, data: uniqueList });
     return uniqueList;
   }
 
@@ -1426,25 +1485,34 @@ async function startServer() {
       return userEmail;
     }
 
+    const cacheKey = `${userEmail}_${reqWorkspaceId || "default"}`;
+    const cached = workspaceOwnerCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && (now - cached.timestamp < 15000)) {
+      return cached.data;
+    }
+
+    let resolvedEmail = userEmail;
     try {
       const accessible = await getUserAccessibleWorkspaces(db, userEmail);
       let activeWsId = reqWorkspaceId || req.session?.user?.workspaceId;
       if (activeWsId && activeWsId !== "personal") {
         const match = accessible.find(w => String(w.id) === String(activeWsId));
         if (match) {
-          return match.ownerEmail;
+          resolvedEmail = match.ownerEmail;
         }
-      }
-
-      const firstInvited = accessible.find(w => w.id !== "personal");
-      if (firstInvited) {
-        return firstInvited.ownerEmail;
+      } else {
+        const firstInvited = accessible.find(w => w.id !== "personal");
+        if (firstInvited) {
+          resolvedEmail = firstInvited.ownerEmail;
+        }
       }
     } catch (e: any) {
       console.error("[getWorkspaceOwnerEmail] Error:", e.message);
     }
 
-    return userEmail;
+    workspaceOwnerCache.set(cacheKey, { timestamp: now, data: resolvedEmail });
+    return resolvedEmail;
   }
 
   // Helper to dynamically enrich user objects with workspace configuration in the session
@@ -2761,6 +2829,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
       // Save back to admin document
       await db.collection("users").doc(userEmail).update({ teamMembers });
 
+      // Invalidate workspace caches so invitations and settings are resolved instantly
+      invalidateWorkspaceCaches();
+
       // 3. Construct HTML email body and verify link
       const protocol = req.headers.host?.includes('.run.app') ? 'https' : (req.headers['x-forwarded-proto'] || 'http');
       const host = req.headers.host;
@@ -2916,6 +2987,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
       }
       req.session.user = enrichedUser;
 
+      // Invalidate workspace caches so the freshly registered member's dashboard resolves immediately
+      invalidateWorkspaceCaches();
+
       res.json({ success: true, user: enrichedUser });
     } catch (err: any) {
       console.error("[Verify and Register Error]:", err);
@@ -2981,6 +3055,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
       } catch (wsErr: any) {
         console.error("[Socket Realtime] Failed to emit role update event on deletion:", wsErr.message);
       }
+
+      // Invalidate workspace caches so the deletion is active instantly
+      invalidateWorkspaceCaches();
 
       res.json({ success: true, teamMembers: updatedList });
     } catch (err: any) {
@@ -3066,6 +3143,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
       } catch (wsErr: any) {
         console.error("[Socket Realtime] Failed to emit role update event:", wsErr.message);
       }
+
+      // Invalidate workspace caches so the role updates are instantly evaluated
+      invalidateWorkspaceCaches();
 
       res.json({ success: true, teamMembers: updatedList });
     } catch (err: any) {
