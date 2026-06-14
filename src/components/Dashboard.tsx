@@ -5737,75 +5737,121 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
 
       {/* Upgrade Plan Modal */}
       {isUpgradeModalOpen && (
-         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 lg:p-10">
+         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 lg:p-10">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setIsUpgradeModalOpen(false)}></div>
-            <div className="bg-white w-full max-w-5xl rounded-[3.5rem] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] overflow-hidden relative z-10 flex flex-col lg:flex-row animate-in fade-in zoom-in-95 duration-500">
-               <div className="w-full lg:w-1/3 bg-indigo-600 p-12 text-white flex flex-col justify-between relative overflow-hidden">
+            <div className="bg-white w-full max-w-7xl rounded-[3.5rem] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)] overflow-hidden relative z-10 flex flex-col lg:flex-row animate-in fade-in zoom-in-95 duration-500 max-h-[90vh]">
+               <div className="w-full lg:w-1/5 bg-indigo-600 p-8 lg:p-12 text-white flex flex-row lg:flex-col justify-between items-center lg:items-stretch relative overflow-hidden shrink-0">
                   <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
                   <div className="relative z-10">
-                     <button onClick={() => setIsUpgradeModalOpen(false)} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all mb-10"><X className="w-5 h-5" /></button>
-                     <p className="text-indigo-200 text-[10px] font-black uppercase tracking-widest mb-2">Premium Experience</p>
-                     <h4 className="text-4xl font-black leading-tight tracking-tight mb-8">Unleash the <br /> Power of AI.</h4>
-                     <ul className="space-y-6">
+                     <button onClick={() => setIsUpgradeModalOpen(false)} className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all mb-6 lg:mb-10 border-none cursor-pointer"><X className="w-5 h-5 text-white" /></button>
+                     <p className="text-indigo-200 text-[10px] font-black uppercase tracking-widest mb-2 hidden lg:block">Premium Experience</p>
+                     <h4 className="text-2xl lg:text-3xl font-black leading-tight tracking-tight mb-4 lg:mb-8 text-white">Unleash the <br className="hidden lg:block" /> Power, scale up.</h4>
+                     <ul className="space-y-4 hidden lg:block">
                         {[
                            { icon: <Zap />, text: "Unlimited Page Sync" },
                            { icon: <Star />, text: "Priority Support" },
                            { icon: <Bot />, text: "Custom Brain Training" },
                            { icon: <Shield />, text: "Enterprise Security" },
                         ].map((item, i) => (
-                           <li key={i} className="flex items-center gap-4 text-xs font-black uppercase tracking-widest opacity-80">
-                              <span className="w-8 h-8 bg-white/10 rounded-xl flex items-center justify-center">{React.cloneElement(item.icon as React.ReactElement, { className: 'w-4 h-4' })}</span>
+                           <li key={i} className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest opacity-80">
+                              <span className="w-6 h-6 bg-white/10 rounded-lg flex items-center justify-center">{React.cloneElement(item.icon as React.ReactElement, { className: 'w-3.5 h-3.5' })}</span>
                               {item.text}
                            </li>
                         ))}
                      </ul>
                   </div>
-                  <div className="relative z-10 mt-12 pt-8 border-t border-white/10">
-                     <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-40">Trusted by modern brands</p>
+                  <div className="relative z-10 mt-0 lg:mt-12 pt-0 lg:pt-8 border-t border-transparent lg:border-white/10 hidden lg:block">
+                     <p className="text-[9px] font-black uppercase tracking-[0.2em] opacity-40">Trusted by modern brands</p>
                   </div>
                </div>
 
-               <div className="flex-1 p-12 lg:p-20 bg-white">
-                  <div className="mb-12">
-                     <h2 className="text-3xl font-black text-slate-900 tracking-tighter mb-4">Choose Your Strategy.</h2>
-                     <p className="text-slate-400 font-bold text-sm tracking-tight uppercase tracking-widest text-[10px]">Simple, transparent pricing for teams of all sizes.</p>
+               <div className="flex-1 p-6 lg:p-10 bg-white overflow-y-auto">
+                  <div className="mb-8 flex justify-between items-center">
+                     <div>
+                        <h2 className="text-2xl font-black text-slate-900 tracking-tighter mb-1">Choose Your Plan</h2>
+                        <p className="text-slate-400 font-bold uppercase tracking-widest text-[9px] leading-none">Simple, transparent pricing for teams of all sizes.</p>
+                     </div>
+                     <button onClick={() => setIsUpgradeModalOpen(false)} className="lg:hidden w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border-none cursor-pointer"><X className="w-4 h-4 text-slate-500" /></button>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
                      {[
                         { 
-                           id: 'architect',
-                           name: 'Architect', 
-                           price: '49', 
-                           desc: 'Perfect for growing brands scaling their social engagement.',
-                           features: ['10 Synced Pages', 'Unlimited Messages', 'Standard Analytics'],
-                           cta: currentPlan === 'architect' ? 'Active Plan' : 'Upgrade to Architect',
-                           theme: 'bg-slate-50 border-transparent text-slate-900 hover:border-indigo-100'
+                           id: 'starter',
+                           name: 'Starter', 
+                           price: '8', 
+                           credits: '30,000',
+                           desc: 'Level up page communication with basic features.',
+                           features: ['1 Page Allowed', '30,000 Credits/mo', 'General Broadcasts', 'Standard Analytics'],
+                           cta: currentPlan === 'starter' ? 'Active Plan' : 'Get Starter',
+                           productId: '8716856a-757e-4422-a486-64274e64d849',
+                           isDark: false,
+                           theme: 'bg-slate-50 border-slate-200/50 text-slate-900 hover:border-indigo-100'
                         },
                         { 
-                           id: 'empire',
-                           name: 'Empire', 
-                           price: '199', 
-                           desc: 'The ultimate tool for agencies and enterprise global teams.',
-                           features: ['Unlimited Pages', 'Full White-labeling', 'API Access', 'Dedicated Manager'],
-                           cta: currentPlan === 'empire' ? 'Active Plan' : 'Go Empire',
-                           theme: 'bg-slate-900 text-white border-transparent shadow-2xl shadow-indigo-100 scale-105'
+                           id: 'growth',
+                           name: 'Growth', 
+                           price: '22', 
+                           credits: '300,000',
+                           desc: 'Essential scaling tools for growing brands and teams.',
+                           features: ['3 Pages Sync', '300,000 Credits/mo', 'Premium Live Chat', '3 Workspace Members'],
+                           cta: currentPlan === 'growth' ? 'Active Plan' : 'Get Growth',
+                           productId: '172a502e-9351-4fbe-ba75-65fc20a23a99',
+                           isDark: false,
+                           theme: 'bg-indigo-50/40 border-indigo-100 text-slate-900 hover:border-indigo-200'
+                        },
+                        { 
+                           id: 'pro',
+                           name: 'Pro', 
+                           price: '49', 
+                           credits: '800,000',
+                           desc: 'The ideal tier to run pro campaigns with maximum outreach features.',
+                           features: ['10 Pages Sync', '800,000 Credits/mo', 'Advanced Triggers', 'Priority support'],
+                           cta: currentPlan === 'pro' ? 'Active Plan' : 'Get Pro',
+                           productId: '1c9ff447-b279-4147-aa12-ddb4777af49c',
+                           isDark: true,
+                           theme: 'bg-indigo-600 text-white border-indigo-500 shadow-xl shadow-indigo-50 hover:bg-indigo-700'
+                        },
+                        { 
+                           id: 'business',
+                           name: 'Business', 
+                           price: '99', 
+                           credits: '2,000,000',
+                           desc: 'The best experience for serious marketing professionals.',
+                           features: ['Unlimited Pages', '2M Credits/mo', 'All Premium Features', 'Dedicated Manager'],
+                           cta: currentPlan === 'business' ? 'Active Plan' : 'Get Business',
+                           productId: '0aa2f6aa-172a-4e18-9689-2aba5e2fbfb7',
+                           isDark: false,
+                           theme: 'bg-slate-50 border-slate-200/50 text-slate-900 hover:border-indigo-100'
+                        },
+                        { 
+                           id: 'enterprise',
+                           name: 'Enterprise', 
+                           price: '219', 
+                           credits: '4,500,000',
+                           desc: 'Maximum volume capabilities, full SLA support.',
+                           features: ['Unlimited Pages', '4.5M Credits/mo', 'White-labeling Options', 'Custom API Integrations'],
+                           cta: currentPlan === 'enterprise' ? 'Active Plan' : 'Get Enterprise',
+                           productId: '91e00e71-56db-41c3-ae54-af586b4ed4bb',
+                           isDark: true,
+                           theme: 'bg-slate-900 text-white border-slate-850'
                         }
                      ].map((item, i) => {
                         const isCurrent = currentPlan === item.id;
                         return (
-                           <div key={i} className={`p-10 rounded-[2.5rem] border-2 transition-all flex flex-col justify-between ${item.theme} ${isCurrent ? 'ring-4 ring-indigo-500/30' : ''}`}>
+                           <div key={i} className={`p-5 rounded-3xl border transition-all flex flex-col justify-between ${item.theme} ${isCurrent ? 'ring-4 ring-indigo-500/30' : ''}`}>
                               <div>
-                                 <p className={`text-[10px] font-black uppercase tracking-widest mb-6 ${i === 1 ? 'text-indigo-400' : 'text-slate-400'}`}>{item.name} Plan</p>
-                                 <div className="flex items-baseline gap-2 mb-6">
-                                    <span className="text-5xl font-black tracking-tighter">${item.price}</span>
-                                    <span className="text-xs font-bold opacity-40">/mo</span>
+                                 <p className={`text-[9px] font-black uppercase tracking-widest mb-4 ${item.isDark ? 'text-indigo-200' : 'text-slate-400'}`}>{item.name}</p>
+                                 <div className="flex items-baseline gap-1 mb-3">
+                                    <span className="text-3xl font-black tracking-tighter">${item.price}</span>
+                                    <span className={`text-[10px] font-bold ${item.isDark ? 'text-indigo-200/60' : 'text-slate-400'}`}>/mo</span>
                                  </div>
-                                 <p className="text-sm font-medium leading-relaxed mb-10 opacity-70">{item.desc}</p>
-                                 <ul className="space-y-4 mb-12">
+                                 <p className={`text-[10px] font-medium leading-relaxed mb-6 ${item.isDark ? 'text-indigo-100/80' : 'text-slate-500'} min-h-[40px]`}>{item.desc}</p>
+                                 <ul className="space-y-2 mb-6">
                                     {item.features.map((f, fi) => (
-                                       <li key={fi} className="flex items-center gap-3 text-[10px] font-black uppercase tracking-widest">
-                                          <CheckCircle2 className={`w-4 h-4 ${i === 1 ? 'text-indigo-400' : 'text-emerald-500'}`} /> {f}
+                                       <li key={fi} className="flex items-start gap-2 text-[8px] font-black uppercase tracking-widest">
+                                          <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${item.isDark ? 'text-indigo-300' : 'text-emerald-500'}`} />
+                                          <span className="leading-tight mt-0.5">{f}</span>
                                        </li>
                                     ))}
                                  </ul>
@@ -5813,14 +5859,17 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                               <button 
                                  disabled={isCurrent}
                                  onClick={() => {
-                                    setCurrentPlan(item.id as any);
-                                    addToast(`Successfully upgraded to the ${item.name} Plan!`, 'success');
+                                    if (isCurrent) return;
+                                    const email = encodeURIComponent(appUser?.email || '');
+                                    const userId = encodeURIComponent(appUser?.email || '');
+                                    const url = `https://messengerai.lemonsqueezy.com/checkout/buy/${item.productId}?checkout[email]=${email}&checkout[custom][user_id]=${userId}`;
+                                    window.open(url, '_blank');
                                     setIsUpgradeModalOpen(false);
                                  }}
-                                 className={`w-full py-5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 border-none cursor-pointer ${
-                                   isCurrent ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 
-                                   i === 1 ? 'bg-indigo-600 text-white hover:bg-slate-800' : 
-                                   'bg-slate-900 text-white hover:bg-indigo-600'
+                                 className={`w-full py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 border-none cursor-pointer ${
+                                   isCurrent ? 'bg-emerald-500/10 text-emerald-500 cursor-not-allowed font-extrabold' : 
+                                   item.isDark ? 'bg-white text-slate-900 hover:bg-slate-100' : 
+                                   'bg-indigo-600 text-white hover:bg-indigo-700'
                                  }`}
                               >
                                  {item.cta}
@@ -5830,7 +5879,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                      })}
                   </div>
 
-                  <div className="mt-12 text-center">
+                  <div className="mt-8 text-center">
                      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">3-Day Full Satisfaction Guarantee</p>
                   </div>
                </div>
