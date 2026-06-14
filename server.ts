@@ -1338,34 +1338,42 @@ async function startServer() {
     });
 
     try {
-      // 2. Scan users to see if they invited this user as a team member
-      const usersSnap = await db.collection("users").get();
-      for (const doc of usersSnap.docs) {
-        const u = doc.data();
-        const ownerEmail = doc.id.toLowerCase().trim();
-        if (ownerEmail === emailLower) continue;
-
-        if (u.teamMembers && Array.isArray(u.teamMembers)) {
-          const match = u.teamMembers.find((m: any) => m.email && m.email.toLowerCase() === emailLower);
-          if (match) {
-            const workspaceId = u.workspaceId && u.workspaceId !== "ws_default" && u.workspaceId !== "personal" ? String(u.workspaceId) : "1";
-            const workspaceName = u.workspaceName || `${u.fullName || ownerEmail}'s Workspace`;
+      // 2. Fast direct lookup of this user's profile to discover their inviter owner and workspace context (O(1))
+      const userDoc = await db.collection("users").doc(emailLower).get();
+      if (userDoc.exists) {
+        const userData = userDoc.data();
+        const inviterEmail = userData?.inviterEmail ? userData.inviterEmail.toLowerCase().trim() : null;
+        
+        if (inviterEmail && inviterEmail !== emailLower) {
+          // Fetch the inviter's workspace details directly (O(1))
+          const inviterDoc = await db.collection("users").doc(inviterEmail).get();
+          if (inviterDoc.exists) {
+            const inviterData = inviterDoc.data() || {};
+            const teamMembers = inviterData.teamMembers || [];
+            const match = teamMembers.find((m: any) => m.email && m.email.toLowerCase() === emailLower);
+            
+            const workspaceId = userData.workspaceId && userData.workspaceId !== "ws_default" && userData.workspaceId !== "personal" 
+              ? String(userData.workspaceId) 
+              : "1";
+            
+            const workspaceName = inviterData.workspaceName || `${inviterData.fullName || inviterEmail}'s Workspace`;
+            
             list.push({
               id: workspaceId,
               name: workspaceName,
-              role: match.role || "member",
-              ownerEmail: ownerEmail,
-              assignedPages: match.assigned_pages || match.assignedPages || []
+              role: userData.role || match?.role || "member",
+              ownerEmail: inviterEmail,
+              assignedPages: userData.assignedPages || match?.assigned_pages || match?.assignedPages || []
             });
           }
         }
       }
     } catch (err: any) {
-      console.error("[getUserAccessibleWorkspaces] error scanning users:", err.message);
+      console.error("[getUserAccessibleWorkspaces] error in direct lookup:", err.message);
     }
 
     try {
-      // 3. Scan invitations collection for any pending or accepted invitation
+      // 3. Scan invitations collection for any pending or accepted invitation (O(1))
       const inviteDoc = await db.collection("invitations").doc(emailLower).get();
       if (inviteDoc.exists) {
         const data = inviteDoc.data();
@@ -2541,7 +2549,51 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const userDoc = await db.collection("users").doc(userEmail).get();
       if (userDoc.exists) {
         const data = userDoc.data();
-        const team = data?.teamMembers || [];
+        let team = data?.teamMembers || [];
+        
+        let changed = false;
+        
+        // Auto Self-Healing: For any pending member, see if their user profile already exists, or if invitation status is accepted
+        const promises = team.map(async (m: any, idx: number) => {
+          if (m.status === "pending") {
+            const memberEmail = String(m.email).toLowerCase().trim();
+            
+            // Check 1: Does their user profile document exist?
+            const memberDoc = await db.collection("users").doc(memberEmail).get();
+            if (memberDoc.exists) {
+              team[idx].status = "active";
+              if (!team[idx].joined_at) {
+                team[idx].joined_at = memberDoc.data()?.createdAt || new Date().toISOString();
+              }
+              changed = true;
+              
+              // Ensure invitation status is marked accepted too
+              try {
+                await db.collection("invitations").doc(memberEmail).update({
+                  status: "accepted",
+                  acceptedAt: new Date().toISOString()
+                });
+              } catch (e) {}
+            } else {
+              // Check 2: Was their invitation status marked as accepted?
+              const inviteDoc = await db.collection("invitations").doc(memberEmail).get();
+              if (inviteDoc.exists && inviteDoc.data()?.status === "accepted") {
+                team[idx].status = "active";
+                if (!team[idx].joined_at) {
+                  team[idx].joined_at = inviteDoc.data()?.acceptedAt || new Date().toISOString();
+                }
+                changed = true;
+              }
+            }
+          }
+        });
+
+        await Promise.all(promises);
+
+        if (changed) {
+          await db.collection("users").doc(userEmail).update({ teamMembers: team });
+        }
+
         return res.json({ teamMembers: team });
       }
       return res.json({ teamMembers: [] });
