@@ -440,16 +440,18 @@ export const BillingPage: React.FC<BillingPageProps> = ({
               <h4 className="text-xs font-black uppercase text-indigo-400 tracking-wider">Coverage & Expiry</h4>
               <div className="space-y-3 font-medium text-slate-300 text-sm">
                 <div className="flex items-center justify-between">
-                  <span>Activated on:</span>
+                  <span>Activation Date:</span>
                   <span className="font-bold text-slate-100">{formatDate(billingInfo.planActivatedAt)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Expires on:</span>
+                  <span>Expiry Date:</span>
                   <span className="font-bold text-slate-100">{formatDate(billingInfo.planExpiresAt)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span>Remaining time:</span>
-                  <span className="font-bold text-indigo-400">{daysRemaining} days</span>
+                  <span>Remaining Days:</span>
+                  <span className={`font-bold ${daysRemaining <= 0 ? "text-rose-400" : "text-indigo-400"}`}>
+                    {daysRemaining <= 0 ? "0 days remaining (Expired)" : `${daysRemaining} days remaining`}
+                  </span>
                 </div>
               </div>
 
@@ -489,8 +491,20 @@ export const BillingPage: React.FC<BillingPageProps> = ({
             <div className="space-y-4 bg-slate-800/30 p-5 rounded-2xl border border-slate-800/40 flex flex-col justify-between">
               <div>
                 <h4 className="text-xs font-black uppercase text-indigo-400 tracking-wider mb-2">Payment Source</h4>
-                <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-800 flex items-center gap-2 text-sm">
-                  {billingInfo.paymentSourceType === "admin" ? (
+                <div className="p-3 bg-slate-800/60 rounded-xl border border-slate-800 flex items-center gap-2.5 text-sm">
+                  {activePlanId === "trial" ? (
+                    <>
+                      <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0">
+                        <Check className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-100">No Card Required</p>
+                        <p className="text-[10px] text-slate-400 font-semibold">
+                          Free Evaluation Trial
+                        </p>
+                      </div>
+                    </>
+                  ) : billingInfo.paymentSourceType === "admin" ? (
                     <>
                       <User className="w-4 h-4 text-emerald-400 shrink-0" />
                       <div>
@@ -833,34 +847,30 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </div>
                   </div>
 
-                  {/* Payment selection */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-black uppercase text-slate-400 tracking-wider">Simulate Payment Method</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("card")}
-                        className={`p-3 rounded-xl border-2 text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          paymentMethod === "card" 
-                            ? 'border-indigo-600 bg-indigo-50/50 text-indigo-600' 
-                            : 'border-slate-100 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        <CreditCard className="w-4 h-4" /> Credit Card
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMethod("paypal")}
-                        className={`p-3 rounded-xl border-2 text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                          paymentMethod === "paypal" 
-                            ? 'border-indigo-600 bg-indigo-50/50 text-indigo-600' 
-                            : 'border-slate-100 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        PayPal Account
-                      </button>
+                  {/* Payment selection / No Card Trial Info */}
+                  {selectedPlanId === "trial" ? (
+                    <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-center space-y-1.5">
+                      <div className="text-emerald-700 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        No Credit Card Required
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-semibold leading-relaxed">
+                        Start your 3-day evaluation trial instantly with full access. No payment card details are requested or recorded.
+                      </p>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <label className="text-xs font-black uppercase text-slate-400 tracking-wider">Simulate Payment Method</label>
+                      <div className="w-full">
+                        <div className="p-4 rounded-xl border-2 border-indigo-600 bg-indigo-50/50 text-indigo-700 text-xs font-black flex items-center justify-between transition-all">
+                          <span className="flex items-center gap-2">
+                            <CreditCard className="w-4 h-4" /> Credit Card (Simulated Sandbox)
+                          </span>
+                          <span className="text-[10px] uppercase font-black tracking-wider text-indigo-500 bg-indigo-100/80 px-2 py-0.5 rounded-full">Selected</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex gap-3">
                     <button

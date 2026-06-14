@@ -863,6 +863,8 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
   }, [appUser?.role]);
   const [teamSubMode, setTeamSubMode] = useState<'list' | 'add'>('list');
   const [memberToRemove, setMemberToRemove] = useState<any | null>(null);
+  const [roleChangeMember, setRoleChangeMember] = useState<any | null>(null);
+  const [roleChangeNewRole, setRoleChangeNewRole] = useState<string>("");
 
   // New Team Member Form States
   const [addMemberEmail, setAddMemberEmail] = useState("");
@@ -4537,6 +4539,20 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                                   {member.role}
                                 </span>
 
+                                {/* Owner Only: Change Role Trigger Button */}
+                                {currentActiveRole === 'owner' && member.role !== 'owner' && !isCurrentUser && (
+                                  <button
+                                    onClick={() => {
+                                      setRoleChangeMember(member);
+                                      setRoleChangeNewRole(member.role);
+                                    }}
+                                    title="Modify this team member's role"
+                                    className="px-2.5 py-1.5 bg-indigo-50/50 hover:bg-indigo-600 hover:text-white text-indigo-600 border border-indigo-150 rounded-xl text-[9.5px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1"
+                                  >
+                                    Change Role
+                                  </button>
+                                )}
+
                                 {/* Remove Button (if not owner and not current workspace user) */}
                                 {member.role !== 'owner' && !isCurrentUser && (currentActiveRole === 'owner' || currentActiveRole === 'admin') && (
                                   <button 
@@ -5945,7 +5961,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setMemberToRemove(null)}></div>
           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl relative z-10 p-10 text-center animate-in zoom-in-95 duration-200">
              <div className="w-16 h-16 bg-red-50 border border-red-100 rounded-2xl flex items-center justify-center mx-auto mb-6 text-red-500 shadow-md">
-                <ShieldAlert className="w-8 h-8" />
+                 <ShieldAlert className="w-8 h-8" />
              </div>
              <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Remove Workspace Member?</h3>
              <p className="text-slate-500 font-medium text-xs leading-relaxed p-1.5 bg-slate-50 rounded-2xl border border-slate-100 mt-4 text-left">
@@ -5987,6 +6003,73 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                    Cancel / Stay
                 </button>
              </div>
+          </div>
+        </div>
+      )}
+
+      {/* Role Change Modal (Owner only) */}
+      {roleChangeMember && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 lg:p-10 animate-in fade-in duration-200">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setRoleChangeMember(null)}></div>
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl relative z-10 p-10 space-y-6 animate-in zoom-in-95 duration-200">
+            <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center mx-auto text-indigo-600 shadow-md">
+              <RefreshCw className="w-8 h-8 animate-spin" style={{ animationDuration: '4s' }} />
+            </div>
+            
+            <div className="text-center space-y-2">
+              <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Change Member Role</h3>
+              <p className="text-slate-500 font-semibold text-xs leading-relaxed p-2 bg-slate-50 border border-slate-100 rounded-xl">
+                Update authorization scope context for <strong className="text-slate-900">{roleChangeMember.name}</strong> (<span className="text-slate-400 font-mono text-[10px] font-bold">{roleChangeMember.email}</span>).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-1 pl-1">New Authorization Role</label>
+              <select
+                value={roleChangeNewRole}
+                onChange={(e) => setRoleChangeNewRole(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl text-xs font-bold text-slate-900 focus:outline-none cursor-pointer"
+              >
+                <option value="admin">Admin - Full access including billing & team</option>
+                <option value="agent">Agent - Full access to inbox, no billing</option>
+                <option value="support">Support - Limited to designated pages only</option>
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={async () => {
+                  if (!roleChangeNewRole) return;
+                  try {
+                    const res = await axios.post("/api/team/change-role", {
+                      email: roleChangeMember.email,
+                      newRole: roleChangeNewRole
+                    });
+                    if (res.data.success) {
+                      setTeamMembers(res.data.teamMembers);
+                      addToast(`Successfully updated ${roleChangeMember.name}'s role to ${roleChangeNewRole.toUpperCase()}`, 'success');
+                    } else {
+                      addToast(res.data.error || 'Failed to update role.', 'error');
+                    }
+                  } catch (err: any) {
+                    console.error("Change role error:", err);
+                    addToast(err.response?.data?.error || err.message || 'Failed to update role.', 'error');
+                  } finally {
+                    setRoleChangeMember(null);
+                  }
+                }}
+                className="w-full py-4 bg-indigo-600 hover:bg-indigo-750 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-1.5 cursor-pointer border-none"
+              >
+                Confirm Role Change
+              </button>
+              
+              <button
+                onClick={() => setRoleChangeMember(null)}
+                className="w-full py-4 text-slate-400 font-bold text-[10px] uppercase tracking-widest hover:text-slate-900 transition-colors bg-transparent border-none cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

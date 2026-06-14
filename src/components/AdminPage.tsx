@@ -62,6 +62,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
     currentPlan: ''
   });
   const [selectedPlan, setSelectedPlan] = useState<string>('trial');
+  const [planDuration, setPlanDuration] = useState<number>(30);
   const [planCreditMode, setPlanCreditMode] = useState<'none' | 'set_default' | 'add_default' | 'set_custom'>('none');
   const [planCustomCredits, setPlanCustomCredits] = useState<number>(0);
 
@@ -276,6 +277,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
     try {
       await axios.post(`/api/admin/users/${encodeURIComponent(planModal.email)}/plan`, {
         plan: selectedPlan === 'trial' ? null : selectedPlan,
+        durationDays: planDuration,
         creditMode: planCreditMode,
         customCredits: planCustomCredits
       });
@@ -1446,7 +1448,9 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                         email: selectedUser.email,
                         currentPlan: selectedUser.plan || 'trial'
                       });
-                      setSelectedPlan(selectedUser.plan || 'trial');
+                      const initPlan = selectedUser.plan || 'trial';
+                      setSelectedPlan(initPlan);
+                      setPlanDuration(initPlan === 'trial' ? 3 : 30);
                       setPlanCreditMode('none');
                       setPlanCustomCredits(0);
                     }}
@@ -1672,16 +1676,34 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
               <select
                 value={selectedPlan}
                 onChange={(e) => {
-                  setSelectedPlan(e.target.value);
+                  const val = e.target.value;
+                  setSelectedPlan(val);
+                  setPlanDuration(val === 'trial' ? 3 : 30);
                 }}
                 className="w-full px-4 py-3 bg-slate-950 border border-slate-800 text-indigo-200 focus:border-indigo-600 rounded-2xl text-xs font-bold focus:outline-none cursor-pointer"
               >
-                <option value="trial">Trial / Free Plan (0 credits default)</option>
+                <option value="trial">Trial / Free Plan (3 Days default)</option>
                 <option value="starter">Starter Plan ($8/mo - 30,000 credits)</option>
                 <option value="growth">Growth Plan ($22/mo - 300,000 credits)</option>
                 <option value="pro">Pro Plan ($49/mo - 800,000 credits)</option>
                 <option value="business">Business Plan ($99/mo - 2,000,000 credits)</option>
                 <option value="enterprise">Enterprise Plan ($199/mo - 4,500,000 credits)</option>
+              </select>
+            </div>
+
+            {/* Package Duration Selection */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase font-extrabold text-slate-500 pl-1">Package Duration</label>
+              <select
+                value={planDuration}
+                onChange={(e) => setPlanDuration(parseInt(e.target.value, 10))}
+                className="w-full px-4 py-3 bg-slate-950 border border-slate-800 text-indigo-200 focus:border-indigo-600 rounded-2xl text-xs font-bold focus:outline-none cursor-pointer"
+              >
+                <option value={3}>3 Days (Free Trial)</option>
+                <option value={30}>30 Days (Standard 1 Month)</option>
+                <option value={90}>90 Days (Standard 3 Months)</option>
+                <option value={180}>180 Days (Standard 6 Months)</option>
+                <option value={365}>365 Days (Standard 1 Year)</option>
               </select>
             </div>
 
