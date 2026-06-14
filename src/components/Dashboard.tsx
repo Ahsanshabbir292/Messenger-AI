@@ -2217,35 +2217,6 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
             </div>
           </div>
           <div className="flex items-center gap-4 sm:gap-6">
-            {/* Custom Role Tester Badge Dropdown */}
-            <div className="flex items-center gap-2 bg-indigo-50/50 border border-indigo-100/40 rounded-2xl px-3 py-1.5 shadow-sm">
-              <span className="hidden sm:inline text-[9px] font-black uppercase tracking-wider text-slate-400">Testing Role:</span>
-              <select 
-                value={currentActiveRole}
-                onChange={(e) => {
-                  const newRole = e.target.value as any;
-                  setCurrentActiveRole(newRole);
-                  
-                  // Immediate redirection if changing to a restricted tab
-                  if (newRole === 'agent' && (activeTab === 'billing' || activeTab === 'team' || activeTab === 'settings')) {
-                    setActiveTab('overview');
-                  } else if (newRole === 'support' && (activeTab === 'billing' || activeTab === 'team' || activeTab === 'pages' || activeTab === 'settings')) {
-                    setActiveTab('overview');
-                  } else if (newRole === 'admin' && activeTab === 'settings') {
-                    setActiveTab('overview');
-                  }
-                  
-                  addToast(`Switched active mock role to ${newRole.toUpperCase()}`, 'info');
-                }}
-                className="bg-transparent border-none text-[10px] font-black uppercase tracking-wider text-indigo-600 focus:outline-none cursor-pointer pr-1"
-              >
-                <option value="owner">Owner (Full)</option>
-                <option value="admin">Admin</option>
-                <option value="agent">Agent</option>
-                <option value="support">Support</option>
-              </select>
-            </div>
-
             <button 
               onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
               className="w-10 h-10 bg-slate-100 rounded-2xl flex items-center justify-center hover:bg-indigo-50 transition-colors cursor-pointer group border-none outline-none"
