@@ -2221,9 +2221,19 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest truncate">Role: {currentActiveRole}</p>
             </div>
           </div>
-          <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-500 font-black hover:bg-red-50 rounded-xl transition-all text-xs uppercase tracking-widest">
+          <button onClick={onLogout} className="w-full flex items-center gap-3 px-4 py-3 text-red-500 font-black hover:bg-red-50 rounded-xl transition-all text-xs uppercase tracking-widest mb-1">
             <LogOut className="w-4 h-4" /> Sign Out
           </button>
+          
+          <a
+            href="https://wa.me/923327733292"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-black text-xs uppercase tracking-widest text-slate-500 hover:bg-emerald-50 hover:text-emerald-700 bg-transparent cursor-pointer decoration-transparent select-none no-underline"
+          >
+            <MessageCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span>Customer Support</span>
+          </a>
         </div>
       </aside>
 
@@ -2870,6 +2880,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
               currentWorkspaceId={currentWorkspaceId}
               setWorkspaces={setWorkspaces}
               appUser={appUser}
+              onUserUpdate={onUserUpdate}
             />
           )}
 

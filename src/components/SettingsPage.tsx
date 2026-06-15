@@ -41,6 +41,7 @@ interface SettingsPageProps {
   currentWorkspaceId: string;
   setWorkspaces: React.Dispatch<React.SetStateAction<any[]>>;
   appUser: any;
+  onUserUpdate?: (user: any) => void;
 }
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({
@@ -80,13 +81,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   setSessionsList,
   currentWorkspaceId,
   setWorkspaces,
-  appUser
+  appUser,
+  onUserUpdate
 }) => {
   const [emailDebug, setEmailDebug] = React.useState<any>(null);
   const [emailLoading, setEmailLoading] = React.useState<boolean>(false);
   const [testEmail, setTestEmail] = React.useState<string>("");
   const [testSending, setTestSending] = React.useState<boolean>(false);
   const [testResult, setTestResult] = React.useState<any>(null);
+  const [editOwnerName, setEditOwnerName] = React.useState<string>("");
 
   const fetchEmailDebug = async () => {
     setEmailLoading(true);
@@ -183,6 +186,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <button 
                 onClick={() => {
                   setEditWorkspaceName(activeWorkspace?.name || "khaadi");
+                  setEditOwnerName(appUser?.fullName || userProfile?.name || "Ahsan Shabbir");
                   setIsEditWorkspaceModalOpen(true);
                 }}
                 className="px-3 py-1.5 sm:px-4 sm:py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-black text-[9px] sm:text-[10px] uppercase tracking-widest rounded-lg sm:rounded-xl transition-all cursor-pointer border-none"
@@ -418,7 +422,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
         <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-[#000000]/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-md p-8 rounded-[2.5rem] shadow-2xl border border-slate-100 animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-black text-slate-950 tracking-tight">Edit Workspace Name</h3>
+              <h3 className="text-xl font-black text-slate-950 tracking-tight">Edit Workspace Details</h3>
               <button 
                 onClick={() => setIsEditWorkspaceModalOpen(false)}
                 className="p-1.5 hover:bg-slate-50 text-slate-400 hover:text-slate-900 rounded-xl transition-all border-none bg-transparent cursor-pointer"
@@ -436,6 +440,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   className="w-full h-12 bg-slate-50 border-2 border-slate-50 rounded-2xl px-4 text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all"
                 />
               </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-400 mb-2 font-mono">Workspace Owner Name</label>
+                <input 
+                  type="text"
+                  value={editOwnerName}
+                  onChange={(e) => setEditOwnerName(e.target.value)}
+                  className="w-full h-12 bg-slate-50 border-2 border-slate-50 rounded-2xl px-4 text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all"
+                />
+              </div>
               <div className="flex gap-4 pt-4">
                 <button 
                   onClick={() => setIsEditWorkspaceModalOpen(false)}
@@ -449,22 +462,33 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                       addToast("Workspace name cannot be empty.", "error");
                       return;
                     }
+                    if (!editOwnerName.trim()) {
+                      addToast("Workspace owner name cannot be empty.", "error");
+                      return;
+                    }
                     const newName = editWorkspaceName.trim();
+                    const newOwnerName = editOwnerName.trim();
+                    
                     // Update local UI state
                     setWorkspaces(prev => prev.map(w => w.id === currentWorkspaceId ? { ...w, name: newName } : w));
                     
                     try {
-                      const res = await axios.post('/api/auth/update-settings', { workspaceName: newName });
+                      const res = await axios.post('/api/auth/update-settings', { 
+                        workspaceName: newName,
+                        fullName: newOwnerName
+                      });
                       if (res.data.user) {
                         localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                        onUserUpdate?.(res.data.user);
                         if (appUser) {
                           appUser.workspaceName = newName;
+                          appUser.fullName = newOwnerName;
                         }
                       }
-                      addToast(`Workspace renamed to "${newName}" successfully!`, "success");
+                      addToast(`Workspace details and owner name updated successfully!`, "success");
                     } catch (e: any) {
                       console.warn("Could not persist workspace settings to database:", e);
-                      addToast(`Workspace renamed to "${newName}" locally (DB sync failed).`, "success");
+                      addToast(`Workspace details updated locally (DB sync failed).`, "success");
                     }
                     setIsEditWorkspaceModalOpen(false);
                   }}
@@ -534,6 +558,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                       const res = await axios.post('/api/auth/update-settings', { fullName: newName });
                       if (res.data.user) {
                         localStorage.setItem('current_app_user', JSON.stringify(res.data.user));
+                        onUserUpdate?.(res.data.user);
                         if (appUser) {
                           appUser.fullName = newName;
                         }
