@@ -221,6 +221,12 @@ export const BillingPage: React.FC<BillingPageProps> = ({
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
 
+  // States for direct manual lookup / alternative email syncing
+  const [customEmail, setCustomEmail] = useState("");
+  const [customOrderId, setCustomOrderId] = useState("");
+  const [showDirectSyncForm, setShowDirectSyncForm] = useState(false);
+  const [syncingManual, setSyncingManual] = useState(false);
+
   // Load complete billing info
   const loadBillingDetails = async () => {
     try {
@@ -352,6 +358,40 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       addToast("Failed to verify webhook status", "error");
     } finally {
       setCheckingPayment(false);
+    }
+  };
+
+  const handleManualSync = async () => {
+    if (!customEmail.trim() && !customOrderId.trim()) {
+      addToast("Please provide either a payment email or an order number to search.", "info");
+      return;
+    }
+    try {
+      setSyncingManual(true);
+      const payload: any = {};
+      if (customEmail.trim()) payload.emailInput = customEmail.trim();
+      if (customOrderId.trim()) payload.orderIdInput = customOrderId.trim();
+
+      const res = await axios.post('/api/billing/sync-payment', payload);
+      if (res.data && res.data.success) {
+        addToast(res.data.message || "Successfully matched and activated your Lemon Squeezy subscription!", "success");
+        setCheckoutPending(false);
+        setIsPackConfirmOpen(false);
+        setIsSwitchConfirmOpen(false);
+        setIsSwitchModalOpen(false);
+        if (res.data.billingData) {
+          setBillingInfo(res.data.billingData);
+        }
+        if (fetchBillingData) await fetchBillingData();
+      } else {
+        addToast(res.data?.error || "We couldn't verify this transaction automatically.", "error");
+      }
+    } catch (err: any) {
+      console.error("Manual sync failed", err);
+      const errMsg = err.response?.data?.error || "No active transaction found on Lemon Squeezy matching these inputs. Double check and try again.";
+      addToast(errMsg, "error");
+    } finally {
+      setSyncingManual(false);
     }
   };
 
@@ -583,6 +623,60 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                   >
                     Cancel Auto-Renewal
                   </button>
+                )}
+
+                {activePlanId === "trial" && (
+                  <div className="pt-2 border-t border-slate-800 space-y-2">
+                    <button
+                      onClick={() => setShowDirectSyncForm(!showDirectSyncForm)}
+                      type="button"
+                      className="w-full text-center text-[10px] text-indigo-400 hover:text-indigo-300 font-bold bg-slate-800/80 hover:bg-slate-800 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border border-slate-700/50"
+                    >
+                      <span>Already purchased? Sync account</span>
+                      <span className="text-[9px] font-black">{showDirectSyncForm ? "▲ Hide" : "▼ Sync"}</span>
+                    </button>
+
+                    {showDirectSyncForm && (
+                      <div className="p-3 bg-slate-800/50 border border-slate-700/60 rounded-xl space-y-2.5 text-left">
+                        <p className="text-[10px] text-slate-300 leading-normal font-medium">
+                          Claim your premium plan by entering your payment email or Lemon Squeezy Order ID.
+                        </p>
+                        
+                        <div className="space-y-1.5">
+                          <div>
+                            <input
+                              type="email"
+                              placeholder="Buyer email (e.g. PayPal)"
+                              value={customEmail}
+                              onChange={(e) => setCustomEmail(e.target.value)}
+                              className="w-full px-2.5 py-1 text-[11px] border border-slate-700 rounded-lg bg-slate-900 font-medium text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+
+                          <div>
+                            <input
+                              type="text"
+                              placeholder="Order ID / # (e.g. 38224110)"
+                              value={customOrderId}
+                              onChange={(e) => setCustomOrderId(e.target.value)}
+                              className="w-full px-2.5 py-1 text-[11px] border border-slate-700 rounded-lg bg-slate-900 font-medium text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                            />
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleManualSync}
+                          disabled={syncingManual || (!customEmail.trim() && !customOrderId.trim())}
+                          type="button"
+                          className="w-full py-1.5 bg-indigo-650 hover:bg-indigo-650 disabled:bg-slate-800 text-white rounded-lg font-bold text-[11px] transition-all cursor-pointer border-none flex items-center justify-center gap-1.5"
+                        >
+                          {syncingManual ? (
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                          ) : "Fetch and Apply Plan"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
@@ -834,6 +928,69 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                       ) : "Verify Payment Status"}
                     </button>
+
+                    {/* HELPFUL DIRECT MANUAL SYNC FLOW */}
+                    <div className="pt-2 border-t border-slate-100 space-y-2">
+                      <button
+                        onClick={() => setShowDirectSyncForm(!showDirectSyncForm)}
+                        type="button"
+                        className="w-full text-center text-[10px] text-indigo-500 hover:text-indigo-600 font-bold bg-indigo-50/50 hover:bg-indigo-55 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border border-indigo-100"
+                      >
+                        <span>Paid using different email or have Order #?</span>
+                        <span className="text-[9px] font-black">{showDirectSyncForm ? "▲ Hide" : "▼ Direct Sync"}</span>
+                      </button>
+
+                      {showDirectSyncForm && (
+                        <motion.div 
+                          initial={{ opacity: 0, y: -5 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-left"
+                        >
+                          <p className="text-[10px] text-slate-500 leading-normal font-medium">
+                            If you checked out using a different email address (e.g., PayPal), or have your Order ID (like <strong>38224110</strong>), enter either below to instantly fetch and activate your account.
+                          </p>
+                          
+                          <div className="space-y-2">
+                            <div>
+                              <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Payment Email (Optional)
+                              </label>
+                              <input
+                                type="email"
+                                placeholder="e.g. buyer@example.com"
+                                value={customEmail}
+                                onChange={(e) => setCustomEmail(e.target.value)}
+                                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Order Number (Optional)
+                              </label>
+                              <input
+                                type="text"
+                                placeholder="e.g. 38224110 (from receipt)"
+                                value={customOrderId}
+                                onChange={(e) => setCustomOrderId(e.target.value)}
+                                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={handleManualSync}
+                            disabled={syncingManual || (!customEmail.trim() && !customOrderId.trim())}
+                            type="button"
+                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white rounded-xl font-bold text-xs transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow"
+                          >
+                            {syncingManual ? (
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                            ) : "Sync Premium Plan Live"}
+                          </button>
+                        </motion.div>
+                      )}
+                    </div>
 
                     <button
                       onClick={() => {
