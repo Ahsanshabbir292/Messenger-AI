@@ -211,6 +211,10 @@ export const BillingPage: React.FC<BillingPageProps> = ({
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
   const [isSwitchConfirmOpen, setIsSwitchConfirmOpen] = useState(false);
   
+  const [isPackConfirmOpen, setIsPackConfirmOpen] = useState(false);
+  const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
+  const [packCheckoutPending, setPackCheckoutPending] = useState(false);
+  
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<"card" | "paypal">("card");
   const [submittingAction, setSubmittingAction] = useState(false);
@@ -274,6 +278,57 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     setIsSwitchConfirmOpen(true);
   };
 
+  const handlePackClick = (packId: string) => {
+    setSelectedPackId(packId);
+    setPackCheckoutPending(false);
+    setIsPackConfirmOpen(true);
+  };
+
+  const handleConfirmPack = () => {
+    if (!selectedPackId) return;
+    const productId = PACK_PRODUCT_IDS[selectedPackId];
+    if (!productId) {
+      addToast("Invalid product configuration for Lemon Squeezy integration", "error");
+      return;
+    }
+    try {
+      const email = encodeURIComponent(appUser?.email || '');
+      const userId = encodeURIComponent(appUser?.email || '');
+      const url = `https://messengerai.lemonsqueezy.com/checkout/buy/${productId}?checkout[email]=${email}&checkout[custom][user_id]=${userId}&checkout[custom][pack_id]=${encodeURIComponent(selectedPackId)}`;
+      window.open(url, '_blank');
+      setPackCheckoutPending(true);
+      addToast("Redirected to official Lemon Squeezy checkout!", "success");
+    } catch (err) {
+      addToast("Failed to open checkout page automatically. Please allow popups.", "error");
+    }
+  };
+
+  const checkPackPaymentStatus = async () => {
+    if (!selectedPackId) return;
+    try {
+      setCheckingPayment(true);
+      const res = await axios.get('/api/billing/data');
+      if (res.data) {
+        const oldCredits = billingInfo?.creditBalance || creditBalance;
+        const newCredits = res.data.creditBalance;
+        if (newCredits > oldCredits) {
+          addToast(`Lemon Squeezy payment confirmed! Great success!`, "success");
+          setPackCheckoutPending(false);
+          setIsPackConfirmOpen(false);
+          setBillingInfo(res.data);
+          if (fetchBillingData) await fetchBillingData();
+        } else {
+          addToast("We haven't received confirmation from Lemon Squeezy yet. Please complete the checkout process.", "info");
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check pack status", err);
+      addToast("Failed to verify webhook status", "error");
+    } finally {
+      setCheckingPayment(false);
+    }
+  };
+
   const checkPaymentStatus = async () => {
     if (!selectedPlanId) return;
     try {
@@ -289,7 +344,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
           setIsSwitchModalOpen(false);
           if (fetchBillingData) await fetchBillingData();
         } else {
-          addToast("We haven't received your checkout confirmation webhook yet. Please complete checkout or click Sandbox Bypass.", "info");
+          addToast("We haven't received your checkout confirmation webhook yet. Please complete the checkout process.", "info");
         }
       }
     } catch (err) {
@@ -297,29 +352,6 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       addToast("Failed to verify webhook status", "error");
     } finally {
       setCheckingPayment(false);
-    }
-  };
-
-  const handleSimulateBypass = async () => {
-    if (!selectedPlanId) return;
-    try {
-      setSubmittingAction(true);
-      const res = await axios.post('/api/billing/switch-plan', {
-        planId: selectedPlanId,
-        paymentMethod: paymentMethod
-      });
-      if (res.data.success) {
-        addToast(`[Sandbox simulation] Payment webhook simulated! Plan successfully updated to ${selectedPlanId}`, "success");
-        setCheckoutPending(false);
-        setIsSwitchConfirmOpen(false);
-        setIsSwitchModalOpen(false);
-        await loadBillingDetails();
-        if (fetchBillingData) await fetchBillingData();
-      }
-    } catch (err: any) {
-      addToast(err.response?.data?.error || "Failed to update package", "error");
-    } finally {
-      setSubmittingAction(false);
     }
   };
 
@@ -658,7 +690,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                 <p className="text-[10px] text-slate-400 font-bold mt-0.5">Never expires</p>
               </div>
               <button
-                onClick={() => openCheckout(PACK_PRODUCT_IDS[pack.id])}
+                onClick={() => handlePackClick(pack.id)}
                 className="w-full py-2.5 bg-slate-50 hover:bg-indigo-600 hover:text-white text-slate-700 rounded-xl font-black text-xs uppercase tracking-wider transition-all border-none cursor-pointer active:scale-95"
               >
                 Buy Pack
@@ -804,16 +836,6 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </button>
 
                     <button
-                      onClick={handleSimulateBypass}
-                      disabled={submittingAction}
-                      className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md shadow-amber-100"
-                    >
-                      {submittingAction ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : "Confirm Mock Payment (Sandbox Bypass)"}
-                    </button>
-
-                    <button
                       onClick={() => {
                         setCheckoutPending(false);
                       }}
@@ -860,13 +882,12 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <label className="text-xs font-black uppercase text-slate-400 tracking-wider">Simulate Payment Method</label>
+                      <label className="text-xs font-black uppercase text-slate-400 tracking-wider">Payment Gateway</label>
                       <div className="w-full">
-                        <div className="p-4 rounded-xl border-2 border-indigo-600 bg-indigo-50/50 text-indigo-700 text-xs font-black flex items-center justify-between transition-all">
+                        <div className="p-4 rounded-xl border border-slate-100 bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-between transition-all">
                           <span className="flex items-center gap-2">
-                            <CreditCard className="w-4 h-4" /> Credit Card (Simulated Sandbox)
+                            <CreditCard className="w-4 h-4 text-indigo-500" /> Secure Checkout via Lemon Squeezy
                           </span>
-                          <span className="text-[10px] uppercase font-black tracking-wider text-indigo-500 bg-indigo-100/80 px-2 py-0.5 rounded-full">Selected</span>
                         </div>
                       </div>
                     </div>
@@ -935,6 +956,97 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                   ) : "Cancel Auto-Renewal"}
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. Extra Credit Pack Purchase Confirmation Dialog */}
+      <AnimatePresence>
+        {isPackConfirmOpen && selectedPackId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6 sm:p-8 space-y-6 border border-slate-100"
+            >
+              {packCheckoutPending ? (
+                <div className="space-y-6">
+                  <div className="text-center space-y-3">
+                    <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto relative">
+                      <RefreshCw className="w-8 h-8 animate-spin" style={{ animationDuration: '3s' }} />
+                      <div className="absolute inset-0 rounded-full border-4 border-blue-500 animate-ping opacity-10"></div>
+                    </div>
+                    <h3 className="text-lg font-black text-slate-900 text-center">Awaiting Credit Pack Payment...</h3>
+                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center">
+                      We opened Lemon Squeezy secure checkout in a new browser tab. Please complete the one-time payment.
+                    </p>
+                  </div>
+
+                  <div className="bg-blue-50/50 rounded-2xl p-4 border border-blue-100 space-y-2 text-xs">
+                    <p className="font-bold text-slate-700 text-center text-sm">
+                      Credits: <span className="text-indigo-600 font-black text-[13px]">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)}</span>
+                    </p>
+                    <p className="text-[11px] text-slate-500 font-medium text-center leading-normal">
+                      Once confirmed via our webhooks, your balance updates immediately.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    <button
+                      onClick={checkPackPaymentStatus}
+                      disabled={checkingPayment}
+                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md"
+                    >
+                      {checkingPayment ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : "Confirm Webhook Status"}
+                    </button>
+
+                    <button
+                      onClick={() => setPackCheckoutPending(false)}
+                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-100 rounded-xl font-bold text-xs uppercase transition-all cursor-pointer text-center"
+                    >
+                      Back
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="text-center space-y-3">
+                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto">
+                      <Zap className="w-6 h-6 text-indigo-600 animate-bounce" />
+                    </div>
+                    <h3 className="text-lg font-black text-slate-900">Purchase Extra Credits</h3>
+                    <p className="text-xs text-slate-400 font-medium">
+                      Add <strong className="text-indigo-600 font-black">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)}</strong> automated credits to your workspace. One-time purchase - credits never expire!
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 font-medium">One-Time Fee:</span>
+                      <span className="font-black text-slate-900">${CREDIT_PACKS.find(p => p.id === selectedPackId)?.price}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setIsPackConfirmOpen(false)}
+                      className="flex-1 py-3 bg-slate-50 text-slate-600 border border-slate-100 hover:bg-slate-100 rounded-xl font-bold text-xs uppercase cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleConfirmPack}
+                      className="flex-1 py-3 bg-indigo-600 hover:bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md"
+                    >
+                      Confirm & Buy
+                    </button>
+                  </div>
+                </>
+              )}
             </motion.div>
           </div>
         )}
