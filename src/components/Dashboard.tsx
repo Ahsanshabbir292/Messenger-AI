@@ -2304,15 +2304,6 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                 >
                   Back to Overview
                 </button>
-                <button 
-                  onClick={() => {
-                    setCurrentActiveRole('owner');
-                    addToast("Switched active role to OWNER for full access", 'success');
-                  }}
-                  className="text-indigo-600 font-extrabold text-xs uppercase tracking-widest py-3 hover:bg-indigo-50 rounded-2xl transition-all border-none bg-transparent"
-                >
-                  Switch to Owner (Tester)
-                </button>
               </div>
             </div>
           ) : (
