@@ -1395,7 +1395,37 @@ async function startServer() {
     });
 
     try {
-      // 2. Fast direct lookup of this user's profile to discover their inviter owner and workspace context (O(1))
+      // 2. Discover all workspace owners where this user has been added to their team roster
+      const usersSnap = await db.collection("users").get();
+      usersSnap.forEach((doc: any) => {
+        const uData = doc.data() || {};
+        const ownerEmail = doc.id.toLowerCase().trim();
+        // Skip self
+        if (ownerEmail === freshEmail) return;
+
+        const team = uData.teamMembers || [];
+        const match = team.find((m: any) => m.email && m.email.toLowerCase() === freshEmail);
+        if (match) {
+          const workspaceId = uData.workspaceId && uData.workspaceId !== "ws_default" && uData.workspaceId !== "personal" 
+            ? String(uData.workspaceId) 
+            : `ws_${ownerEmail}`;
+          const workspaceName = uData.workspaceName || `${uData.fullName || ownerEmail}'s Workspace`;
+          
+          list.push({
+            id: workspaceId,
+            name: workspaceName,
+            role: match.role || "member",
+            ownerEmail: ownerEmail,
+            assignedPages: match.assigned_pages || match.assignedPages || []
+          });
+        }
+      });
+    } catch (err: any) {
+      console.error("[getUserAccessibleWorkspaces] Error scanning all users for team roster:", err.message);
+    }
+
+    try {
+      // 3. Fast direct lookup of this user's profile to discover their inviter owner and workspace context (O(1)) fallback
       const userDoc = await db.collection("users").doc(freshEmail).get();
       if (userDoc.exists) {
         const userData = userDoc.data();
@@ -1411,7 +1441,7 @@ async function startServer() {
             
             const workspaceId = userData.workspaceId && userData.workspaceId !== "ws_default" && userData.workspaceId !== "personal" 
               ? String(userData.workspaceId) 
-              : "1";
+              : `ws_${inviterEmail}`;
             
             const workspaceName = inviterData.workspaceName || `${inviterData.fullName || inviterEmail}'s Workspace`;
             
@@ -1430,13 +1460,15 @@ async function startServer() {
     }
 
     try {
-      // 3. Scan invitations collection for any pending or accepted invitation (O(1))
+      // 4. Scan invitations collection for any pending or accepted invitation (O(1)) fallback
       const inviteDoc = await db.collection("invitations").doc(freshEmail).get();
       if (inviteDoc.exists) {
         const data = inviteDoc.data();
         if (data?.inviterEmail) {
           const inviterEmail = data.inviterEmail.toLowerCase().trim();
-          const workspaceId = data.inviterWorkspaceId && data.inviterWorkspaceId !== "ws_default" && data.inviterWorkspaceId !== "personal" ? String(data.inviterWorkspaceId) : "1";
+          const workspaceId = data.inviterWorkspaceId && data.inviterWorkspaceId !== "ws_default" && data.inviterWorkspaceId !== "personal" 
+            ? String(data.inviterWorkspaceId) 
+            : `ws_${inviterEmail}`;
           const role = data.role || "member";
 
           if (!list.some(w => String(w.id) === String(workspaceId))) {
