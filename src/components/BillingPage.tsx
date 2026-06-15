@@ -13,16 +13,6 @@ interface BillingPageProps {
 
 const PLANS = [
   {
-    id: "trial",
-    name: "Free Trial",
-    price: 0,
-    credits: 10000,
-    pages: 3,
-    teamMembers: 1,
-    popular: false,
-    features: ["3 Facebook pages", "Auto replies", "Live chat simulator", "Complimentary 10k credits", "Expires in exactly 3 days"],
-  },
-  {
     id: "starter",
     name: "Starter",
     price: 8,

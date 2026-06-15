@@ -144,14 +144,7 @@ export function AudiencePage({ onOpenChat, addToast }: AudiencePageProps) {
 
         {/* METADATA / STATUS INDICATORS */}
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 shrink-0">
-          {/* Live Webhook Indicator */}
-          <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-100/50 rounded-2xl">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-            </span>
-            <span className="text-xs font-bold text-emerald-700 tracking-wide uppercase">Webhook Connected</span>
-          </div>
+
 
           {/* Pagination Info */}
           <div className="px-4 py-2 bg-slate-50 border border-slate-150 rounded-2xl text-xs font-bold text-slate-600 tracking-wider">
@@ -374,18 +367,7 @@ export function AudiencePage({ onOpenChat, addToast }: AudiencePageProps) {
         )}
       </div>
 
-      {/* POLICY INFORMATION CALLOUT CARD */}
-      <div className="bg-slate-100/50 p-6 rounded-3xl border border-slate-200/60 flex items-start gap-4">
-        <div className="w-10 h-10 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-center justify-center shrink-0 text-indigo-600 shadow-sm">
-          <Clock className="w-5 h-5" />
-        </div>
-        <div className="space-y-1">
-          <h4 className="text-sm font-extrabold text-slate-900 tracking-tight">Understanding Meta's 24-Hour Messaging Policy</h4>
-          <p className="text-xs font-medium text-slate-500 leading-relaxed">
-            Meta allows pages to send broadcasts or replies freely within 24 hours of a customer's last incoming message (marked as <span className="font-extrabold text-[#10B981]">Eligible</span>). Outside this window (marked as <span className="font-bold text-slate-600">24h Window</span>), standard api broadcasts are strictly restricted to avoid shadow-banning. However, you can always use the "Chat" button above to launch manual live communications directly from your inbox using the HUMAN_AGENT tag fallback!
-          </p>
-        </div>
-      </div>
+
 
     </div>
   );

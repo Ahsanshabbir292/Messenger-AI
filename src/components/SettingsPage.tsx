@@ -220,17 +220,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
               <h3 className="text-base sm:text-lg font-bold text-slate-900">Facebook Connection</h3>
             </div>
             <div className="p-5 sm:p-6 md:p-8 space-y-4 sm:space-y-6 text-left">
-              {userProfile && (
-                <div className="bg-amber-50/70 border border-amber-200/60 rounded-xl p-4 flex items-start gap-3 text-amber-800 animate-in fade-in duration-300">
-                  <ShieldCheck className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-extrabold text-[13px] tracking-tight text-amber-950">Security Lock Enabled</p>
-                    <p className="text-xs text-amber-800/90 font-medium leading-relaxed">
-                      This Facebook connection is <strong>permanently locked and secured</strong> to your primary account to enforce secure 1-to-1 account mapping. For security purposes, this connection cannot be disconnected or changed from this settings dashboard. Only system administrators can perform a forced un-link.
-                    </p>
-                  </div>
-                </div>
-              )}
+
 
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 sm:gap-6">
                 <div className="flex items-center gap-4">

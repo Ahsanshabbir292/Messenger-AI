@@ -15,12 +15,18 @@ interface AdminPageProps {
   appUser: any;
   onLogout: () => void | Promise<void>;
   navigateTo: (path: string) => void;
+  onUserUpdate?: (user: any) => void;
 }
 
 type AdminTab = 'dashboard' | 'users' | 'credits' | 'subscriptions' | 'pages' | 'broadcasts' | 'teams' | 'announcements' | 'billing' | 'activity_logs';
 
-export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPageProps) {
+export default function AdminPage({ appUser, onLogout, navigateTo, onUserUpdate }: AdminPageProps) {
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
+  
+  // Inline connection limit input states
+  const [isEditingLimit, setIsEditingLimit] = useState(false);
+  const [limitInputVal, setLimitInputVal] = useState("");
+
   const [stats, setStats] = useState<any>(null);
   const [dbDiag, setDbDiag] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
@@ -152,6 +158,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
   // View User Full Details
   const viewUserDetails = async (email: string) => {
     setLoadingUserDetails(true);
+    setIsEditingLimit(false);
     try {
       const userRes = await axios.get(`/api/admin/users/${encodeURIComponent(email)}`);
       setSelectedUser(userRes.data.user);
@@ -271,11 +278,32 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
     }
   };
 
+  // Update Facebook Connection Limit directly
+  const handleUpdateConnectionLimit = async (email: string, limit: number | null) => {
+    try {
+      const res = await axios.post(`/api/admin/users/${encodeURIComponent(email)}/connection-limit`, { limit });
+      if (res.data.success) {
+        addToast(`Successfully updated Facebook connection limit to ${limit === null ? 'Plan Default' : limit + ' pages'}.`, "success");
+        if (selectedUser?.email?.toLowerCase() === email.toLowerCase()) {
+          setSelectedUser(prev => prev ? { ...prev, facebookConnectionLimit: limit } : null);
+        }
+        setUsers(prev => prev.map(u => u.email?.toLowerCase() === email.toLowerCase() ? { ...u, facebookConnectionLimit: limit } : u));
+        
+        // Instantly refresh admin's own appUser context if updating self!
+        if (onUserUpdate && appUser?.email?.toLowerCase() === email.toLowerCase()) {
+          onUserUpdate({ ...appUser, facebookConnectionLimit: limit });
+        }
+      }
+    } catch (err: any) {
+      addToast(err.response?.data?.error || "Failed to update connection limit", "danger");
+    }
+  };
+
   // Assign plan/package directly to user
   const handleUpdateUserPlan = async () => {
     if (!planModal.email) return;
     try {
-      await axios.post(`/api/admin/users/${encodeURIComponent(planModal.email)}/plan`, {
+      const res = await axios.post(`/api/admin/users/${encodeURIComponent(planModal.email)}/plan`, {
         plan: selectedPlan === 'trial' ? null : selectedPlan,
         durationDays: planDuration,
         creditMode: planCreditMode,
@@ -284,9 +312,23 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
       addToast(`Subscription package/plan successfully set to ${selectedPlan.toUpperCase()} for ${planModal.email}`, "success");
       setPlanModal(prev => ({ ...prev, isOpen: false }));
       handleRefresh();
-      if (selectedUser?.email === planModal.email) {
-        viewUserDetails(planModal.email);
+      
+      // Instantly refresh admin's own appUser context if updating self!
+      if (onUserUpdate && appUser?.email?.toLowerCase() === planModal.email.toLowerCase()) {
+        const resetVal = selectedPlan === 'trial' ? null : selectedPlan;
+        onUserUpdate({ 
+          ...appUser, 
+          plan: resetVal,
+          planExpiresAt: res.data.planExpiresAt,
+          planActivatedAt: res.data.planActivatedAt,
+          credits: res.data.credits,
+          creditBalance: res.data.credits
+        });
       }
+
+      if (selectedUser?.email?.toLowerCase() === planModal.email.toLowerCase()) {
+        viewUserDetails(planModal.email);
+       }
     } catch (err: any) {
       addToast(err.response?.data?.error || "Failed to update package/plan", "danger");
     }
@@ -1458,6 +1500,79 @@ export default function AdminPage({ appUser, onLogout, navigateTo }: AdminPagePr
                   >
                     Change Plan
                   </button>
+                </div>
+              </div>
+
+              {/* Facebook Connection Limit Overrides */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-black uppercase text-slate-400 tracking-wide">Facebook Connection Limit</h4>
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800">
+                  {isEditingLimit ? (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <div>
+                        <label className="text-[10px] text-indigo-400 font-extrabold uppercase leading-none block mb-1.5">
+                          Set Custom Max Pages Limit
+                        </label>
+                        <p className="text-[9px] text-slate-500 leading-normal mb-2">
+                          Enter maximum number of connected Facebook pages allowed for this user. Leave empty or blank to restore Plan default.
+                        </p>
+                        <input
+                          type="number"
+                          min="0"
+                          value={limitInputVal}
+                          onChange={(e) => setLimitInputVal(e.target.value)}
+                          placeholder="e.g. 5 (or leave blank to reset)"
+                          className="w-full px-4 py-2.5 bg-slate-900 border border-slate-800 focus:border-indigo-500 text-white text-xs rounded-xl focus:outline-none transition-all font-semibold"
+                        />
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingLimit(false)}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[10px] font-black tracking-wider uppercase transition-all cursor-pointer border-none"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const trimmed = limitInputVal.trim();
+                            const limitVal = trimmed ? parseInt(trimmed, 10) : null;
+                            if (trimmed && (isNaN(limitVal || 0) || (limitVal || 0) < 0)) {
+                              addToast("Please enter a valid positive number or leave blank.", "danger");
+                              return;
+                            }
+                            await handleUpdateConnectionLimit(selectedUser.email, limitVal);
+                            setIsEditingLimit(false);
+                          }}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black tracking-wider uppercase transition-all cursor-pointer border-none"
+                        >
+                          Save Limit
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="text-[10px] text-slate-500 font-extrabold uppercase leading-none mb-1">Max Pages Allowed</p>
+                        <p className="text-sm font-black text-white">
+                          {selectedUser.facebookConnectionLimit !== undefined && selectedUser.facebookConnectionLimit !== null
+                            ? `${selectedUser.facebookConnectionLimit} Pages`
+                            : "Plan Default (No Custom Override)"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLimitInputVal(selectedUser.facebookConnectionLimit !== undefined && selectedUser.facebookConnectionLimit !== null ? String(selectedUser.facebookConnectionLimit) : "");
+                          setIsEditingLimit(true);
+                        }}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[10px] font-black tracking-wider uppercase transition-colors cursor-pointer border-none"
+                      >
+                        Change Limit
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 

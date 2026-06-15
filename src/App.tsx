@@ -385,7 +385,7 @@ export default function App() {
             </div>
           </div>
         ) : (
-          <AdminPage appUser={appUser} onLogout={handleLogout} navigateTo={navigateTo} />
+          <AdminPage appUser={appUser} onLogout={handleLogout} navigateTo={navigateTo} onUserUpdate={setAppUser} />
         )
       )}
 

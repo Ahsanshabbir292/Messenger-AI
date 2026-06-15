@@ -5110,6 +5110,12 @@ Super-administrative console restricted to permitted accounts to audit system ac
         else if (lowerPlan === "enterprise") { limit = 9999; planName = "Enterprise Package"; }
       }
 
+      // Check for Admin Override of Connection Limit
+      if (userData?.facebookConnectionLimit !== undefined && userData?.facebookConnectionLimit !== null) {
+        limit = userData.facebookConnectionLimit;
+        planName = `Custom Override Limit (${limit} page${limit > 1 ? 's' : ''})`;
+      }
+
       let selectedPageIds: string[] = data.selectedPageIds || [];
       if (selected) {
         if (!selectedPageIds.includes(pageId)) {
@@ -8935,6 +8941,40 @@ Write a realistic, short and natural response expressing your reaction, query, o
     } catch (err: any) {
       console.error("[Admin API] Failed to update user plan:", err.message);
       res.status(500).json({ error: "Failed to update user plan", details: err.message });
+    }
+  });
+
+  // Users Management - Update Facebook Connection Limit Override
+  app.post("/api/admin/users/:email/connection-limit", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+    const { limit } = req.body;
+
+    try {
+      const userDocRef = db.collection("users").doc(emailLower);
+      const userDoc = await userDocRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const parsedLimit = (limit === null || limit === undefined) ? null : parseInt(limit, 10);
+      if (parsedLimit !== null && (isNaN(parsedLimit) || parsedLimit < 0)) {
+        return res.status(400).json({ error: "Invalid connection limit number" });
+      }
+
+      await userDocRef.update({
+        facebookConnectionLimit: parsedLimit
+      });
+
+      await logAdminAction(
+        parsedLimit === null ? "Reset Facebook Connection Limit to Plan Default" : `Updated Facebook Connection Limit to ${parsedLimit} page(s)`,
+        emailLower,
+        req
+      );
+
+      res.json({ success: true, limit: parsedLimit });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to update user connection limit:", err.message);
+      res.status(500).json({ error: "Failed to update connection limit", details: err.message });
     }
   });
 

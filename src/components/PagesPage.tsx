@@ -15,6 +15,7 @@ interface PagesPageProps {
   lastSyncedContacts?: string | null;
   isSyncingContacts?: boolean;
   handleSyncContacts?: () => void | Promise<void>;
+  appUser?: any;
 }
 
 export const PagesPage: React.FC<PagesPageProps> = ({
@@ -28,7 +29,8 @@ export const PagesPage: React.FC<PagesPageProps> = ({
   onLockTrial,
   lastSyncedContacts = null,
   isSyncingContacts = false,
-  handleSyncContacts
+  handleSyncContacts,
+  appUser
 }) => {
   // Sync states for each individual page
   const [pageSyncStates, setPageSyncStates] = useState<Record<string, { status: 'idle' | 'syncing' | 'completed'; stageText: string }>>({});
@@ -64,7 +66,10 @@ export const PagesPage: React.FC<PagesPageProps> = ({
   };
 
   const planDetails = getPlanDetails(currentPlan);
-  const pageLimit = planDetails.limit;
+  const rawPageLimit = planDetails.limit;
+  const pageLimit = (appUser?.facebookConnectionLimit !== undefined && appUser?.facebookConnectionLimit !== null)
+    ? appUser.facebookConnectionLimit
+    : rawPageLimit;
   const isTrial = planDetails.isTrial;
 
   const handleSinglePageSync = async (pageId: string, pageName: string) => {
@@ -202,18 +207,7 @@ export const PagesPage: React.FC<PagesPageProps> = ({
           </div>
         </div>
 
-        {/* Pages Missing Help Alert */}
-        <div className="px-5 sm:px-8 py-5 bg-indigo-50/40 border-b border-indigo-100 flex flex-col sm:flex-row items-start sm:items-center gap-4 text-xs">
-          <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 shrink-0">
-            <Facebook className="w-5 h-5 fill-current" />
-          </div>
-          <div>
-            <p className="font-bold text-indigo-900 text-sm">How to Synchronize All Your Facebook Pages?</p>
-            <p className="text-indigo-700/90 font-medium mt-1 leading-relaxed text-[11px] sm:text-xs">
-              If some of your pages are not listed here, click the <strong>"Sync Facebook Pages"</strong> button above. When the permissions screen opens, make sure to click <strong>"Edit Settings"</strong> and check or check-mark <strong>all of your Pages</strong>. If any page is unchecked, Facebook will hide it from being synchronized!
-            </p>
-          </div>
-        </div>
+
 
         <div className="overflow-x-auto">
           <table className="w-full text-left">

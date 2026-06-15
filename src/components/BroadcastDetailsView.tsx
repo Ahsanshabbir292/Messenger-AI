@@ -681,7 +681,7 @@ export function BroadcastDetailsView({
       </div>
 
       {/* INDIVIDUAL RECIPIENT DELIVERY TABLE */}
-      <div className="bg-white border border-slate-200 rounded-[1.5rem] shadow-sm overflow-hidden text-left mt-6 shadow-sm">
+      <div className="hidden bg-white border border-slate-200 rounded-[1.5rem] shadow-sm overflow-hidden text-left mt-6 shadow-sm">
         <div className="border-b border-slate-100 px-6 py-5 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
             <h3 className="text-sm font-black uppercase tracking-wider text-slate-800 flex items-center gap-2">

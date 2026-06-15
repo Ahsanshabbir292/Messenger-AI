@@ -2365,6 +2365,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
               isSyncingContacts={isSyncingContacts}
               handleSyncContacts={handleSyncContacts}
               onLockTrial={handleLockTrial}
+              appUser={appUser}
             />
           )}
 
