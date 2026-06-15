@@ -1443,12 +1443,29 @@ async function startServer() {
             const inviterDoc = await db.collection("users").doc(inviterEmail).get();
             const inviterData = inviterDoc.exists ? inviterDoc.data() : null;
             const workspaceName = inviterData?.workspaceName || data.workspaceName || `${data.inviterName || inviterEmail}'s Workspace`;
+            
+            // Dynamically resolve active member role and assigned pages from the inviter's teamMembers list as the single master source of truth
+            let activeRole = role;
+            let activeAssignedPages = data.assignedPages || [];
+            if (inviterData) {
+              const teamMembers = inviterData.teamMembers || [];
+              const match = teamMembers.find((m: any) => m.email && m.email.toLowerCase() === freshEmail);
+              if (match) {
+                if (match.role) {
+                  activeRole = match.role;
+                }
+                if (match.assigned_pages || match.assignedPages) {
+                  activeAssignedPages = match.assigned_pages || match.assignedPages;
+                }
+              }
+            }
+
             list.push({
               id: workspaceId,
               name: workspaceName,
-              role: role,
+              role: activeRole,
               ownerEmail: inviterEmail,
-              assignedPages: data.assignedPages || []
+              assignedPages: activeAssignedPages
             });
           }
         }
@@ -3142,6 +3159,11 @@ Super-administrative console restricted to permitted accounts to audit system ac
       // Synchronize back to the member's personal document
       try {
         await db.collection("users").doc(targetEmailLower).update({ role: newRole });
+      } catch (err) {}
+
+      // Synchronize back to the invitation record as well
+      try {
+        await db.collection("invitations").doc(targetEmailLower).update({ role: newRole });
       } catch (err) {}
 
       // Emit realtime websocket event to user room so their frontend syncs instantly
