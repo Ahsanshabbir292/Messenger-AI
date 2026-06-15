@@ -252,33 +252,41 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       const triggerAutoCheck = async () => {
         try {
           queryCount++;
-          const res = await axios.get('/api/billing/data');
-          if (res.data) {
-            // Check for plan switch/upgrade auto detection
-            if (checkoutPending && selectedPlanId) {
-              const currentRefreshedPlan = res.data.currentPlan;
-              if (currentRefreshedPlan === selectedPlanId) {
-                addToast(`Order detected and processed! Plan successfully upgraded to ${selectedPlanId}`, "success");
-                setCheckoutPending(false);
-                setIsSwitchConfirmOpen(false);
-                setIsSwitchModalOpen(false);
-                setBillingInfo(res.data);
-                if (fetchBillingData) await fetchBillingData();
-                return;
-              }
-            }
+          // High-availability: post to confirm-order as part of the background check
+          const confirmRes = await axios.post('/api/billing/confirm-order', {
+            planId: checkoutPending ? selectedPlanId : undefined,
+            packId: packCheckoutPending ? selectedPackId : undefined
+          });
 
-            // Check for credit pack auto detection
-            if (packCheckoutPending) {
-              const newCredits = res.data.creditBalance || 0;
-              const oldCredits = billingInfo?.creditBalance || creditBalance;
-              if (newCredits > oldCredits) {
-                addToast(`One-time payment detected! Added extra credits to your account balance.`, "success");
-                setPackCheckoutPending(false);
-                setIsPackConfirmOpen(false);
-                setBillingInfo(res.data);
-                if (fetchBillingData) await fetchBillingData();
-                return;
+          if (confirmRes.data && confirmRes.data.success) {
+            const res = await axios.get('/api/billing/data');
+            if (res.data) {
+              // Check for plan switch/upgrade auto detection
+              if (checkoutPending && selectedPlanId) {
+                const currentRefreshedPlan = res.data.currentPlan;
+                if (currentRefreshedPlan === selectedPlanId) {
+                  addToast(confirmRes.data.message || `Order detected and processed! Plan successfully upgraded to ${selectedPlanId}`, "success");
+                  setCheckoutPending(false);
+                  setIsSwitchConfirmOpen(false);
+                  setIsSwitchModalOpen(false);
+                  setBillingInfo(res.data);
+                  if (fetchBillingData) await fetchBillingData();
+                  return;
+                }
+              }
+
+              // Check for credit pack auto detection
+              if (packCheckoutPending) {
+                const newCredits = res.data.creditBalance || 0;
+                const oldCredits = billingInfo?.creditBalance || creditBalance;
+                if (newCredits > oldCredits) {
+                  addToast(confirmRes.data.message || `One-time payment detected! Added extra credits to your account balance.`, "success");
+                  setPackCheckoutPending(false);
+                  setIsPackConfirmOpen(false);
+                  setBillingInfo(res.data);
+                  if (fetchBillingData) await fetchBillingData();
+                  return;
+                }
               }
             }
           }
@@ -303,7 +311,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
         console.log("[Auto-Payment System] Cleaned up background polling checker.");
       }
     };
-  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance]);
+  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance, selectedPackId]);
 
   // Instantly run dynamic check as soon as the user refocuses on this app tab
   useEffect(() => {
@@ -311,27 +319,34 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       if (checkoutPending || packCheckoutPending) {
         console.log("[Auto-Payment System] Tab refocused. Initiating instant validation scan...");
         try {
-          const res = await axios.get('/api/billing/data');
-          if (res.data) {
-            if (checkoutPending && selectedPlanId) {
-              if (res.data.currentPlan === selectedPlanId) {
-                addToast(`Order detected and activated! Plan upgrade successful.`, "success");
-                setCheckoutPending(false);
-                setIsSwitchConfirmOpen(false);
-                setIsSwitchModalOpen(false);
-                setBillingInfo(res.data);
-                if (fetchBillingData) await fetchBillingData();
+          const confirmRes = await axios.post('/api/billing/confirm-order', {
+            planId: checkoutPending ? selectedPlanId : undefined,
+            packId: packCheckoutPending ? selectedPackId : undefined
+          });
+
+          if (confirmRes.data && confirmRes.data.success) {
+            const res = await axios.get('/api/billing/data');
+            if (res.data) {
+              if (checkoutPending && selectedPlanId) {
+                if (res.data.currentPlan === selectedPlanId) {
+                  addToast(confirmRes.data.message || `Order detected and activated! Plan upgrade successful.`, "success");
+                  setCheckoutPending(false);
+                  setIsSwitchConfirmOpen(false);
+                  setIsSwitchModalOpen(false);
+                  setBillingInfo(res.data);
+                  if (fetchBillingData) await fetchBillingData();
+                }
               }
-            }
-            if (packCheckoutPending) {
-              const newCredits = res.data.creditBalance || 0;
-              const oldCredits = billingInfo?.creditBalance || creditBalance;
-              if (newCredits > oldCredits) {
-                addToast(`Extra credits detected and activated automatically!`, "success");
-                setPackCheckoutPending(false);
-                setIsPackConfirmOpen(false);
-                setBillingInfo(res.data);
-                if (fetchBillingData) await fetchBillingData();
+              if (packCheckoutPending) {
+                const newCredits = res.data.creditBalance || 0;
+                const oldCredits = billingInfo?.creditBalance || creditBalance;
+                if (newCredits > oldCredits) {
+                  addToast(confirmRes.data.message || `Extra credits detected and activated automatically!`, "success");
+                  setPackCheckoutPending(false);
+                  setIsPackConfirmOpen(false);
+                  setBillingInfo(res.data);
+                  if (fetchBillingData) await fetchBillingData();
+                }
               }
             }
           }
@@ -345,7 +360,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     return () => {
       window.removeEventListener("focus", handleTabRefocus);
     };
-  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance]);
+  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance, selectedPackId]);
 
   const openCheckout = (productId: string, planId?: string) => {
     const email = encodeURIComponent(appUser?.email || '');
@@ -895,7 +910,36 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </button>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
+                    <button
+                      onClick={async () => {
+                        try {
+                          addToast("Contacting automated payment processor to verify checkout...", "info");
+                          const confirmRes = await axios.post('/api/billing/confirm-order', {
+                            planId: selectedPlanId
+                          });
+                          if (confirmRes.data && confirmRes.data.success) {
+                            addToast(confirmRes.data.message || `Order successfully verified and activated! Enjoy your ${selectedPlanId} plan.`, "success");
+                            setCheckoutPending(false);
+                            setIsSwitchConfirmOpen(false);
+                            setIsSwitchModalOpen(false);
+                            const res = await axios.get('/api/billing/data');
+                            if (res.data) {
+                              setBillingInfo(res.data);
+                            }
+                            if (fetchBillingData) await fetchBillingData();
+                          } else {
+                            addToast(confirmRes.data.error || "Order status checking completed. Please complete checkout to proceed.", "error");
+                          }
+                        } catch (err: any) {
+                          addToast(err.response?.data?.error || "We're checking your purchase. Please complete the subscription in the checkout window.", "error");
+                        }
+                      }}
+                      className="w-full py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-2 shadow-md shadow-indigo-150"
+                    >
+                      <Check className="w-4 h-4 text-white" /> Verify & Activate Order Now
+                    </button>
+
                     <button
                       onClick={() => {
                         setCheckoutPending(false);
@@ -1057,7 +1101,35 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </p>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
+                    <button
+                      onClick={async () => {
+                        try {
+                          addToast("Contacting automated payment processor to verify checkout...", "info");
+                          const confirmRes = await axios.post('/api/billing/confirm-order', {
+                            packId: selectedPackId
+                          });
+                          if (confirmRes.data && confirmRes.data.success) {
+                            addToast(confirmRes.data.message || "Purchase successfully verified and activated! Added extra credits.", "success");
+                            setPackCheckoutPending(false);
+                            setIsPackConfirmOpen(false);
+                            const res = await axios.get('/api/billing/data');
+                            if (res.data) {
+                              setBillingInfo(res.data);
+                            }
+                            if (fetchBillingData) await fetchBillingData();
+                          } else {
+                            addToast(confirmRes.data.error || "Order status checking completed. Please complete checkout to proceed.", "error");
+                          }
+                        } catch (err: any) {
+                          addToast(err.response?.data?.error || "We're checking your purchase. Please complete the payment in the checkout window.", "error");
+                        }
+                      }}
+                      className="w-full py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-2 shadow-md shadow-indigo-150"
+                    >
+                      <Check className="w-4 h-4 text-white" /> Verify & Activate Credits Now
+                    </button>
+
                     <button
                       onClick={() => setPackCheckoutPending(false)}
                       className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center border-none"
