@@ -221,12 +221,6 @@ export const BillingPage: React.FC<BillingPageProps> = ({
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
 
-  // States for direct manual lookup / alternative email syncing
-  const [customEmail, setCustomEmail] = useState("");
-  const [customOrderId, setCustomOrderId] = useState("");
-  const [showDirectSyncForm, setShowDirectSyncForm] = useState(false);
-  const [syncingManual, setSyncingManual] = useState(false);
-
   // Load complete billing info
   const loadBillingDetails = async () => {
     try {
@@ -246,6 +240,112 @@ export const BillingPage: React.FC<BillingPageProps> = ({
   useEffect(() => {
     loadBillingDetails();
   }, [initialCurrentPlan]);
+
+  // Completely automated payment and subscription background polling checks
+  useEffect(() => {
+    let intervalId: any = null;
+
+    if (checkoutPending || packCheckoutPending) {
+      console.log("[Auto-Payment System] Active pending checkout. Initiating automatic background order detection.");
+      let queryCount = 0;
+
+      const triggerAutoCheck = async () => {
+        try {
+          queryCount++;
+          const res = await axios.get('/api/billing/data');
+          if (res.data) {
+            // Check for plan switch/upgrade auto detection
+            if (checkoutPending && selectedPlanId) {
+              const currentRefreshedPlan = res.data.currentPlan;
+              if (currentRefreshedPlan === selectedPlanId) {
+                addToast(`Order detected and processed! Plan successfully upgraded to ${selectedPlanId}`, "success");
+                setCheckoutPending(false);
+                setIsSwitchConfirmOpen(false);
+                setIsSwitchModalOpen(false);
+                setBillingInfo(res.data);
+                if (fetchBillingData) await fetchBillingData();
+                return;
+              }
+            }
+
+            // Check for credit pack auto detection
+            if (packCheckoutPending) {
+              const newCredits = res.data.creditBalance || 0;
+              const oldCredits = billingInfo?.creditBalance || creditBalance;
+              if (newCredits > oldCredits) {
+                addToast(`One-time payment detected! Added extra credits to your account balance.`, "success");
+                setPackCheckoutPending(false);
+                setIsPackConfirmOpen(false);
+                setBillingInfo(res.data);
+                if (fetchBillingData) await fetchBillingData();
+                return;
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[Auto-Payment System] Error during background check:", e);
+        }
+
+        // Limit polling to about 5 minutes to prevent redundant network consumption
+        if (queryCount > 100) {
+          console.log("[Auto-Payment System] Reached polling maximum timeout.");
+          if (intervalId) clearInterval(intervalId);
+        }
+      };
+
+      // Poll every 3 seconds for lightning-fast auto payment capture
+      intervalId = setInterval(triggerAutoCheck, 3000);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+        console.log("[Auto-Payment System] Cleaned up background polling checker.");
+      }
+    };
+  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance]);
+
+  // Instantly run dynamic check as soon as the user refocuses on this app tab
+  useEffect(() => {
+    const handleTabRefocus = async () => {
+      if (checkoutPending || packCheckoutPending) {
+        console.log("[Auto-Payment System] Tab refocused. Initiating instant validation scan...");
+        try {
+          const res = await axios.get('/api/billing/data');
+          if (res.data) {
+            if (checkoutPending && selectedPlanId) {
+              if (res.data.currentPlan === selectedPlanId) {
+                addToast(`Order detected and activated! Plan upgrade successful.`, "success");
+                setCheckoutPending(false);
+                setIsSwitchConfirmOpen(false);
+                setIsSwitchModalOpen(false);
+                setBillingInfo(res.data);
+                if (fetchBillingData) await fetchBillingData();
+              }
+            }
+            if (packCheckoutPending) {
+              const newCredits = res.data.creditBalance || 0;
+              const oldCredits = billingInfo?.creditBalance || creditBalance;
+              if (newCredits > oldCredits) {
+                addToast(`Extra credits detected and activated automatically!`, "success");
+                setPackCheckoutPending(false);
+                setIsPackConfirmOpen(false);
+                setBillingInfo(res.data);
+                if (fetchBillingData) await fetchBillingData();
+              }
+            }
+          }
+        } catch (e) {
+          console.error("[Auto-Payment System] Refocus checkout scan failed:", e);
+        }
+      }
+    };
+
+    window.addEventListener("focus", handleTabRefocus);
+    return () => {
+      window.removeEventListener("focus", handleTabRefocus);
+    };
+  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance]);
 
   const openCheckout = (productId: string, planId?: string) => {
     const email = encodeURIComponent(appUser?.email || '');
@@ -306,92 +406,6 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       addToast("Redirected to official Lemon Squeezy checkout!", "success");
     } catch (err) {
       addToast("Failed to open checkout page automatically. Please allow popups.", "error");
-    }
-  };
-
-  const checkPackPaymentStatus = async () => {
-    if (!selectedPackId) return;
-    try {
-      setCheckingPayment(true);
-      const res = await axios.get('/api/billing/data');
-      if (res.data) {
-        const oldCredits = billingInfo?.creditBalance || creditBalance;
-        const newCredits = res.data.creditBalance;
-        if (newCredits > oldCredits) {
-          addToast(`Lemon Squeezy payment confirmed! Great success!`, "success");
-          setPackCheckoutPending(false);
-          setIsPackConfirmOpen(false);
-          setBillingInfo(res.data);
-          if (fetchBillingData) await fetchBillingData();
-        } else {
-          addToast("We haven't received confirmation from Lemon Squeezy yet. Please complete the checkout process.", "info");
-        }
-      }
-    } catch (err) {
-      console.error("Failed to check pack status", err);
-      addToast("Failed to verify webhook status", "error");
-    } finally {
-      setCheckingPayment(false);
-    }
-  };
-
-  const checkPaymentStatus = async () => {
-    if (!selectedPlanId) return;
-    try {
-      setCheckingPayment(true);
-      const res = await axios.get('/api/billing/data');
-      if (res.data) {
-        setBillingInfo(res.data);
-        const currentRefreshedPlan = res.data.currentPlan;
-        if (currentRefreshedPlan === selectedPlanId) {
-          addToast(`Lemon Squeezy payment confirmed! Plan successfully upgraded to ${selectedPlanId}`, "success");
-          setCheckoutPending(false);
-          setIsSwitchConfirmOpen(false);
-          setIsSwitchModalOpen(false);
-          if (fetchBillingData) await fetchBillingData();
-        } else {
-          addToast("We haven't received your checkout confirmation webhook yet. Please complete the checkout process.", "info");
-        }
-      }
-    } catch (err) {
-      console.error("Failed to check status", err);
-      addToast("Failed to verify webhook status", "error");
-    } finally {
-      setCheckingPayment(false);
-    }
-  };
-
-  const handleManualSync = async () => {
-    if (!customEmail.trim() && !customOrderId.trim()) {
-      addToast("Please provide either a payment email or an order number to search.", "info");
-      return;
-    }
-    try {
-      setSyncingManual(true);
-      const payload: any = {};
-      if (customEmail.trim()) payload.emailInput = customEmail.trim();
-      if (customOrderId.trim()) payload.orderIdInput = customOrderId.trim();
-
-      const res = await axios.post('/api/billing/sync-payment', payload);
-      if (res.data && res.data.success) {
-        addToast(res.data.message || "Successfully matched and activated your Lemon Squeezy subscription!", "success");
-        setCheckoutPending(false);
-        setIsPackConfirmOpen(false);
-        setIsSwitchConfirmOpen(false);
-        setIsSwitchModalOpen(false);
-        if (res.data.billingData) {
-          setBillingInfo(res.data.billingData);
-        }
-        if (fetchBillingData) await fetchBillingData();
-      } else {
-        addToast(res.data?.error || "We couldn't verify this transaction automatically.", "error");
-      }
-    } catch (err: any) {
-      console.error("Manual sync failed", err);
-      const errMsg = err.response?.data?.error || "No active transaction found on Lemon Squeezy matching these inputs. Double check and try again.";
-      addToast(errMsg, "error");
-    } finally {
-      setSyncingManual(false);
     }
   };
 
@@ -626,56 +640,10 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                 )}
 
                 {activePlanId === "trial" && (
-                  <div className="pt-2 border-t border-slate-800 space-y-2">
-                    <button
-                      onClick={() => setShowDirectSyncForm(!showDirectSyncForm)}
-                      type="button"
-                      className="w-full text-center text-[10px] text-indigo-400 hover:text-indigo-300 font-bold bg-slate-800/80 hover:bg-slate-800 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border border-slate-700/50"
-                    >
-                      <span>Already purchased? Sync account</span>
-                      <span className="text-[9px] font-black">{showDirectSyncForm ? "▲ Hide" : "▼ Sync"}</span>
-                    </button>
-
-                    {showDirectSyncForm && (
-                      <div className="p-3 bg-slate-800/50 border border-slate-700/60 rounded-xl space-y-2.5 text-left">
-                        <p className="text-[10px] text-slate-300 leading-normal font-medium">
-                          Claim your premium plan by entering your payment email or Lemon Squeezy Order ID.
-                        </p>
-                        
-                        <div className="space-y-1.5">
-                          <div>
-                            <input
-                              type="email"
-                              placeholder="Buyer email (e.g. PayPal)"
-                              value={customEmail}
-                              onChange={(e) => setCustomEmail(e.target.value)}
-                              className="w-full px-2.5 py-1 text-[11px] border border-slate-700 rounded-lg bg-slate-900 font-medium text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-
-                          <div>
-                            <input
-                              type="text"
-                              placeholder="Order ID / # (e.g. 38224110)"
-                              value={customOrderId}
-                              onChange={(e) => setCustomOrderId(e.target.value)}
-                              className="w-full px-2.5 py-1 text-[11px] border border-slate-700 rounded-lg bg-slate-900 font-medium text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                            />
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={handleManualSync}
-                          disabled={syncingManual || (!customEmail.trim() && !customOrderId.trim())}
-                          type="button"
-                          className="w-full py-1.5 bg-indigo-650 hover:bg-indigo-650 disabled:bg-slate-800 text-white rounded-lg font-bold text-[11px] transition-all cursor-pointer border-none flex items-center justify-center gap-1.5"
-                        >
-                          {syncingManual ? (
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                          ) : "Fetch and Apply Plan"}
-                        </button>
-                      </div>
-                    )}
+                  <div className="pt-2 border-t border-slate-800 space-y-1 text-center">
+                    <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">
+                      Upgrade to a premium plan above to unlock automated credits and advanced AI features.
+                    </p>
                   </div>
                 )}
               </div>
@@ -889,114 +857,50 @@ export const BillingPage: React.FC<BillingPageProps> = ({
             >
               {checkoutPending ? (
                 <div className="space-y-6">
-                  <div className="text-center space-y-3">
-                    <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto relative">
-                      <RefreshCw className="w-8 h-8 animate-spin" style={{ animationDuration: '3s' }} />
-                      <div className="absolute inset-0 rounded-full border-4 border-blue-500 animate-ping opacity-10"></div>
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto relative">
+                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" style={{ animationDuration: '2.5s' }} />
+                      <div className="absolute inset-0 rounded-full border-4 border-indigo-500 animate-ping opacity-15"></div>
                     </div>
-                    <h3 className="text-lg font-black text-slate-900 text-center">Awaiting Lemon Squeezy Payment...</h3>
-                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center">
-                      We opened the official Lemon Squeezy secure checkout in a new browser tab. Please complete the subscription payment there.
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-black text-slate-900 text-center">Checking Payment Status...</h3>
+                      <p className="text-xs text-slate-500 font-bold uppercase tracking-wider text-center">Automatic Live Detection Active</p>
+                    </div>
+                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center px-2">
+                      We opened the official Lemon Squeezy secure checkout in a new browser tab. Please complete the subscription payment there. Our automated polling engine is checking status live.
                     </p>
                   </div>
 
-                  <div className="bg-blue-50/50 rounded-2xl p-4 border border-blue-100 space-y-3 text-xs">
+                  <div className="bg-indigo-50/50 rounded-2xl p-5 border border-indigo-100 space-y-3 text-xs">
                     <p className="font-bold text-slate-700 text-center">
                       Workspace target plan: <span className="text-indigo-600 font-black uppercase text-[13px]">{selectedPlanId}</span>
                     </p>
-                    <p className="text-[11px] text-slate-500 font-medium text-center leading-normal">
-                      Once payment is confirmed via webhook, your dashboard plan updates immediately. If the popup didn't load, use the button below to launch it again.
+                    <div className="flex items-center gap-2 justify-center py-1">
+                      <span className="w-2 h-2 rounded-full bg-indigo-600 animate-ping"></span>
+                      <p className="text-[11px] text-indigo-600 font-black leading-none uppercase">
+                        Auto-detecting your purchase...
+                      </p>
+                    </div>
+                    <p className="text-[10px] text-slate-400 font-semibold text-center leading-normal">
+                      As soon as Lemon Squeezy processes your payment, this window will automatically detect your order and apply it instantly. No manual activation or codes needed.
                     </p>
                     <button
                       onClick={() => {
                         const prodId = PLAN_PRODUCT_IDS[selectedPlanId];
                         if (prodId) openCheckout(prodId, selectedPlanId);
                       }}
-                      className="w-full py-2 bg-white hover:bg-blue-50 text-blue-600 border border-blue-200 rounded-xl font-bold text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1"
+                      className="w-full py-2 bg-white hover:bg-indigo-50/80 text-indigo-600 border border-indigo-200 rounded-xl font-bold text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1 mt-1"
                     >
                       Retrieve Checkout Page
                     </button>
                   </div>
 
-                  <div className="space-y-2.5">
-                    <button
-                      onClick={checkPaymentStatus}
-                      disabled={checkingPayment}
-                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md shadow-blue-150"
-                    >
-                      {checkingPayment ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : "Verify Payment Status"}
-                    </button>
-
-                    {/* HELPFUL DIRECT MANUAL SYNC FLOW */}
-                    <div className="pt-2 border-t border-slate-100 space-y-2">
-                      <button
-                        onClick={() => setShowDirectSyncForm(!showDirectSyncForm)}
-                        type="button"
-                        className="w-full text-center text-[10px] text-indigo-500 hover:text-indigo-600 font-bold bg-indigo-50/50 hover:bg-indigo-55 py-1.5 px-3 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1 border border-indigo-100"
-                      >
-                        <span>Paid using different email or have Order #?</span>
-                        <span className="text-[9px] font-black">{showDirectSyncForm ? "▲ Hide" : "▼ Direct Sync"}</span>
-                      </button>
-
-                      {showDirectSyncForm && (
-                        <motion.div 
-                          initial={{ opacity: 0, y: -5 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 text-left"
-                        >
-                          <p className="text-[10px] text-slate-500 leading-normal font-medium">
-                            If you checked out using a different email address (e.g., PayPal), or have your Order ID (like <strong>38224110</strong>), enter either below to instantly fetch and activate your account.
-                          </p>
-                          
-                          <div className="space-y-2">
-                            <div>
-                              <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                                Payment Email (Optional)
-                              </label>
-                              <input
-                                type="email"
-                                placeholder="e.g. buyer@example.com"
-                                value={customEmail}
-                                onChange={(e) => setCustomEmail(e.target.value)}
-                                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-[9px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                                Order Number (Optional)
-                              </label>
-                              <input
-                                type="text"
-                                placeholder="e.g. 38224110 (from receipt)"
-                                value={customOrderId}
-                                onChange={(e) => setCustomOrderId(e.target.value)}
-                                className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-white font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={handleManualSync}
-                            disabled={syncingManual || (!customEmail.trim() && !customOrderId.trim())}
-                            type="button"
-                            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white rounded-xl font-bold text-xs transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow"
-                          >
-                            {syncingManual ? (
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                            ) : "Sync Premium Plan Live"}
-                          </button>
-                        </motion.div>
-                      )}
-                    </div>
-
+                  <div className="space-y-2">
                     <button
                       onClick={() => {
                         setCheckoutPending(false);
                       }}
-                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-100 rounded-xl font-bold text-xs uppercase transition-all cursor-pointer text-center"
+                      className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer text-center border-none"
                     >
                       Go Back / Change Plan
                     </button>
@@ -1130,42 +1034,35 @@ export const BillingPage: React.FC<BillingPageProps> = ({
             >
               {packCheckoutPending ? (
                 <div className="space-y-6">
-                  <div className="text-center space-y-3">
-                    <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto relative">
-                      <RefreshCw className="w-8 h-8 animate-spin" style={{ animationDuration: '3s' }} />
-                      <div className="absolute inset-0 rounded-full border-4 border-blue-500 animate-ping opacity-10"></div>
+                  <div className="text-center space-y-4">
+                    <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto relative">
+                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" style={{ animationDuration: '2.5s' }} />
+                      <div className="absolute inset-0 rounded-full border-4 border-indigo-505 animate-ping opacity-15"></div>
                     </div>
-                    <h3 className="text-lg font-black text-slate-900 text-center">Awaiting Credit Pack Payment...</h3>
-                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center">
+                    <div className="space-y-1">
+                      <h3 className="text-lg font-black text-slate-900 text-center">Awaiting Dynamic Payment...</h3>
+                      <p className="text-xs text-indigo-600 font-bold uppercase tracking-wider text-center">Auto-Detecting Purchase Live</p>
+                    </div>
+                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center px-1">
                       We opened Lemon Squeezy secure checkout in a new browser tab. Please complete the one-time payment.
                     </p>
                   </div>
 
-                  <div className="bg-blue-50/50 rounded-2xl p-4 border border-blue-100 space-y-2 text-xs">
-                    <p className="font-bold text-slate-700 text-center text-sm">
-                      Credits: <span className="text-indigo-600 font-black text-[13px]">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)}</span>
+                  <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-100 space-y-2.5 text-xs text-center">
+                    <p className="font-bold text-slate-700 text-sm">
+                      Target pack: <span className="text-indigo-600 font-black">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)} Credits</span>
                     </p>
-                    <p className="text-[11px] text-slate-500 font-medium text-center leading-normal">
-                      Once confirmed via our webhooks, your balance updates immediately.
+                    <p className="text-[10px] text-slate-400 font-semibold leading-normal">
+                      Once processed, your account balance updates immediately in the background. No manual synchronization required.
                     </p>
                   </div>
 
-                  <div className="space-y-2.5">
-                    <button
-                      onClick={checkPackPaymentStatus}
-                      disabled={checkingPayment}
-                      className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md"
-                    >
-                      {checkingPayment ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : "Confirm Webhook Status"}
-                    </button>
-
+                  <div className="space-y-2">
                     <button
                       onClick={() => setPackCheckoutPending(false)}
-                      className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-500 border border-slate-100 rounded-xl font-bold text-xs uppercase transition-all cursor-pointer text-center"
+                      className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center border-none"
                     >
-                      Back
+                      Back / Cancel
                     </button>
                   </div>
                 </div>
