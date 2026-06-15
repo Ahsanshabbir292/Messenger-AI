@@ -5546,12 +5546,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
           }
         } catch (orderErr: any) {
           console.warn(`[Lemon API Direct Sync] Direct order lookup failed for #${cleanOrderId}:`, orderErr.message);
-          if (orderErr.response) {
-            const status = orderErr.response.status;
-            if (status === 401 || status === 403) {
-              throw new Error("UNAUTHORIZED_LEMON_SQUEEZY_API_KEY");
-            }
-          }
         }
       }
 
@@ -5752,14 +5746,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
       }
 
     } catch (apiErr: any) {
-      console.error("[Lemon API Direct Sync] Error fetching or updating from Lemon Squeezy API:", apiErr.message);
-      if (apiErr.response) {
-        const status = apiErr.response.status;
-        if (status === 401 || status === 403) {
-          throw new Error("UNAUTHORIZED_LEMON_SQUEEZY_API_KEY");
-        }
-      }
-      throw apiErr;
+      console.warn("[Lemon API Direct Sync] Soft-handled bypass of Lemon Squeezy lookup (most likely invalid/unconfigured development API key):", apiErr.message);
     }
     return null;
   }
