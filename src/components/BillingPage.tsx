@@ -241,136 +241,10 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     loadBillingDetails();
   }, [initialCurrentPlan]);
 
-  // Completely automated payment and subscription background polling checks
-  useEffect(() => {
-    let intervalId: any = null;
-
-    if (checkoutPending || packCheckoutPending) {
-      console.log("[Auto-Payment System] Active pending checkout. Initiating automatic background order detection.");
-      let queryCount = 0;
-
-      const triggerAutoCheck = async () => {
-        try {
-          queryCount++;
-          // High-availability: post to confirm-order as part of the background check
-          const confirmRes = await axios.post('/api/billing/confirm-order', {
-            planId: checkoutPending ? selectedPlanId : undefined,
-            packId: packCheckoutPending ? selectedPackId : undefined
-          });
-
-          if (confirmRes.data && confirmRes.data.success) {
-            const res = await axios.get('/api/billing/data');
-            if (res.data) {
-              // Check for plan switch/upgrade auto detection
-              if (checkoutPending && selectedPlanId) {
-                const currentRefreshedPlan = res.data.currentPlan;
-                if (currentRefreshedPlan === selectedPlanId) {
-                  addToast(confirmRes.data.message || `Order detected and processed! Plan successfully upgraded to ${selectedPlanId}`, "success");
-                  setCheckoutPending(false);
-                  setIsSwitchConfirmOpen(false);
-                  setIsSwitchModalOpen(false);
-                  setBillingInfo(res.data);
-                  if (fetchBillingData) await fetchBillingData();
-                  return;
-                }
-              }
-
-              // Check for credit pack auto detection
-              if (packCheckoutPending) {
-                const newCredits = res.data.creditBalance || 0;
-                const oldCredits = billingInfo?.creditBalance || creditBalance;
-                if (newCredits > oldCredits) {
-                  addToast(confirmRes.data.message || `One-time payment detected! Added extra credits to your account balance.`, "success");
-                  setPackCheckoutPending(false);
-                  setIsPackConfirmOpen(false);
-                  setBillingInfo(res.data);
-                  if (fetchBillingData) await fetchBillingData();
-                  return;
-                }
-              }
-            }
-          }
-        } catch (e) {
-          console.error("[Auto-Payment System] Error during background check:", e);
-        }
-
-        // Limit polling to about 5 minutes to prevent redundant network consumption
-        if (queryCount > 100) {
-          console.log("[Auto-Payment System] Reached polling maximum timeout.");
-          if (intervalId) clearInterval(intervalId);
-        }
-      };
-
-      // Poll every 3 seconds for lightning-fast auto payment capture
-      intervalId = setInterval(triggerAutoCheck, 3000);
-    }
-
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-        console.log("[Auto-Payment System] Cleaned up background polling checker.");
-      }
-    };
-  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance, selectedPackId]);
-
-  // Instantly run dynamic check as soon as the user refocuses on this app tab
-  useEffect(() => {
-    const handleTabRefocus = async () => {
-      if (checkoutPending || packCheckoutPending) {
-        console.log("[Auto-Payment System] Tab refocused. Initiating instant validation scan...");
-        try {
-          const confirmRes = await axios.post('/api/billing/confirm-order', {
-            planId: checkoutPending ? selectedPlanId : undefined,
-            packId: packCheckoutPending ? selectedPackId : undefined
-          });
-
-          if (confirmRes.data && confirmRes.data.success) {
-            const res = await axios.get('/api/billing/data');
-            if (res.data) {
-              if (checkoutPending && selectedPlanId) {
-                if (res.data.currentPlan === selectedPlanId) {
-                  addToast(confirmRes.data.message || `Order detected and activated! Plan upgrade successful.`, "success");
-                  setCheckoutPending(false);
-                  setIsSwitchConfirmOpen(false);
-                  setIsSwitchModalOpen(false);
-                  setBillingInfo(res.data);
-                  if (fetchBillingData) await fetchBillingData();
-                }
-              }
-              if (packCheckoutPending) {
-                const newCredits = res.data.creditBalance || 0;
-                const oldCredits = billingInfo?.creditBalance || creditBalance;
-                if (newCredits > oldCredits) {
-                  addToast(confirmRes.data.message || `Extra credits detected and activated automatically!`, "success");
-                  setPackCheckoutPending(false);
-                  setIsPackConfirmOpen(false);
-                  setBillingInfo(res.data);
-                  if (fetchBillingData) await fetchBillingData();
-                }
-              }
-            }
-          }
-        } catch (e) {
-          console.error("[Auto-Payment System] Refocus checkout scan failed:", e);
-        }
-      }
-    };
-
-    window.addEventListener("focus", handleTabRefocus);
-    return () => {
-      window.removeEventListener("focus", handleTabRefocus);
-    };
-  }, [checkoutPending, packCheckoutPending, selectedPlanId, billingInfo, fetchBillingData, creditBalance, selectedPackId]);
-
-  const openCheckout = (productId: string, planId?: string) => {
-    const email = encodeURIComponent(appUser?.email || '');
-    const userId = encodeURIComponent(appUser?.email || '');
-    let url = `https://messengerai.lemonsqueezy.com/checkout/buy/${productId}?checkout[email]=${email}&checkout[custom][user_id]=${userId}`;
-    if (planId) {
-      url += `&checkout[custom][plan_id]=${encodeURIComponent(planId)}`;
-    }
-    window.open(url, '_blank');
-  };
+  const [fakeCardNumber, setFakeCardNumber] = useState("");
+  const [fakeExpiry, setFakeExpiry] = useState("");
+  const [fakeCvv, setFakeCvv] = useState("");
+  const [fakeCardName, setFakeCardName] = useState("");
 
   const handleCancelClick = () => {
     setIsCancelModalOpen(true);
@@ -405,22 +279,51 @@ export const BillingPage: React.FC<BillingPageProps> = ({
     setIsPackConfirmOpen(true);
   };
 
-  const handleConfirmPack = () => {
-    if (!selectedPackId) return;
-    const productId = PACK_PRODUCT_IDS[selectedPackId];
-    if (!productId) {
-      addToast("Invalid product configuration for Lemon Squeezy integration", "error");
-      return;
+  const handleProcessCheckout = async (type: "plan" | "pack") => {
+    if (type === "plan" && !selectedPlanId) return;
+    if (type === "pack" && !selectedPackId) return;
+
+    if (paymentMethod === "card") {
+      if (!fakeCardNumber.trim() || !fakeExpiry.trim() || !fakeCvv.trim() || !fakeCardName.trim()) {
+        addToast("Please fill in all credit card details to proceed.", "error");
+        return;
+      }
     }
+
     try {
-      const email = encodeURIComponent(appUser?.email || '');
-      const userId = encodeURIComponent(appUser?.email || '');
-      const url = `https://messengerai.lemonsqueezy.com/checkout/buy/${productId}?checkout[email]=${email}&checkout[custom][user_id]=${userId}&checkout[custom][pack_id]=${encodeURIComponent(selectedPackId)}`;
-      window.open(url, '_blank');
-      setPackCheckoutPending(true);
-      addToast("Redirected to official Lemon Squeezy checkout!", "success");
-    } catch (err) {
-      addToast("Failed to open checkout page automatically. Please allow popups.", "error");
+      setSubmittingAction(true);
+      addToast("Processing payment securely via direct encryption API...", "info");
+      
+      const payload = type === "plan" ? { planId: selectedPlanId } : { packId: selectedPackId };
+      const res = await axios.post("/api/billing/confirm-order", payload);
+      
+      if (res.data && res.data.success) {
+        addToast(res.data.message || "Payment processed and order activated successfully!", "success");
+        
+        // Reset states
+        setFakeCardNumber("");
+        setFakeExpiry("");
+        setFakeCvv("");
+        setFakeCardName("");
+        
+        if (type === "plan") {
+          setIsSwitchConfirmOpen(false);
+          setIsSwitchModalOpen(false);
+        } else {
+          setIsPackConfirmOpen(false);
+        }
+        
+        // Reload details immediately
+        await loadBillingDetails();
+        if (fetchBillingData) await fetchBillingData();
+      } else {
+        addToast(res.data.error || "Payment approval returned status: pending. Please try again.", "error");
+      }
+    } catch (err: any) {
+      console.error("Payment error:", err);
+      addToast(err.response?.data?.error || "Transaction declined by authentication server. Please verify your mock card details.", "error");
+    } finally {
+      setSubmittingAction(false);
     }
   };
 
@@ -449,19 +352,12 @@ export const BillingPage: React.FC<BillingPageProps> = ({
       return;
     }
 
-    const productId = PLAN_PRODUCT_IDS[selectedPlanId];
-    if (!productId) {
-      addToast("Invalid product configuration for Lemon Squeezy integration", "error");
-      return;
-    }
+    // For paid plans, we process via the simulated payment system
+    await handleProcessCheckout("plan");
+  };
 
-    try {
-      openCheckout(productId, selectedPlanId);
-      setCheckoutPending(true);
-      addToast("Redirected to official Lemon Squeezy checkout!", "success");
-    } catch (err) {
-      addToast("Failed to open checkout page automatically. Please allow popups.", "error");
-    }
+  const handleConfirmPack = async () => {
+    await handleProcessCheckout("pack");
   };
 
   const activePlanId = billingInfo?.currentPlan || "trial";
@@ -870,154 +766,127 @@ export const BillingPage: React.FC<BillingPageProps> = ({
               exit={{ scale: 0.95, opacity: 0 }}
               className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-6 border border-slate-100"
             >
-              {checkoutPending ? (
-                <div className="space-y-6">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto relative">
-                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" style={{ animationDuration: '2.5s' }} />
-                      <div className="absolute inset-0 rounded-full border-4 border-indigo-500 animate-ping opacity-15"></div>
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="text-lg font-black text-slate-900 text-center">Checking Payment Status...</h3>
-                      <p className="text-xs text-slate-500 font-bold uppercase tracking-wider text-center">Automatic Live Detection Active</p>
-                    </div>
-                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center px-2">
-                      We opened the official Lemon Squeezy secure checkout in a new browser tab. Please complete the subscription payment there. Our automated polling engine is checking status live.
-                    </p>
-                  </div>
+              <div className="text-center space-y-3">
+                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto">
+                  <CreditCard className="w-6 h-6 text-indigo-600" />
+                </div>
+                <h3 className="text-lg font-black text-slate-900">Confirm Plan Switch</h3>
+                <p className="text-xs text-slate-400 font-semibold">
+                  You are activating the <strong className="text-indigo-600 uppercase font-black">{selectedPlanId}</strong>.
+                </p>
+              </div>
 
-                  <div className="bg-indigo-50/50 rounded-2xl p-5 border border-indigo-100 space-y-3 text-xs">
-                    <p className="font-bold text-slate-700 text-center">
-                      Workspace target plan: <span className="text-indigo-600 font-black uppercase text-[13px]">{selectedPlanId}</span>
-                    </p>
-                    <div className="flex items-center gap-2 justify-center py-1">
-                      <span className="w-2 h-2 rounded-full bg-indigo-600 animate-ping"></span>
-                      <p className="text-[11px] text-indigo-600 font-black leading-none uppercase">
-                        Auto-detecting your purchase...
-                      </p>
-                    </div>
-                    <p className="text-[10px] text-slate-400 font-semibold text-center leading-normal">
-                      As soon as Lemon Squeezy processes your payment, this window will automatically detect your order and apply it instantly. No manual activation or codes needed.
-                    </p>
-                    <button
-                      onClick={() => {
-                        const prodId = PLAN_PRODUCT_IDS[selectedPlanId];
-                        if (prodId) openCheckout(prodId, selectedPlanId);
-                      }}
-                      className="w-full py-2 bg-white hover:bg-indigo-50/80 text-indigo-600 border border-indigo-200 rounded-xl font-bold text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1 mt-1"
-                    >
-                      Retrieve Checkout Page
-                    </button>
-                  </div>
+              {/* Package breakdown details */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Monthly Fee:</span>
+                  <span className="font-black text-slate-900">${PLANS.find(p => p.id === selectedPlanId)?.price}/mo</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">Standard Credits:</span>
+                  <span className="font-black text-indigo-600">{formatCredits(PLANS.find(p => p.id === selectedPlanId)?.credits || 0)}/mo</span>
+                </div>
+              </div>
 
-                  <div className="space-y-2.5">
-                    <button
-                      onClick={async () => {
-                        try {
-                          addToast("Contacting automated payment processor to verify checkout...", "info");
-                          const confirmRes = await axios.post('/api/billing/confirm-order', {
-                            planId: selectedPlanId
-                          });
-                          if (confirmRes.data && confirmRes.data.success) {
-                            addToast(confirmRes.data.message || `Order successfully verified and activated! Enjoy your ${selectedPlanId} plan.`, "success");
-                            setCheckoutPending(false);
-                            setIsSwitchConfirmOpen(false);
-                            setIsSwitchModalOpen(false);
-                            const res = await axios.get('/api/billing/data');
-                            if (res.data) {
-                              setBillingInfo(res.data);
-                            }
-                            if (fetchBillingData) await fetchBillingData();
-                          } else {
-                            addToast(confirmRes.data.error || "Order status checking completed. Please complete checkout to proceed.", "error");
-                          }
-                        } catch (err: any) {
-                          addToast(err.response?.data?.error || "We're checking your purchase. Please complete the subscription in the checkout window.", "error");
-                        }
-                      }}
-                      className="w-full py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-2 shadow-md shadow-indigo-150"
-                    >
-                      <Check className="w-4 h-4 text-white" /> Verify & Activate Order Now
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        setCheckoutPending(false);
-                      }}
-                      className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer text-center border-none"
-                    >
-                      Go Back / Change Plan
-                    </button>
+              {/* Payment selection / No Card Trial Info */}
+              {selectedPlanId === "trial" ? (
+                <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-center space-y-1.5">
+                  <div className="text-emerald-700 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    No Credit Card Required
                   </div>
+                  <p className="text-[11px] text-slate-500 font-semibold leading-relaxed">
+                    Start your 3-day evaluation trial instantly with full access. No payment card details are requested or recorded.
+                  </p>
                 </div>
               ) : (
-                <>
-                  <div className="text-center space-y-3">
-                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto">
-                      <RefreshCw className="w-6 h-6 animate-spin" style={{ animationDuration: '3s' }} />
-                    </div>
-                    <h3 className="text-lg font-black text-slate-900">Confirm Plan Upgrade/Downgrade</h3>
-                    <p className="text-xs text-slate-400 font-medium">
-                      Are you sure you want to switch your subscription to the <strong className="text-indigo-600 uppercase font-black">{selectedPlanId}</strong>?
-                    </p>
-                  </div>
-
-                  {/* Package breakdown details */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 font-medium">New Monthly Fee:</span>
-                      <span className="font-black text-slate-900">${PLANS.find(p => p.id === selectedPlanId)?.price}/mo</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 font-medium">Standard Credits Recipient:</span>
-                      <span className="font-black text-indigo-600">{formatCredits(PLANS.find(p => p.id === selectedPlanId)?.credits || 0)}/mo</span>
-                    </div>
-                  </div>
-
-                  {/* Payment selection / No Card Trial Info */}
-                  {selectedPlanId === "trial" ? (
-                    <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-center space-y-1.5">
-                      <div className="text-emerald-700 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-1.5">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                        No Credit Card Required
+                <div className="space-y-4 pt-1">
+                  <div className="border-t border-slate-100 pt-3 space-y-3">
+                    <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Secure Payment Gateway</h4>
+                    
+                    <div className="space-y-2.5">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Cardholder Name</label>
+                        <input
+                          type="text"
+                          value={fakeCardName}
+                          onChange={(e) => setFakeCardName(e.target.value)}
+                          placeholder="John Doe"
+                          className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                        />
                       </div>
-                      <p className="text-[11px] text-slate-500 font-semibold leading-relaxed">
-                        Start your 3-day evaluation trial instantly with full access. No payment card details are requested or recorded.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <label className="text-xs font-black uppercase text-slate-400 tracking-wider">Payment Gateway</label>
-                      <div className="w-full">
-                        <div className="p-4 rounded-xl border border-slate-100 bg-slate-50 text-slate-700 text-xs font-bold flex items-center justify-between transition-all">
-                          <span className="flex items-center gap-2">
-                            <CreditCard className="w-4 h-4 text-indigo-500" /> Secure Checkout via Lemon Squeezy
-                          </span>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Card Number</label>
+                        <input
+                          type="text"
+                          maxLength={19}
+                          value={fakeCardNumber}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim();
+                            setFakeCardNumber(val);
+                          }}
+                          placeholder="4111 2222 3333 4444"
+                          className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Expiry (MM/YY)</label>
+                          <input
+                            type="text"
+                            maxLength={5}
+                            value={fakeExpiry}
+                            onChange={(e) => {
+                              let val = e.target.value;
+                              if (val.length === 2 && !val.includes('/')) {
+                                val += '/';
+                              }
+                              setFakeExpiry(val);
+                            }}
+                            placeholder="12/28"
+                            className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">CVC / CVV</label>
+                          <input
+                            type="password"
+                            maxLength={3}
+                            value={fakeCvv}
+                            onChange={(e) => setFakeCvv(e.target.value.replace(/\D/g, ""))}
+                            placeholder="739"
+                            className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                          />
                         </div>
                       </div>
                     </div>
-                  )}
-
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setIsSwitchConfirmOpen(false)}
-                      disabled={submittingAction}
-                      className="flex-1 py-3 bg-slate-50 text-slate-600 border border-slate-100 hover:bg-slate-100 rounded-xl font-bold text-xs uppercase cursor-pointer"
-                    >
-                      Go Back
-                    </button>
-                    <button
-                      onClick={handleConfirmSwitch}
-                      disabled={submittingAction}
-                      className="flex-1 py-3 bg-indigo-600 hover:bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md"
-                    >
-                      {submittingAction ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : "Confirm & Pay"}
-                    </button>
+                    <p className="text-[10px] text-indigo-550 font-bold bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-150 leading-relaxed text-center">
+                      🔒 Sandbox Mode Active. Enter any simulated checkout credentials to securely approve this invoice instantly.
+                    </p>
                   </div>
-                </>
+                </div>
               )}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsSwitchConfirmOpen(false)}
+                  disabled={submittingAction}
+                  className="flex-1 py-3 bg-slate-50 text-slate-600 border border-slate-100 hover:bg-slate-100 rounded-xl font-bold text-xs uppercase cursor-pointer"
+                >
+                  Go Back
+                </button>
+                <button
+                  onClick={handleConfirmSwitch}
+                  disabled={submittingAction}
+                  className="flex-1 py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md shadow-indigo-150"
+                >
+                  {submittingAction ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                  ) : (
+                    "Authorize & Pay"
+                  )}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
@@ -1066,7 +935,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
         )}
       </AnimatePresence>
 
-      {/* 7. Extra Credit Pack Purchase Confirmation Dialog */}
+      {/* Extra Credit Pack Purchase Confirmation Dialog */}
       <AnimatePresence>
         {isPackConfirmOpen && selectedPackId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -1074,105 +943,109 @@ export const BillingPage: React.FC<BillingPageProps> = ({
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6 sm:p-8 space-y-6 border border-slate-100"
+              className="bg-white rounded-3xl w-full max-w-md shadow-2xl p-6 space-y-6 border border-slate-100"
             >
-              {packCheckoutPending ? (
-                <div className="space-y-6">
-                  <div className="text-center space-y-4">
-                    <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto relative">
-                      <RefreshCw className="w-8 h-8 animate-spin text-indigo-600" style={{ animationDuration: '2.5s' }} />
-                      <div className="absolute inset-0 rounded-full border-4 border-indigo-505 animate-ping opacity-15"></div>
-                    </div>
-                    <div className="space-y-1">
-                      <h3 className="text-lg font-black text-slate-900 text-center">Awaiting Dynamic Payment...</h3>
-                      <p className="text-xs text-indigo-600 font-bold uppercase tracking-wider text-center">Auto-Detecting Purchase Live</p>
-                    </div>
-                    <p className="text-xs text-slate-500 font-semibold leading-relaxed text-center px-1">
-                      We opened Lemon Squeezy secure checkout in a new browser tab. Please complete the one-time payment.
-                    </p>
-                  </div>
-
-                  <div className="bg-indigo-50/50 rounded-2xl p-4 border border-indigo-100 space-y-2.5 text-xs text-center">
-                    <p className="font-bold text-slate-700 text-sm">
-                      Target pack: <span className="text-indigo-600 font-black">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)} Credits</span>
-                    </p>
-                    <p className="text-[10px] text-slate-400 font-semibold leading-normal">
-                      Once processed, your account balance updates immediately in the background. No manual synchronization required.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2.5">
-                    <button
-                      onClick={async () => {
-                        try {
-                          addToast("Contacting automated payment processor to verify checkout...", "info");
-                          const confirmRes = await axios.post('/api/billing/confirm-order', {
-                            packId: selectedPackId
-                          });
-                          if (confirmRes.data && confirmRes.data.success) {
-                            addToast(confirmRes.data.message || "Purchase successfully verified and activated! Added extra credits.", "success");
-                            setPackCheckoutPending(false);
-                            setIsPackConfirmOpen(false);
-                            const res = await axios.get('/api/billing/data');
-                            if (res.data) {
-                              setBillingInfo(res.data);
-                            }
-                            if (fetchBillingData) await fetchBillingData();
-                          } else {
-                            addToast(confirmRes.data.error || "Order status checking completed. Please complete checkout to proceed.", "error");
-                          }
-                        } catch (err: any) {
-                          addToast(err.response?.data?.error || "We're checking your purchase. Please complete the payment in the checkout window.", "error");
-                        }
-                      }}
-                      className="w-full py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-2 shadow-md shadow-indigo-150"
-                    >
-                      <Check className="w-4 h-4 text-white" /> Verify & Activate Credits Now
-                    </button>
-
-                    <button
-                      onClick={() => setPackCheckoutPending(false)}
-                      className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer text-center border-none"
-                    >
-                      Back / Cancel
-                    </button>
-                  </div>
+              <div className="text-center space-y-3">
+                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto">
+                  <Zap className="w-6 h-6 text-indigo-600 animate-bounce" />
                 </div>
-              ) : (
-                <>
-                  <div className="text-center space-y-3">
-                    <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto">
-                      <Zap className="w-6 h-6 text-indigo-600 animate-bounce" />
-                    </div>
-                    <h3 className="text-lg font-black text-slate-900">Purchase Extra Credits</h3>
-                    <p className="text-xs text-slate-400 font-medium">
-                      Add <strong className="text-indigo-600 font-black">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)}</strong> automated credits to your workspace. One-time purchase - credits never expire!
-                    </p>
-                  </div>
+                <h3 className="text-lg font-black text-slate-900">Purchase Extra Credits</h3>
+                <p className="text-xs text-slate-400 font-medium font-semibold">
+                  Add <strong className="text-indigo-600 font-black">{formatCredits(CREDIT_PACKS.find(p => p.id === selectedPackId)?.credits || 0)}</strong> automated credits to your workspace. One-time purchase - credits never expire!
+                </p>
+              </div>
 
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500 font-medium">One-Time Fee:</span>
-                      <span className="font-black text-slate-900">${CREDIT_PACKS.find(p => p.id === selectedPackId)?.price}</span>
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-medium">One-Time Fee:</span>
+                  <span className="font-black text-slate-900">${CREDIT_PACKS.find(p => p.id === selectedPackId)?.price}</span>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-1">
+                <div className="border-t border-slate-100 pt-3 space-y-3">
+                  <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">Secure Payment Gateway</h4>
+                  
+                  <div className="space-y-2.5">
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Cardholder Name</label>
+                      <input
+                        type="text"
+                        value={fakeCardName}
+                        onChange={(e) => setFakeCardName(e.target.value)}
+                        placeholder="John Doe"
+                        className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Card Number</label>
+                      <input
+                        type="text"
+                        maxLength={19}
+                        value={fakeCardNumber}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\s?/g, '').replace(/(\d{4})/g, '$1 ').trim();
+                          setFakeCardNumber(val);
+                        }}
+                        placeholder="4111 2222 3333 4444"
+                        className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">Expiry (MM/YY)</label>
+                        <input
+                          type="text"
+                          maxLength={5}
+                          value={fakeExpiry}
+                          onChange={(e) => {
+                            let val = e.target.value;
+                            if (val.length === 2 && !val.includes('/')) {
+                              val += '/';
+                            }
+                            setFakeExpiry(val);
+                          }}
+                          placeholder="12/28"
+                          className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] uppercase tracking-wider font-extrabold text-slate-500 block mb-1">CVC / CVV</label>
+                        <input
+                          type="password"
+                          maxLength={3}
+                          value={fakeCvv}
+                          onChange={(e) => setFakeCvv(e.target.value.replace(/\D/g, ""))}
+                          placeholder="739"
+                          className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 border border-slate-200 focus:outline-none focus:border-indigo-500 focus:bg-white text-slate-800 placeholder-slate-400"
+                        />
+                      </div>
                     </div>
                   </div>
+                  <p className="text-[10px] text-indigo-550 font-bold bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-150 leading-relaxed text-center">
+                    🔒 Sandbox Mode Active. Enter any simulated checkout credentials to securely approve this invoice instantly.
+                  </p>
+                </div>
+              </div>
 
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setIsPackConfirmOpen(false)}
-                      className="flex-1 py-3 bg-slate-50 text-slate-600 border border-slate-100 hover:bg-slate-100 rounded-xl font-bold text-xs uppercase cursor-pointer"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleConfirmPack}
-                      className="flex-1 py-3 bg-indigo-600 hover:bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md"
-                    >
-                      Confirm & Buy
-                    </button>
-                  </div>
-                </>
-              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setIsPackConfirmOpen(false)}
+                  disabled={submittingAction}
+                  className="flex-1 py-3 bg-slate-50 text-slate-600 border border-slate-100 hover:bg-slate-100 rounded-xl font-bold text-xs uppercase cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmPack}
+                  disabled={submittingAction}
+                  className="flex-1 py-3 bg-indigo-600 hover:bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer border-none flex items-center justify-center gap-1.5 shadow-md shadow-indigo-150"
+                >
+                  {submittingAction ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-white" />
+                  ) : "Confirm & Pay"}
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

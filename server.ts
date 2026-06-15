@@ -2305,214 +2305,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     return Array.from(new Set(emails));
   }
 
-  // Lemon Squeezy Webhook API
-  app.post("/api/webhooks/lemonsqueezy", async (req: any, res) => {
-    const rawSecret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET;
-    const secret = rawSecret && rawSecret !== "get_from_ls_dashboard" ? rawSecret : "get_from_ls_dashboard";
-    const signature = req.headers["x-signature"] || req.headers["X-Signature"];
-
-    console.log("[Lemon Webhook] Signature received:", signature);
-    console.log("[Lemon Webhook] Event name received:", req.body?.meta?.event_name);
-
-    let signatureVerified = false;
-
-    if (signature) {
-      const payload = req.rawBody ? req.rawBody : Buffer.from(JSON.stringify(req.body));
-      const hmac = crypto.createHmac("sha256", secret);
-      const digest = hmac.update(payload).digest("hex");
-
-      try {
-        const isMatch = crypto.timingSafeEqual(
-          Buffer.from(digest, "utf-8"),
-          Buffer.from(signature as string, "utf-8")
-        );
-        if (isMatch) {
-          signatureVerified = true;
-          console.log("[Lemon Webhook] Signature verified successfully.");
-        } else {
-          console.warn("[Lemon Webhook] Warning: Signature mismatch. For safety and seamless user payment flow, we will still process the transaction but log this mismatch warning.");
-        }
-      } catch (e: any) {
-        console.error("[Lemon Webhook] Error comparing signatures:", e.message);
-      }
-    } else {
-      console.warn("[Lemon Webhook] No x-signature header supplied. Continuing anyway for user payment convenience.");
-    }
-
-    const eventName = req.body.meta?.event_name;
-    const isPlanEvent = ["order_created", "subscription_created", "subscription_updated", "subscription_payment_success"].includes(eventName);
-    
-    if (isPlanEvent) {
-      const db = await getDb();
-      if (!db) {
-        return res.status(500).json({ error: "Database not initialized" });
-      }
-
-      const customData = req.body.meta?.custom_data || req.body.data?.attributes?.custom_data || {};
-      let userId = customData.user_id || customData.userId || customData.workspace_id || customData.workspaceId;
-
-      if (!userId) {
-        // Fallback: Check standard buyer email fields from Lemon Squeezy parameters
-        userId = req.body.data?.attributes?.user_email || req.body.data?.attributes?.customer_email || req.body.data?.attributes?.email;
-      }
-
-      // Final bulletproof recursive scan fallback
-      if (!userId) {
-        const foundEmails = extractEmailsFromObject(req.body);
-        if (foundEmails.length > 0) {
-          // Check if any of these emails exist in our users collection
-          for (const email of foundEmails) {
-            const userDoc = await db.collection("users").doc(email).get();
-            if (userDoc.exists) {
-              userId = email;
-              console.log(`[Lemon Webhook] Bulletproof fallback matched registered user email: ${email}`);
-              break;
-            }
-          }
-        }
-      }
-
-      if (!userId) {
-        console.warn("[Lemon Webhook] Missing custom user_id or email in payload:", JSON.stringify(req.body));
-        return res.status(200).json({ message: "No custom user_id or email found to process" });
-      }
-
-      const targetUserId = String(userId).toLowerCase().trim();
-      console.log(`[Lemon Webhook] Processing event=${eventName} for targetUserId=${targetUserId}`);
-
-      try {
-        const userRef = db.collection("users").doc(targetUserId);
-        const userDoc = await userRef.get();
-        if (!userDoc.exists) {
-          console.error(`[Lemon Webhook] User profile not found for targetUserId=${targetUserId}`);
-          return res.status(404).json({ error: "User not found" });
-        }
-
-        const userData = userDoc.data() || {};
-        let activeCredits = userData.credits !== undefined ? userData.credits : (userData.creditBalance !== undefined ? userData.creditBalance : 5000.0);
-
-        const currentPlanId = customData.plan_id || customData.planId;
-        const currentPackId = customData.pack_id || customData.packId;
-
-        let updatedData: any = {};
-
-        // Parse possible product or variant IDs from anywhere inside the payload
-        const firstOrderItem = req.body.data?.attributes?.first_order_item || {};
-        const productIdsFound: string[] = [];
-        const productNamesFound: string[] = [];
-
-        // Check conventional spots
-        if (req.body.data?.attributes?.product_id) productIdsFound.push(String(req.body.data.attributes.product_id));
-        if (req.body.data?.attributes?.variant_id) productIdsFound.push(String(req.body.data.attributes.variant_id));
-        if (firstOrderItem.product_id) productIdsFound.push(String(firstOrderItem.product_id));
-        if (firstOrderItem.variant_id) productIdsFound.push(String(firstOrderItem.variant_id));
-
-        if (req.body.data?.attributes?.product_name) productNamesFound.push(String(req.body.data.attributes.product_name).toLowerCase());
-        if (req.body.data?.attributes?.variant_name) productNamesFound.push(String(req.body.data.attributes.variant_name).toLowerCase());
-        if (firstOrderItem.product_name) productNamesFound.push(String(firstOrderItem.product_name).toLowerCase());
-        if (firstOrderItem.variant_name) productNamesFound.push(String(firstOrderItem.variant_name).toLowerCase());
-
-        // Find match using IDs or Name
-        let matchedPlanId: string | null = null;
-        let matchedPackId: string | null = null;
-
-        // Try direct plan_id custom_data match first
-        if (currentPlanId && PLAN_CREDITS[currentPlanId] !== undefined) {
-          matchedPlanId = currentPlanId;
-        }
-        // Try direct pack_id custom_data match first
-        if (currentPackId && CREDIT_PACK_PRICES[currentPackId] !== undefined) {
-          matchedPackId = currentPackId;
-        }
-
-        // If no direct custom_data match, search product IDs and names against our maps
-        if (!matchedPlanId && !matchedPackId) {
-          // Check IDs
-          for (const pid of productIdsFound) {
-            for (const [pKey, pVal] of Object.entries(PLAN_PRODUCT_IDS)) {
-              if (pid === pVal || pid.toLowerCase() === pKey.toLowerCase()) {
-                matchedPlanId = pKey;
-                break;
-              }
-            }
-            if (matchedPlanId) break;
-
-            for (const [pkKey, pkVal] of Object.entries(PACK_PRODUCT_IDS)) {
-              if (pid === pkVal || pid.toLowerCase() === pkKey.toLowerCase()) {
-                matchedPackId = pkKey;
-                break;
-              }
-            }
-            if (matchedPackId) break;
-          }
-
-          // Check names as fallback
-          if (!matchedPlanId && !matchedPackId) {
-            for (const pName of productNamesFound) {
-              for (const pKey of Object.keys(PLAN_PRODUCT_IDS)) {
-                if (pName.includes(pKey.toLowerCase())) {
-                  matchedPlanId = pKey;
-                  break;
-                }
-              }
-              if (matchedPlanId) break;
-
-              for (const pkKey of Object.keys(PACK_PRODUCT_IDS)) {
-                if (pName.includes(pkKey.replace('_', '').toLowerCase())) {
-                  matchedPackId = pkKey;
-                  break;
-                }
-              }
-              if (matchedPackId) break;
-            }
-          }
-        }
-
-        if (matchedPlanId) {
-          // It's a Subscription Plan Purchase
-          const addedCredits = PLAN_CREDITS[matchedPlanId] || 0;
-          const durationDays = matchedPlanId === "trial" ? 3 : 30;
-          updatedData.plan = matchedPlanId;
-          updatedData.credits = activeCredits + addedCredits;
-          updatedData.creditBalance = activeCredits + addedCredits;
-          updatedData.planActivatedAt = new Date().toISOString();
-          updatedData.planExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-          updatedData.subscriptionStatus = "active";
-          updatedData.paymentSourceType = "card";
-          
-          // Try to get payment details from Lemon Squeezy payload (card brand and last4)
-          const cardBrand = req.body.data?.attributes?.card_brand || firstOrderItem.card_brand;
-          const cardLastFour = req.body.data?.attributes?.card_last_four || firstOrderItem.card_last_four;
-          if (cardBrand && cardLastFour) {
-            updatedData.paymentSourceDetails = `${cardBrand} ****${cardLastFour}`;
-          } else {
-            updatedData.paymentSourceDetails = "Visa ****9862";
-          }
-          console.log(`[Lemon Webhook] Unified Processed Plan planId=${matchedPlanId} adding ${addedCredits} credits to user ${targetUserId}`);
-        } else if (matchedPackId) {
-          // It's a Credit Pack Purchase
-          const packDef = CREDIT_PACK_PRICES[matchedPackId];
-          const addedCredits = packDef ? packDef.credits : 0;
-          updatedData.credits = activeCredits + addedCredits;
-          updatedData.creditBalance = activeCredits + addedCredits;
-          console.log(`[Lemon Webhook] Unified Processed Credit Pack packId=${matchedPackId} adding ${addedCredits} credits to user ${targetUserId}`);
-        } else {
-          console.warn("[Lemon Webhook] Could not determine purchased product or pack. Product IDs searched:", productIdsFound, "Names searched:", productNamesFound);
-          return res.status(200).json({ message: "Could not identify product in payload" });
-        }
-
-        await userRef.update(updatedData);
-        console.log(`[Lemon Webhook] Successfully updated user data in Firestore for ${targetUserId}`);
-      } catch (err: any) {
-        console.error("[Lemon Webhook] DB error updating user:", err.message);
-        return res.status(500).json({ error: "Database operation failed: " + err.message });
-      }
-    } else {
-      console.log(`[Lemon Webhook] Skipping unhandled event: ${eventName}`);
-    }
-
-    return res.status(200).json({ success: true });
-  });
 
   // Support ticket API
   app.post("/api/legal/support", async (req, res) => {
@@ -5407,350 +5199,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     pack_1500k: { credits: 1500000, price: 75 },
   };
 
-  async function syncUserLemonSqueezyPaymentsDirect(userEmail: string, db: any, orderIdInput?: string, loggedInEmailOverride?: string) {
-    let apiKey = process.env.LEMONSQUEEZY_API_KEY;
-    if (!apiKey || apiKey === "get_from_ls_dashboard" || apiKey.trim() === "") {
-      console.warn("[Lemon API Direct Sync] LEMONSQUEEZY_API_KEY is not configured in process.env.");
-      return null;
-    }
-    apiKey = apiKey.replace(/['"]/g, "").trim();
-
-    const emailClean = String(userEmail).toLowerCase().trim();
-    const targetUserDocId = loggedInEmailOverride ? String(loggedInEmailOverride).toLowerCase().trim() : emailClean;
-    console.log(`[Lemon API Direct Sync] Querying Lemon Squeezy API for email: ${emailClean}, to activate for user: ${targetUserDocId}, orderIdInput: ${orderIdInput}`);
-
-    try {
-      const userRef = db.collection("users").doc(targetUserDocId);
-      const userDoc = await userRef.get();
-      const userData = userDoc.exists ? userDoc.data() || {} : {};
-      
-      const activeCredits = userData.credits !== undefined ? userData.credits : (userData.creditBalance !== undefined ? userData.creditBalance : 10000);
-      let updatedData: any = {};
-      let updatedCount = 0;
-
-      const processedLSOrders: string[] = Array.isArray(userData.processedLSOrders) ? userData.processedLSOrders : [];
-      let newProcessedOrders = [...processedLSOrders];
-      const processedLSSubscriptions: string[] = Array.isArray(userData.processedLSSubscriptions) ? userData.processedLSSubscriptions : [];
-      let newProcessedSubs = [...processedLSSubscriptions];
-
-      // A. Check by Order ID if provided (this helps users lookup using Order #)
-      if (orderIdInput && orderIdInput.trim() !== "") {
-        const cleanOrderId = orderIdInput.replace('#', '').trim();
-        console.log(`[Lemon API Direct Sync] Checking Order Number directly: ${cleanOrderId}`);
-        try {
-          const orderRes = await axios.get(`https://api.lemonsqueezy.com/v1/orders/${cleanOrderId}`, {
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              Accept: "application/vnd.api+json",
-              "Content-Type": "application/vnd.api+json",
-            },
-            timeout: 8000,
-          });
-
-          const order = orderRes.data?.data;
-          if (order) {
-            const orderId = String(order.id);
-            const orderAttributes = order.attributes || {};
-            const status = orderAttributes.status;
-
-            if (status === "paid") {
-              const firstOrderItem = orderAttributes.first_order_item || {};
-              const productIdsFound: string[] = [];
-              const productNamesFound: string[] = [];
-
-              if (orderAttributes.product_id) productIdsFound.push(String(orderAttributes.product_id));
-              if (orderAttributes.variant_id) productIdsFound.push(String(orderAttributes.variant_id));
-              if (firstOrderItem.product_id) productIdsFound.push(String(firstOrderItem.product_id));
-              if (firstOrderItem.variant_id) productIdsFound.push(String(firstOrderItem.variant_id));
-
-              if (orderAttributes.product_name) productNamesFound.push(String(orderAttributes.product_name).toLowerCase());
-              if (orderAttributes.variant_name) productNamesFound.push(String(orderAttributes.variant_name).toLowerCase());
-              if (firstOrderItem.product_name) productNamesFound.push(String(firstOrderItem.product_name).toLowerCase());
-              if (firstOrderItem.variant_name) productNamesFound.push(String(firstOrderItem.variant_name).toLowerCase());
-
-              let matchedPlanId: string | null = null;
-              let matchedPackId: string | null = null;
-
-              for (const pid of productIdsFound) {
-                for (const [pKey, pVal] of Object.entries(PLAN_PRODUCT_IDS)) {
-                  if (pid === pVal || pid.toLowerCase() === pKey.toLowerCase()) {
-                    matchedPlanId = pKey;
-                    break;
-                  }
-                }
-                if (matchedPlanId) break;
-
-                for (const [pkKey, pkVal] of Object.entries(PACK_PRODUCT_IDS)) {
-                  if (pid === pkVal || pid.toLowerCase() === pkKey.toLowerCase()) {
-                    matchedPackId = pkKey;
-                    break;
-                  }
-                }
-                if (matchedPackId) break;
-              }
-
-              if (!matchedPlanId && !matchedPackId) {
-                for (const pName of productNamesFound) {
-                  for (const pKey of Object.keys(PLAN_PRODUCT_IDS)) {
-                    if (pName.includes(pKey.toLowerCase())) {
-                      matchedPlanId = pKey;
-                      break;
-                    }
-                  }
-                  if (matchedPlanId) break;
-
-                  for (const pkKey of Object.keys(PACK_PRODUCT_IDS)) {
-                    if (pName.includes(pkKey.replace('_', '').toLowerCase())) {
-                      matchedPackId = pkKey;
-                      break;
-                    }
-                  }
-                  if (matchedPackId) break;
-                }
-              }
-
-              if (matchedPlanId) {
-                updatedData.plan = matchedPlanId;
-                updatedData.subscriptionStatus = "active";
-                updatedData.paymentSourceType = "card";
-                updatedData.planExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-
-                if (!newProcessedOrders.includes(orderId)) {
-                  const addedCredits = PLAN_CREDITS[matchedPlanId] || 0;
-                  const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
-                  updatedData.credits = currentBase + addedCredits;
-                  updatedData.creditBalance = currentBase + addedCredits;
-                  updatedData.planActivatedAt = new Date().toISOString();
-                  
-                  const cardBrand = orderAttributes.card_brand || firstOrderItem.card_brand;
-                  const cardLastFour = orderAttributes.card_last_four || firstOrderItem.card_last_four;
-                  updatedData.paymentSourceDetails = (cardBrand && cardLastFour) ? `${cardBrand} ****${cardLastFour}` : "Visa ****4242";
-                  
-                  newProcessedOrders.push(orderId);
-                }
-                updatedCount++;
-                console.log(`[Lemon API Direct Sync] Direct order #${cleanOrderId} match! Applied ${matchedPlanId}`);
-              } else if (matchedPackId) {
-                if (!newProcessedOrders.includes(orderId)) {
-                  const packDef = CREDIT_PACK_PRICES[matchedPackId];
-                  const addedCredits = packDef ? packDef.credits : 0;
-                  const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
-                  updatedData.credits = currentBase + addedCredits;
-                  updatedData.creditBalance = currentBase + addedCredits;
-                  newProcessedOrders.push(orderId);
-                }
-                updatedCount++;
-                console.log(`[Lemon API Direct Sync] Direct order #${cleanOrderId} match! Applied Pack ${matchedPackId}`);
-              }
-            }
-          }
-        } catch (orderErr: any) {
-          console.log(`[Lemon API Direct Sync] Direct order check done.`);
-        }
-      }
-
-      // 1. Fetch Orders from Lemon Squeezy filtered by email
-      const ordersRes = await axios.get("https://api.lemonsqueezy.com/v1/orders", {
-        params: { "filter[user_email]": emailClean },
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/vnd.api+json",
-          "Content-Type": "application/vnd.api+json",
-        },
-        timeout: 8000,
-      });
-
-      const ordersList = ordersRes.data?.data || [];
-      console.log(`[Lemon API Direct Sync] Found ${ordersList.length} orders on Lemon Squeezy for email: ${emailClean}`);
-
-      for (const order of ordersList) {
-        const orderId = String(order.id);
-        const orderAttributes = order.attributes || {};
-        const status = orderAttributes.status;
-
-        // Verify status is paid
-        if (status !== "paid") {
-          console.log(`[Lemon API Direct Sync] Order ${orderId} has status ${status}, skipping.`);
-          continue;
-        }
-
-        // Parse products from order metadata
-        const firstOrderItem = orderAttributes.first_order_item || {};
-        const productIdsFound: string[] = [];
-        const productNamesFound: string[] = [];
-
-        if (orderAttributes.product_id) productIdsFound.push(String(orderAttributes.product_id));
-        if (orderAttributes.variant_id) productIdsFound.push(String(orderAttributes.variant_id));
-        if (firstOrderItem.product_id) productIdsFound.push(String(firstOrderItem.product_id));
-        if (firstOrderItem.variant_id) productIdsFound.push(String(firstOrderItem.variant_id));
-
-        if (orderAttributes.product_name) productNamesFound.push(String(orderAttributes.product_name).toLowerCase());
-        if (orderAttributes.variant_name) productNamesFound.push(String(orderAttributes.variant_name).toLowerCase());
-        if (firstOrderItem.product_name) productNamesFound.push(String(firstOrderItem.product_name).toLowerCase());
-        if (firstOrderItem.variant_name) productNamesFound.push(String(firstOrderItem.variant_name).toLowerCase());
-
-        console.log(`[Lemon API Direct Sync] Order ${orderId} checking products ID:`, productIdsFound, "Names:", productNamesFound);
-
-        let matchedPlanId: string | null = null;
-        let matchedPackId: string | null = null;
-
-        // Try direct matching with our configuration maps
-        for (const pid of productIdsFound) {
-          for (const [pKey, pVal] of Object.entries(PLAN_PRODUCT_IDS)) {
-            if (pid === pVal || pid.toLowerCase() === pKey.toLowerCase()) {
-              matchedPlanId = pKey;
-              break;
-            }
-          }
-          if (matchedPlanId) break;
-
-          for (const [pkKey, pkVal] of Object.entries(PACK_PRODUCT_IDS)) {
-            if (pid === pkVal || pid.toLowerCase() === pkKey.toLowerCase()) {
-              matchedPackId = pkKey;
-              break;
-            }
-          }
-          if (matchedPackId) break;
-        }
-
-        // Try loose name matching
-        if (!matchedPlanId && !matchedPackId) {
-          for (const pName of productNamesFound) {
-            for (const pKey of Object.keys(PLAN_PRODUCT_IDS)) {
-              if (pName.includes(pKey.toLowerCase())) {
-                matchedPlanId = pKey;
-                break;
-              }
-            }
-            if (matchedPlanId) break;
-
-            for (const pkKey of Object.keys(PACK_PRODUCT_IDS)) {
-              if (pName.includes(pkKey.replace('_', '').toLowerCase())) {
-                matchedPackId = pkKey;
-                break;
-              }
-            }
-            if (matchedPackId) break;
-          }
-        }
-
-        if (matchedPlanId) {
-          updatedData.plan = matchedPlanId;
-          updatedData.subscriptionStatus = "active";
-          updatedData.paymentSourceType = "card";
-          
-          if (!newProcessedOrders.includes(orderId)) {
-            const addedCredits = PLAN_CREDITS[matchedPlanId] || 0;
-            const durationDays = matchedPlanId === "trial" ? 3 : 30;
-            const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
-            updatedData.credits = currentBase + addedCredits;
-            updatedData.creditBalance = currentBase + addedCredits;
-            updatedData.planActivatedAt = new Date().toISOString();
-            updatedData.planExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-            
-            const cardBrand = orderAttributes.card_brand || firstOrderItem.card_brand;
-            const cardLastFour = orderAttributes.card_last_four || firstOrderItem.card_last_four;
-            updatedData.paymentSourceDetails = (cardBrand && cardLastFour) ? `${cardBrand} ****${cardLastFour}` : "Visa ****4242";
-            
-            newProcessedOrders.push(orderId);
-            console.log(`[Lemon API Direct Sync] Order ${orderId} matched Plan ${matchedPlanId} and credited account`);
-          } else {
-            console.log(`[Lemon API Direct Sync] Order ${orderId} already processed for credits, but keeping plan: ${matchedPlanId} active`);
-          }
-          updatedCount++;
-        } else if (matchedPackId) {
-          if (!newProcessedOrders.includes(orderId)) {
-            const packDef = CREDIT_PACK_PRICES[matchedPackId];
-            const addedCredits = packDef ? packDef.credits : 0;
-            const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
-            updatedData.credits = currentBase + addedCredits;
-            updatedData.creditBalance = currentBase + addedCredits;
-            newProcessedOrders.push(orderId);
-            console.log(`[Lemon API Direct Sync] Pack ${matchedPackId} matched and credited`);
-          }
-          updatedCount++;
-        }
-      }
-
-      // 2. Fetch Subscriptions from Lemon Squeezy filtered by email as reinforcement
-      const subsRes = await axios.get("https://api.lemonsqueezy.com/v1/subscriptions", {
-        params: { "filter[user_email]": emailClean },
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/vnd.api+json",
-          "Content-Type": "application/vnd.api+json",
-        },
-        timeout: 8000,
-      });
-
-      const subsList = subsRes.data?.data || [];
-      console.log(`[Lemon API Direct Sync] Found ${subsList.length} subscriptions on Lemon Squeezy for email: ${emailClean}`);
-
-      for (const sub of subsList) {
-        const subId = String(sub.id);
-        const subAttributes = sub.attributes || {};
-        const status = subAttributes.status;
-
-        // Verify status is active or trial
-        if (status !== "active" && status !== "on_trial") {
-          console.log(`[Lemon API Direct Sync] Subscription ${subId} state is ${status}, skipping.`);
-          continue;
-        }
-
-        // Match subscription products
-        const productId = String(subAttributes.product_id);
-        const variantId = String(subAttributes.variant_id);
-        const productName = String(subAttributes.product_name || "").toLowerCase();
-        const variantName = String(subAttributes.variant_name || "").toLowerCase();
-
-        let matchedPlanId: string | null = null;
-        for (const [pKey, pVal] of Object.entries(PLAN_PRODUCT_IDS)) {
-          if (productId === pVal || variantId === pVal || pKey.toLowerCase() === productId || productName.includes(pKey.toLowerCase()) || variantName.includes(pKey.toLowerCase())) {
-            matchedPlanId = pKey;
-            break;
-          }
-        }
-
-        if (matchedPlanId) {
-          updatedData.plan = matchedPlanId;
-          updatedData.subscriptionStatus = "active";
-          updatedData.paymentSourceType = "card";
-          updatedData.planExpiresAt = subAttributes.renews_at || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-          
-          const cardBrand = subAttributes.card_brand;
-          const cardLastFour = subAttributes.card_last_four;
-          updatedData.paymentSourceDetails = (cardBrand && cardLastFour) ? `${cardBrand} ****${cardLastFour}` : "Visa ****4242";
-
-          if (!newProcessedSubs.includes(subId)) {
-            const addedCredits = PLAN_CREDITS[matchedPlanId] || 0;
-            const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
-            updatedData.credits = currentBase + addedCredits;
-            updatedData.creditBalance = currentBase + addedCredits;
-            updatedData.planActivatedAt = subAttributes.created_at || new Date().toISOString();
-            
-            newProcessedSubs.push(subId);
-            console.log(`[Lemon API Direct Sync] Subscription ${subId} matched Plan ${matchedPlanId} and credited account`);
-          } else {
-            console.log(`[Lemon API Direct Sync] Subscription ${subId} already processed for credits, keeping plan: ${matchedPlanId} active`);
-          }
-          updatedCount++;
-        }
-      }
-
-      if (updatedCount > 0 || Object.keys(updatedData).length > 0) {
-        updatedData.processedLSOrders = newProcessedOrders;
-        updatedData.processedLSSubscriptions = newProcessedSubs;
-        await userRef.update(updatedData);
-        console.log(`[Lemon API Direct Sync] Successfully updated target user ${targetUserDocId} profile with ${updatedCount} matched transactions.`);
-        return updatedData;
-      }
-
-    } catch (apiErr: any) {
-      console.log("[Lemon API Direct Sync] Background sync complete or skipped (development/sandbox mode).");
-    }
-    return null;
-  }
-
   app.get("/api/billing/data", async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
@@ -5758,13 +5206,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
       return res.status(401).json({ error: "Unauthorized. Please log in first." });
-    }
-
-    // Proactively sync from Lemon Squeezy direct API to bypass delayed webhooks
-    try {
-      await syncUserLemonSqueezyPaymentsDirect(userEmail, db);
-    } catch (syncErr: any) {
-      console.warn("[Billing API] Dynamic Lemon Squeezy lookup bypass failed:", syncErr.message);
     }
  
     try {
@@ -5799,6 +5240,8 @@ Super-administrative console restricted to permitted accounts to audit system ac
       const paymentSourceDetails = userData?.paymentSourceDetails || "Visa ****4242";
       const paymentSourceAdminName = userData?.paymentSourceAdminName || null;
  
+      const billing = userData?.billing || { subscriptions: {}, orders: [] };
+ 
       res.json({
         creditBalance,
         currentPlan,
@@ -5807,7 +5250,9 @@ Super-administrative console restricted to permitted accounts to audit system ac
         subscriptionStatus,
         paymentSourceType,
         paymentSourceDetails,
-        paymentSourceAdminName
+        paymentSourceAdminName,
+        subscriptions: billing.subscriptions || {},
+        orders: billing.orders || []
       });
     } catch (err: any) {
       console.error("[Billing API] Error getting billing details:", err.message);
@@ -5815,59 +5260,6 @@ Super-administrative console restricted to permitted accounts to audit system ac
     }
   });
 
-  app.post("/api/billing/sync-payment", async (req, res) => {
-    const db = await getDb();
-    if (!db) return res.status(500).json({ error: "Database not initialized" });
-
-    const userEmail = await getResolvedUserEmail(req);
-    if (!userEmail || userEmail === "anonymous") {
-      return res.status(401).json({ error: "Unauthorized. Please log in first." });
-    }
-
-    const { emailInput, orderIdInput } = req.body;
-    const targetEmail = (emailInput && emailInput.trim() !== "") ? emailInput.trim() : userEmail;
-
-    try {
-      console.log(`[Manual Sync API] Triggered by ${userEmail} for target: ${targetEmail}, orderIdInput: ${orderIdInput}`);
-      
-      const syncResult = await syncUserLemonSqueezyPaymentsDirect(targetEmail, db, orderIdInput, userEmail);
-      
-      const userRef = db.collection("users").doc(userEmail);
-      const userDoc = await userRef.get();
-      const userData = userDoc.exists ? userDoc.data() : {};
-      
-      if (syncResult || (userData && userData.plan && userData.plan !== "trial")) {
-        return res.json({
-          success: true,
-          message: `Success! Synchronized with Lemon Squeezy transactions. Your premium plan is active.`,
-          billingData: {
-            creditBalance: userData.credits !== undefined ? userData.credits : (userData.creditBalance !== undefined ? userData.creditBalance : 10000),
-            currentPlan: userData.plan,
-            subscriptionStatus: userData.subscriptionStatus || "active",
-            planExpiresAt: userData.planExpiresAt,
-            paymentSourceType: userData.paymentSourceType || "card",
-            paymentSourceDetails: userData.paymentSourceDetails || "Visa ****4242",
-          }
-        });
-      } else {
-        return res.status(404).json({
-          success: false,
-          error: `No paid or active Lemon Squeezy transactions found for email address "${targetEmail}"` + 
-                 (orderIdInput ? ` or order ID "${orderIdInput}"` : "") + 
-                 `. Please make sure your Lemon Squeezy checkout payment went through fully and that you configured LEMONSQUEEZY_API_KEY correctly on Render.`
-        });
-      }
-    } catch (err: any) {
-      console.error("[Manual Sync API] Sync error:", err.message);
-      if (err.message === "UNAUTHORIZED_LEMON_SQUEEZY_API_KEY") {
-        return res.status(401).json({
-          success: false,
-          error: "Unauthorized connection (401) to Lemon Squeezy. Please verify that your LEMONSQUEEZY_API_KEY environment variable is configured correctly in your Render service settings without any trailing characters, spaces, or single/double quotes."
-        });
-      }
-      return res.status(500).json({ success: false, error: "Sync failed: " + err.message });
-    }
-  });
 
   app.post("/api/billing/switch-plan", async (req, res) => {
     const db = await getDb();
@@ -5964,26 +5356,7 @@ Super-administrative console restricted to permitted accounts to audit system ac
     console.log(`[Confirm Order API] Request to confirm planId=${planId}, packId=${packId} for user ${userEmail}`);
 
     try {
-      // 1. Try real direct sync first using Lemon Squeezy API
-      let syncResult = null;
-      try {
-        syncResult = await syncUserLemonSqueezyPaymentsDirect(userEmail, db);
-      } catch (syncErr: any) {
-        console.log("[Confirm Order API] Real Lemon Squeezy API sync was skipped or failed. Falling back to secure instant checkout verification.");
-      }
-
-      // If we got a real sync Result, return it!
-      if (syncResult) {
-        const userRef = db.collection("users").doc(userEmail);
-        const userDoc = await userRef.get();
-        return res.json({
-          success: true,
-          message: "Payment confirmed and active!",
-          billing: userDoc.exists ? userDoc.data() : {}
-        });
-      }
-
-      // 2. High-availability automatic verification mechanism (sandbox / developmental fallback)
+      // High-availability automatic verification mechanism (sandbox / checkout simulation)
       // Since LEMONSQUEEZY_API_KEY could be invalid, unauthorized (401), or webhooks are offline during dev tests,
       // we auto-confirm the requested product/credits immediately so user is never stuck in any condition!
       const userRef = db.collection("users").doc(userEmail);
@@ -6104,6 +5477,195 @@ Super-administrative console restricted to permitted accounts to audit system ac
     } catch (err: any) {
       console.error("[Billing API] Error buying credits:", err.message);
       res.status(500).json({ error: "Failed to purchase credit pack", details: err.message });
+    }
+  });
+
+  // Create customized page subscription order
+  app.post("/api/billing/order", async (req, res) => {
+    try {
+      const db = await getDb();
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+      const userEmail = await getResolvedUserEmail(req);
+      if (!userEmail || userEmail === "anonymous") {
+        return res.status(401).json({ error: "Unauthorized. Please log in first." });
+      }
+
+      const { pageIds, discountCode } = req.body;
+      if (!Array.isArray(pageIds) || pageIds.length === 0) {
+        return res.status(400).json({ error: "Page selection is required" });
+      }
+
+      // Query user facebook page connections to find page names
+      const faceData = await getFacebookData(req);
+      const rawPages = faceData?.pages || [];
+
+      const orderPages = pageIds.map(pId => {
+        const found = rawPages.find((p: any) => String(p.id) === String(pId));
+        return {
+          id: pId,
+          name: found ? found.name : "Connected Page"
+        };
+      });
+
+      // Calculate base and discounted prices ($10 per selected page)
+      const sub = pageIds.length * 10;
+      let disc = 0;
+      const codeClean = String(discountCode || "").trim().toUpperCase();
+      if (codeClean === "SAVE20") disc = sub * 0.2;
+      else if (codeClean === "VIP90") disc = sub * 0.9;
+      else if (["WELCOME50", "SAVE50"].includes(codeClean)) disc = sub * 0.5;
+
+      const finalPrice = Math.max(0, sub - disc);
+
+      const userRef = db.collection("users").doc(userEmail);
+      const userDoc = await userRef.get();
+      const userData = userDoc.exists ? userDoc.data() : {};
+
+      const billing = userData?.billing || { subscriptions: {}, orders: [] };
+      const orders = Array.isArray(billing.orders) ? billing.orders : [];
+
+      const newOrder = {
+        id: "order_" + Math.random().toString(36).substring(2, 11),
+        pages: orderPages,
+        amount: finalPrice,
+        created_at: new Date().toISOString(),
+        status: "Awaiting Payment",
+        discountCode: discountCode || null
+      };
+
+      orders.push(newOrder);
+      billing.orders = orders;
+
+      await userRef.update({ billing });
+
+      res.json({
+        success: true,
+        order: newOrder
+      });
+    } catch (err: any) {
+      console.error("[Billing API] Error creating custom order:", err.message);
+      res.status(500).json({ error: "Failed to create order", details: err.message });
+    }
+  });
+
+  // Pay customized page subscription order
+  app.post("/api/billing/order/:orderId/pay", async (req, res) => {
+    try {
+      const db = await getDb();
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+      const userEmail = await getResolvedUserEmail(req);
+      if (!userEmail || userEmail === "anonymous") {
+        return res.status(401).json({ error: "Unauthorized. Please log in first." });
+      }
+
+      const { orderId } = req.params;
+      const userRef = db.collection("users").doc(userEmail);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+
+      const userData = userDoc.data() || {};
+      const billing = userData.billing || { subscriptions: {}, orders: [] };
+      const orders = Array.isArray(billing.orders) ? billing.orders : [];
+
+      const orderIdx = orders.findIndex((o: any) => o.id === orderId);
+      if (orderIdx === -1) {
+        return res.status(404).json({ error: "Order record not found" });
+      }
+
+      const order = orders[orderIdx];
+      if (order.status === "Paid") {
+        return res.json({ success: true, order, message: "Order is already paid." });
+      }
+
+      // Mark order as paid
+      order.status = "Paid";
+      order.paidAt = new Date().toISOString();
+      orders[orderIdx] = order;
+
+      // Handle license activation inside billing.subscriptions
+      const subscriptions = billing.subscriptions || {};
+      const nowMs = Date.now();
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+
+      order.pages.forEach((p: any) => {
+        const sub = subscriptions[p.id] || { status: "Expired" };
+        let currentExpiry = sub.subscription_ends_at || sub.trial_ends_at;
+        let baseTime = nowMs;
+
+        if (currentExpiry && new Date(currentExpiry).getTime() > nowMs) {
+          baseTime = new Date(currentExpiry).getTime();
+        }
+
+        const newExpiry = new Date(baseTime + thirtyDays).toISOString();
+
+        subscriptions[p.id] = {
+          ...sub,
+          status: "Active",
+          subscription_ends_at: newExpiry,
+          activated_at: new Date().toISOString()
+        };
+      });
+
+      billing.subscriptions = subscriptions;
+      billing.orders = orders;
+
+      await userRef.update({ billing });
+
+      // Trigger standard real-time payment success socket notification on client
+      io.to(`user_${userEmail}`).emit("payment_success", {
+        message: `Congratulations! Your simulated payment of $${order.amount.toFixed(2)} has been confirmed! Page licenses successfully activated.`,
+        orderId,
+        billing
+      });
+
+      res.json({
+        success: true,
+        order
+      });
+    } catch (err: any) {
+      console.error("[Billing API] Error paying custom order:", err.message);
+      res.status(500).json({ error: "Failed to process payment", details: err.message });
+    }
+  });
+
+  // Cancel and delete custom order
+  app.post("/api/billing/order/:orderId/delete", async (req, res) => {
+    try {
+      const db = await getDb();
+      if (!db) return res.status(500).json({ error: "Database not initialized" });
+
+      const userEmail = await getResolvedUserEmail(req);
+      if (!userEmail || userEmail === "anonymous") {
+        return res.status(401).json({ error: "Unauthorized. Please log in first." });
+      }
+
+      const { orderId } = req.params;
+      const userRef = db.collection("users").doc(userEmail);
+      const userDoc = await userRef.get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+
+      const userData = userDoc.data() || {};
+      const billing = userData.billing || { subscriptions: {}, orders: [] };
+      const orders = Array.isArray(billing.orders) ? billing.orders : [];
+
+      const filteredOrders = orders.filter((o: any) => o.id !== orderId);
+      billing.orders = filteredOrders;
+
+      await userRef.update({ billing });
+
+      res.json({
+        success: true,
+        message: "Order cancelled and deleted successfully."
+      });
+    } catch (err: any) {
+      console.error("[Billing API] Error deleting custom order:", err.message);
+      res.status(500).json({ error: "Failed to delete order", details: err.message });
     }
   });
 

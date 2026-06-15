@@ -1039,6 +1039,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
         setCreditBalance(res.data.creditBalance !== undefined ? res.data.creditBalance : 0);
         setCurrentPlan(res.data.currentPlan || null);
         setPlanExpiresAt(res.data.planExpiresAt || null);
+        setBillingData(res.data);
       }
     } catch (err) {
       console.error("Failed to fetch billing data", err);
@@ -1293,12 +1294,25 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
       validateWorkspaceMembership();
     };
 
+    const handlePaymentSuccess = (data: any) => {
+      console.log("[Socket Realtime] Payment success event received:", data);
+      if (data && data.message) {
+        addToast(data.message, "success");
+      } else {
+        addToast("Congratulations! Your payment has been confirmed automatically. Your order status is active!", "success");
+      }
+      fetchBillingData();
+      validateWorkspaceMembership();
+    };
+
     socket.on("role_updated", handleRoleUpdate);
+    socket.on("payment_success", handlePaymentSuccess);
 
     return () => {
       socket.off("role_updated", handleRoleUpdate);
+      socket.off("payment_success", handlePaymentSuccess);
     };
-  }, [socket, validateWorkspaceMembership]);
+  }, [socket, validateWorkspaceMembership, fetchBillingData]);
 
   const getConversations = async (pageId: string, forceRefresh: boolean = false, showLoader: boolean = true) => {
     if (showLoader) setIsLoading(true);
@@ -5399,15 +5413,10 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                             </div>
                             <button 
                               onClick={() => {
-                                const numPages = orderObj.pages?.length || 1;
-                                const uEmail = encodeURIComponent(appUser?.email || 'ahsan.shabbir292@gmail.com');
-                                const oId = encodeURIComponent(orderObj.id);
-                                const uId = encodeURIComponent(appUser?.email || 'ahsan.shabbir292@gmail.com');
-                                const wsId = encodeURIComponent(orderObj.workspace_id || appUser?.workspaceId || appUser?.email || 'ahsan.shabbir292@gmail.com');
-                                const checkoutUrl = `https://messengerai.lemonsqueezy.com/checkout/buy/8e9d0f54-c033-4b21-a1c7-87f6a397de4c?quantity=${numPages}&checkout[email]=${uEmail}&checkout[custom][order_id]=${oId}&checkout[custom][user_id]=${uId}&checkout[custom][workspace_id]=${wsId}`;
-                                window.open(checkoutUrl, '_blank');
+                                setSelectedOrderId(orderObj.id);
+                                setBillingSubView('payment');
                               }}
-                              className="px-5 py-2.5 bg-amber-600 hover:bg-slate-950 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-colors shrink-0"
+                              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black text-xs uppercase tracking-wider transition-colors shrink-0 cursor-pointer"
                             >
                               Pay Now
                             </button>
@@ -5483,17 +5492,12 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                           <div className="space-y-3">
                             <button 
                               onClick={() => {
-                                const numPages = orderObj.pages?.length || 1;
-                                const uEmail = encodeURIComponent(appUser?.email || 'ahsan.shabbir292@gmail.com');
-                                const oId = encodeURIComponent(orderObj.id);
-                                const uId = encodeURIComponent(appUser?.email || 'ahsan.shabbir292@gmail.com');
-                                const wsId = encodeURIComponent(orderObj.workspace_id || appUser?.workspaceId || appUser?.email || 'ahsan.shabbir292@gmail.com');
-                                const checkoutUrl = `https://messengerai.lemonsqueezy.com/checkout/buy/8e9d0f54-c033-4b21-a1c7-87f6a397de4c?quantity=${numPages}&checkout[email]=${uEmail}&checkout[custom][order_id]=${oId}&checkout[custom][user_id]=${uId}&checkout[custom][workspace_id]=${wsId}`;
-                                window.open(checkoutUrl, '_blank');
+                                setSelectedOrderId(orderObj.id);
+                                setBillingSubView('payment');
                               }}
-                              className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-emerald-950/20"
+                              className="w-full py-4 bg-indigo-600 hover:bg-slate-950 text-white rounded-xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-indigo-950/20"
                             >
-                              Pay Now (Lemon Squeezy)
+                              Pay Now
                             </button>
                             <button 
                               onClick={() => {
@@ -5917,13 +5921,21 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                               </div>
                               <button 
                                  disabled={isCurrent}
-                                 onClick={() => {
+                                 onClick={async () => {
                                     if (isCurrent) return;
-                                    const email = encodeURIComponent(appUser?.email || '');
-                                    const userId = encodeURIComponent(appUser?.email || '');
-                                    const url = `https://messengerai.lemonsqueezy.com/checkout/buy/${item.productId}?checkout[email]=${email}&checkout[custom][user_id]=${userId}`;
-                                    window.open(url, '_blank');
-                                    setIsUpgradeModalOpen(false);
+                                    try {
+                                       setIsBillingLoading(true);
+                                       const res = await axios.post("/api/billing/confirm-order", { planId: item.id });
+                                       if (res.data.success) {
+                                          alert(res.data.message || `Congratulations! Upgraded to ${item.name} successfully!`);
+                                          await fetchBillingData();
+                                          setIsUpgradeModalOpen(false);
+                                       }
+                                    } catch (err: any) {
+                                       alert("Failed to confirm upgrade path: " + (err.response?.data?.error || err.message));
+                                    } finally {
+                                       setIsBillingLoading(false);
+                                    }
                                  }}
                                  className={`w-full py-3 rounded-xl font-black text-[9px] uppercase tracking-widest transition-all active:scale-95 border-none cursor-pointer ${
                                    isCurrent ? 'bg-emerald-500/10 text-emerald-500 cursor-not-allowed font-extrabold' : 
