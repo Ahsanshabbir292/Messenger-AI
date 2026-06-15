@@ -5407,6 +5407,240 @@ Super-administrative console restricted to permitted accounts to audit system ac
     pack_1500k: { credits: 1500000, price: 75 },
   };
 
+  async function syncUserLemonSqueezyPaymentsDirect(userEmail: string, db: any) {
+    const apiKey = process.env.LEMONSQUEEZY_API_KEY;
+    if (!apiKey || apiKey === "get_from_ls_dashboard" || apiKey.trim() === "") {
+      console.warn("[Lemon API Direct Sync] LEMONSQUEEZY_API_KEY is not configured in process.env.");
+      return null;
+    }
+
+    const emailClean = String(userEmail).toLowerCase().trim();
+    console.log(`[Lemon API Direct Sync] Querying Lemon Squeezy API for email: ${emailClean}`);
+
+    try {
+      // 1. Fetch Orders from Lemon Squeezy filtered by email
+      const ordersRes = await axios.get("https://api.lemonsqueezy.com/v1/orders", {
+        params: { "filter[user_email]": emailClean },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/vnd.api+json",
+          "Content-Type": "application/vnd.api+json",
+        },
+        timeout: 8000,
+      });
+
+      const userRef = db.collection("users").doc(emailClean);
+      const userDoc = await userRef.get();
+      const userData = userDoc.exists ? userDoc.data() || {} : {};
+      
+      const activeCredits = userData.credits !== undefined ? userData.credits : (userData.creditBalance !== undefined ? userData.creditBalance : 10000);
+      let updatedData: any = {};
+      let updatedCount = 0;
+
+      const processedLSOrders: string[] = Array.isArray(userData.processedLSOrders) ? userData.processedLSOrders : [];
+      let newProcessedOrders = [...processedLSOrders];
+
+      const ordersList = ordersRes.data?.data || [];
+      console.log(`[Lemon API Direct Sync] Found ${ordersList.length} orders on Lemon Squeezy for email: ${emailClean}`);
+
+      for (const order of ordersList) {
+        const orderId = String(order.id);
+        const orderAttributes = order.attributes || {};
+        const status = orderAttributes.status;
+
+        // Verify status is paid
+        if (status !== "paid") {
+          console.log(`[Lemon API Direct Sync] Order ${orderId} has status ${status}, skipping.`);
+          continue;
+        }
+
+        if (newProcessedOrders.includes(orderId)) {
+          console.log(`[Lemon API Direct Sync] Order ${orderId} is already processed, skipping.`);
+          continue;
+        }
+
+        // Parse products from order metadata
+        const firstOrderItem = orderAttributes.first_order_item || {};
+        const productIdsFound: string[] = [];
+        const productNamesFound: string[] = [];
+
+        if (orderAttributes.product_id) productIdsFound.push(String(orderAttributes.product_id));
+        if (orderAttributes.variant_id) productIdsFound.push(String(orderAttributes.variant_id));
+        if (firstOrderItem.product_id) productIdsFound.push(String(firstOrderItem.product_id));
+        if (firstOrderItem.variant_id) productIdsFound.push(String(firstOrderItem.variant_id));
+
+        if (orderAttributes.product_name) productNamesFound.push(String(orderAttributes.product_name).toLowerCase());
+        if (orderAttributes.variant_name) productNamesFound.push(String(orderAttributes.variant_name).toLowerCase());
+        if (firstOrderItem.product_name) productNamesFound.push(String(firstOrderItem.product_name).toLowerCase());
+        if (firstOrderItem.variant_name) productNamesFound.push(String(firstOrderItem.variant_name).toLowerCase());
+
+        console.log(`[Lemon API Direct Sync] Order ${orderId} checking products ID:`, productIdsFound, "Names:", productNamesFound);
+
+        let matchedPlanId: string | null = null;
+        let matchedPackId: string | null = null;
+
+        // Try direct matching with our configuration maps
+        for (const pid of productIdsFound) {
+          for (const [pKey, pVal] of Object.entries(PLAN_PRODUCT_IDS)) {
+            if (pid === pVal || pid.toLowerCase() === pKey.toLowerCase()) {
+              matchedPlanId = pKey;
+              break;
+            }
+          }
+          if (matchedPlanId) break;
+
+          for (const [pkKey, pkVal] of Object.entries(PACK_PRODUCT_IDS)) {
+            if (pid === pkVal || pid.toLowerCase() === pkKey.toLowerCase()) {
+              matchedPackId = pkKey;
+              break;
+            }
+          }
+          if (matchedPackId) break;
+        }
+
+        // Try loose name matching
+        if (!matchedPlanId && !matchedPackId) {
+          for (const pName of productNamesFound) {
+            for (const pKey of Object.keys(PLAN_PRODUCT_IDS)) {
+              if (pName.includes(pKey.toLowerCase())) {
+                matchedPlanId = pKey;
+                break;
+              }
+            }
+            if (matchedPlanId) break;
+
+            for (const pkKey of Object.keys(PACK_PRODUCT_IDS)) {
+              if (pName.includes(pkKey.replace('_', '').toLowerCase())) {
+                matchedPackId = pkKey;
+                break;
+              }
+            }
+            if (matchedPackId) break;
+          }
+        }
+
+        if (matchedPlanId) {
+          const addedCredits = PLAN_CREDITS[matchedPlanId] || 0;
+          const durationDays = matchedPlanId === "trial" ? 3 : 30;
+          updatedData.plan = matchedPlanId;
+          const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
+          updatedData.credits = currentBase + addedCredits;
+          updatedData.creditBalance = currentBase + addedCredits;
+          updatedData.planActivatedAt = new Date().toISOString();
+          updatedData.planExpiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+          updatedData.subscriptionStatus = "active";
+          updatedData.paymentSourceType = "card";
+          
+          const cardBrand = orderAttributes.card_brand || firstOrderItem.card_brand;
+          const cardLastFour = orderAttributes.card_last_four || firstOrderItem.card_last_four;
+          if (cardBrand && cardLastFour) {
+            updatedData.paymentSourceDetails = `${cardBrand} ****${cardLastFour}`;
+          } else {
+            updatedData.paymentSourceDetails = "Visa ****4242";
+          }
+          newProcessedOrders.push(orderId);
+          updatedCount++;
+          console.log(`[Lemon API Direct Sync] Clean Match Applied Plan ${matchedPlanId} for order ${orderId}`);
+        } else if (matchedPackId) {
+          const packDef = CREDIT_PACK_PRICES[matchedPackId];
+          const addedCredits = packDef ? packDef.credits : 0;
+          const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
+          updatedData.credits = currentBase + addedCredits;
+          updatedData.creditBalance = currentBase + addedCredits;
+          newProcessedOrders.push(orderId);
+          updatedCount++;
+          console.log(`[Lemon API Direct Sync] Clean Match Applied Credit Pack ${matchedPackId} for order ${orderId}`);
+        }
+      }
+
+      // 2. Fetch Subscriptions from Lemon Squeezy filtered by email as reinforcement
+      const subsRes = await axios.get("https://api.lemonsqueezy.com/v1/subscriptions", {
+        params: { "filter[user_email]": emailClean },
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/vnd.api+json",
+          "Content-Type": "application/vnd.api+json",
+        },
+        timeout: 8000,
+      });
+
+      const processedLSSubscriptions: string[] = Array.isArray(userData.processedLSSubscriptions) ? userData.processedLSSubscriptions : [];
+      let newProcessedSubs = [...processedLSSubscriptions];
+
+      const subsList = subsRes.data?.data || [];
+      console.log(`[Lemon API Direct Sync] Found ${subsList.length} subscriptions on Lemon Squeezy for email: ${emailClean}`);
+
+      for (const sub of subsList) {
+        const subId = String(sub.id);
+        const subAttributes = sub.attributes || {};
+        const status = subAttributes.status;
+
+        // Verify status is active or trial
+        if (status !== "active" && status !== "on_trial") {
+          console.log(`[Lemon API Direct Sync] Subscription ${subId} state is ${status}, skipping.`);
+          continue;
+        }
+
+        if (newProcessedSubs.includes(subId)) {
+          console.log(`[Lemon API Direct Sync] Subscription ${subId} is already processed, skipping.`);
+          continue;
+        }
+
+        // Match subscription products
+        const productId = String(subAttributes.product_id);
+        const variantId = String(subAttributes.variant_id);
+        const productName = String(subAttributes.product_name || "").toLowerCase();
+        const variantName = String(subAttributes.variant_name || "").toLowerCase();
+
+        let matchedPlanId: string | null = null;
+        for (const [pKey, pVal] of Object.entries(PLAN_PRODUCT_IDS)) {
+          if (productId === pVal || variantId === pVal || pKey.toLowerCase() === productId || productName.includes(pKey.toLowerCase()) || variantName.includes(pKey.toLowerCase())) {
+            matchedPlanId = pKey;
+            break;
+          }
+        }
+
+        if (matchedPlanId) {
+          const addedCredits = PLAN_CREDITS[matchedPlanId] || 0;
+          const durationDays = matchedPlanId === "trial" ? 3 : 30;
+          
+          updatedData.plan = matchedPlanId;
+          const currentBase = updatedData.credits !== undefined ? updatedData.credits : activeCredits;
+          updatedData.credits = currentBase + addedCredits;
+          updatedData.creditBalance = currentBase + addedCredits;
+          updatedData.planActivatedAt = subAttributes.created_at || new Date().toISOString();
+          updatedData.planExpiresAt = subAttributes.renews_at || new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+          updatedData.subscriptionStatus = "active";
+          updatedData.paymentSourceType = "card";
+          
+          const cardBrand = subAttributes.card_brand;
+          const cardLastFour = subAttributes.card_last_four;
+          if (cardBrand && cardLastFour) {
+            updatedData.paymentSourceDetails = `${cardBrand} ****${cardLastFour}`;
+          } else {
+            updatedData.paymentSourceDetails = "Visa ****4242";
+          }
+          
+          newProcessedSubs.push(subId);
+          updatedCount++;
+          console.log(`[Lemon API Direct Sync] Subscription ${subId} matched and applied plan ${matchedPlanId}`);
+        }
+      }
+
+      if (updatedCount > 0) {
+        updatedData.processedLSOrders = newProcessedOrders;
+        updatedData.processedLSSubscriptions = newProcessedSubs;
+        await userRef.update(updatedData);
+        console.log(`[Lemon API Direct Sync] Successfully updated user ${emailClean} profile in Firestore with ${updatedCount} synced transactions.`);
+        return updatedData;
+      }
+
+    } catch (apiErr: any) {
+      console.error("[Lemon API Direct Sync] Error fetching or updating from Lemon Squeezy API:", apiErr.message);
+    }
+    return null;
+  }
+
   app.get("/api/billing/data", async (req, res) => {
     const db = await getDb();
     if (!db) return res.status(500).json({ error: "Database not initialized" });
@@ -5414,6 +5648,13 @@ Super-administrative console restricted to permitted accounts to audit system ac
     const userEmail = await getResolvedUserEmail(req);
     if (!userEmail || userEmail === "anonymous") {
       return res.status(401).json({ error: "Unauthorized. Please log in first." });
+    }
+
+    // Proactively sync from Lemon Squeezy direct API to bypass delayed webhooks
+    try {
+      await syncUserLemonSqueezyPaymentsDirect(userEmail, db);
+    } catch (syncErr: any) {
+      console.warn("[Billing API] Dynamic Lemon Squeezy lookup bypass failed:", syncErr.message);
     }
  
     try {
