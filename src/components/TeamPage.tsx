@@ -311,7 +311,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                 });
 
                 if (res.data.success) {
-                  // Handle potential simulated responses (e.g., Sandbox environment or SMTP disabled/failed)
+                  // Handle potential responses (e.g., mail delivery bypassed or SMTP disabled/failed)
                   if (res.data.simulated) {
                     setSimulatedInvite({
                       email: addMemberEmail.trim().toLowerCase(),
@@ -319,7 +319,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                       name: addMemberName.trim(),
                       role: addMemberRole
                     });
-                    addToast("Sandbox Mode: Join link compiled successfully!", 'success');
+                    addToast("Join link compiled successfully!", 'success');
                   } else {
                     addToast(`Invitation email successfully sent to ${addMemberEmail.trim()}`, 'success');
                   }
@@ -496,7 +496,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({
         </div>
       )}
 
-      {/* Simulated/Sandbox Mode Invitation Acceptance Tester Modal */}
+      {/* Simulated Invitation Acceptance Tester Modal */}
       {simulatedInvite && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 sm:p-6 lg:p-10 animate-in fade-in duration-200">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-md" onClick={() => setSimulatedInvite(null)}></div>
@@ -505,9 +505,9 @@ export const TeamPage: React.FC<TeamPageProps> = ({
                 <div className="w-16 h-16 bg-indigo-50 border border-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-indigo-600 shadow-sm">
                    <Mail className="w-8 h-8 text-indigo-600" />
                 </div>
-                <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Sandbox Email Generated</h3>
+                <h3 className="text-2xl font-black text-slate-900 tracking-tighter">Onboarding Link Generated</h3>
                 <p className="text-slate-500 font-medium text-xs leading-relaxed max-w-md mx-auto mt-2">
-                   SMTP credentials are not active in this sandbox. We compiled and loaded the direct invitation registration URL below for offline acceptance!
+                   We compiled and loaded the direct invitation registration URL below for instant offline acceptance and onboarding!
                 </p>
              </div>
 

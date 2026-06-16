@@ -35,10 +35,7 @@ export default function SupportFAQPage({ onBack, currentUserEmail }: SupportFAQP
       q: "How does the active page billing and evaluation trial model work?",
       a: "Each newly connected Facebook commercial page is automatically credentialed with an initial, risk-free 14-Day Free Evaluation Trial. Throughout this testing period, the full spectrum of our Gemini AI-driven automation engine is accessible without hidden charges. Upon conclusion of the trial cycle, a flat, transparent subscription rate of $10 per connected page per month is billed to continue production replies. The billing sequence features a premium, zero-hidden-fees commitment, and you are free to unsubscribe or deactivate automation triggers via your Billing dashboard interface whenever desired."
     },
-    {
-      q: "What is the Ethereal test email framework during registration?",
-      a: "During the user sign-up process, we prioritize friction-free developer tests. To maintain instant sandboxed accounts without relying on traditional mail server latency, we offer direct support for Ethereal simulated mailboxes. You can access developer codes within local console logs, or utilize the universal test bypass sequence '000000' during active development to instantly verify user authentication mechanisms and unlock your SaaS developer playground features immediately."
-    },
+
     {
       q: "How do I disconnect my connected Facebook Developer Applications?",
       a: "To disable Page permissions, you can toggle active synchronizations to 'Disconnected' directly within your central multi-page dashboard panel. Alternatively, to permanently revoke all application scopes from Meta's infrastructure, you may visit your personal Facebook settings panel under 'Apps and Websites', search for the 'Perseus Bot' integration card, and click the standard 'Remove' trigger to wipe current OAuth session references immediately."

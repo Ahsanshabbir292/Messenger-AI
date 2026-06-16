@@ -80,7 +80,7 @@ const PLAN_DETAILS: Record<string, { name: string; description: string; features
       "10,000 automated credits",
       "3-Day trial period duration",
       "Live Chat assistant dashboard support",
-      "Custom sandbox messaging options"
+      "Custom messaging options"
     ]
   },
   starter: {
@@ -632,7 +632,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
         </div>
 
         <p className="text-xs text-slate-400 font-bold text-center mt-4">
-          All changes take effect immediately on credit balance. Sandbox transaction limits do not request actual cards.
+          All changes take effect immediately on credit balance.
         </p>
       </div>
 
@@ -851,7 +851,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                       </div>
                     </div>
                     <p className="text-[10px] text-indigo-550 font-bold bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-150 leading-relaxed text-center">
-                      🔒 Sandbox Mode Active. Enter any simulated checkout credentials to securely approve this invoice instantly.
+                      🔒 Enter any simulated checkout credentials to securely approve this invoice instantly.
                     </p>
                   </div>
                 </div>
@@ -1013,7 +1013,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </div>
                   </div>
                   <p className="text-[10px] text-indigo-550 font-bold bg-indigo-50/50 p-2.5 rounded-xl border border-indigo-150 leading-relaxed text-center">
-                    🔒 Sandbox Mode Active. Enter any simulated checkout credentials to securely approve this invoice instantly.
+                    🔒 Enter any simulated checkout credentials to securely approve this invoice instantly.
                   </p>
                 </div>
               </div>

@@ -93,7 +93,7 @@ export default function PrivacyPage({ onBack }: PrivacyPageProps) {
             <div>
               <h3 className="text-slate-950 font-black text-base uppercase tracking-wider mb-2">3. Third-Party Sharing and Advertisement Policy</h3>
               <p>
-                We maintain a strict zero-sharing commitment. Perseus Bot does not offer, sell, trade, or transfer any private user identification data, administrative settings, or messenger chat histories to advertising firms, tracking agencies, or third-party marketing companies. Data is processed strictly within sandboxed Cloud Run server instances and Firebase database partitions configured inside enterprise Google Cloud resources.
+                We maintain a strict zero-sharing commitment. Perseus Bot does not offer, sell, trade, or transfer any private user identification data, administrative settings, or messenger chat histories to advertising firms, tracking agencies, or third-party marketing companies. Data is processed strictly within secure Cloud Run server instances and Firebase database partitions configured inside enterprise Google Cloud resources.
               </p>
             </div>
 
