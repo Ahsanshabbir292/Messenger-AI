@@ -8944,6 +8944,41 @@ Write a realistic, short and natural response expressing your reaction, query, o
     }
   });
 
+  // Users Management - Instantly Expire Subscription Plan / Package
+  app.post("/api/admin/users/:email/expire-plan", verifyAdminMiddleware, async (req, res) => {
+    const db = await getDb();
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+    const emailLower = req.params.email.toLowerCase().trim();
+
+    try {
+      const userDocRef = db.collection("users").doc(emailLower);
+      const userDoc = await userDocRef.get();
+      if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+
+      const pastExpiryDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(); // 24 hours ago
+
+      await userDocRef.update({
+        planExpiresAt: pastExpiryDate,
+        subscriptionStatus: "expired"
+      });
+
+      await logAdminAction(
+        "Instantly expired subscription plan",
+        emailLower,
+        req
+      );
+
+      res.json({ 
+        success: true, 
+        planExpiresAt: pastExpiryDate,
+        subscriptionStatus: "expired"
+      });
+    } catch (err: any) {
+      console.error("[Admin API] Failed to expire user plan:", err.message);
+      res.status(500).json({ error: "Failed to expire user plan", details: err.message });
+    }
+  });
+
   // Users Management - Update Facebook Connection Limit Override
   app.post("/api/admin/users/:email/connection-limit", verifyAdminMiddleware, async (req, res) => {
     const db = await getDb();

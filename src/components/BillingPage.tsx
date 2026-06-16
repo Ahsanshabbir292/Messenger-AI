@@ -355,6 +355,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
   const daysRemaining = getDaysRemaining(billingInfo?.planExpiresAt);
   const isNearExpiry = daysRemaining >= 0 && daysRemaining <= 7;
   const isCancelled = billingInfo?.subscriptionStatus === "cancelled";
+  const isPlanExpired = !!billingInfo?.planExpiresAt && new Date(billingInfo.planExpiresAt).getTime() < Date.now();
 
   return (
     <div className="max-w-7xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 pb-20 px-4 sm:px-6">
@@ -385,10 +386,14 @@ export const BillingPage: React.FC<BillingPageProps> = ({
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 border-b border-slate-800 pb-6">
             <div className="space-y-2">
               <div className="flex items-center gap-3">
-                <span className="text-xs bg-indigo-500 text-white font-black uppercase px-2.5 py-1 rounded-full tracking-widest">
-                  Active Subscription
+                <span className={`text-xs font-black uppercase px-2.5 py-1 rounded-full tracking-widest ${isPlanExpired ? 'bg-rose-600 text-white' : 'bg-indigo-500 text-white'}`}>
+                  {isPlanExpired ? 'Expired Subscription' : 'Active Subscription'}
                 </span>
-                {isCancelled ? (
+                {isPlanExpired ? (
+                  <span className="text-xs bg-rose-500/15 border border-rose-500/40 text-rose-400 font-bold px-2.5 py-1 rounded-full">
+                    Expired
+                  </span>
+                ) : isCancelled ? (
                   <span className="text-xs bg-rose-500/10 border border-rose-500/30 text-rose-400 font-bold px-2.5 py-1 rounded-full">
                     Cancelled
                   </span>
@@ -578,7 +583,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     </span>
                   </div>
                 )}
-                {isCurrent && (
+                {isCurrent && !isPlanExpired && (
                   <div className="absolute -top-3 right-4">
                     <span className="px-3 py-1 bg-emerald-500 text-white text-[10px] font-black uppercase tracking-wider rounded-full whitespace-nowrap">
                       Active
@@ -613,18 +618,18 @@ export const BillingPage: React.FC<BillingPageProps> = ({
 
                 <button
                   onClick={() => {
-                    if (isCurrent) return;
+                    if (isCurrent && !isPlanExpired) return;
                     handleSwitchClick(plan.id);
                   }}
                   className={`w-full py-2.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all border-none cursor-pointer ${
-                    isCurrent
+                    isCurrent && !isPlanExpired
                       ? 'bg-emerald-50 text-emerald-600 cursor-not-allowed font-bold'
                       : plan.popular
                       ? 'bg-indigo-600 text-white hover:bg-slate-900 active:scale-95 shadow-md'
                       : 'bg-slate-50 text-slate-700 hover:bg-indigo-600 hover:text-white active:scale-95'
                   }`}
                 >
-                  {isCurrent ? 'Current Plan ✓' : `Switch Plan`}
+                  {isCurrent && !isPlanExpired ? 'Current Plan ✓' : isCurrent ? 'Reactivate Plan' : `Switch Plan`}
                 </button>
               </div>
             );
@@ -698,10 +703,10 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                     <div 
                       key={plan.id}
                       onClick={() => {
-                        if (!isCurrent) handleSwitchClick(plan.id);
+                        if (!isCurrent || isPlanExpired) handleSwitchClick(plan.id);
                       }}
                       className={`p-5 rounded-2xl border transition-all flex flex-col justify-between h-[230px] cursor-pointer ${
-                        isCurrent 
+                        isCurrent && !isPlanExpired
                           ? 'border-indigo-500 bg-indigo-50/30 ring-2 ring-indigo-500/20' 
                           : 'border-slate-100 hover:border-indigo-300 hover:bg-slate-50/50'
                       }`}
@@ -709,7 +714,7 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                       <div className="space-y-1">
                         <div className="flex items-center justify-between">
                           <span className="text-sm font-black text-slate-900">{plan.name}</span>
-                          {isCurrent && (
+                          {isCurrent && !isPlanExpired && (
                             <span className="text-[9px] font-black text-white bg-indigo-600 px-2 py-0.5 rounded-full uppercase">
                               Current Plan
                             </span>
@@ -727,13 +732,13 @@ export const BillingPage: React.FC<BillingPageProps> = ({
                           <Check className="w-3 h-3 text-emerald-500 inline mr-1" />
                           {formatCredits(plan.credits)} Monthly credits
                         </p>
-                        {isCurrent ? (
+                        {isCurrent && !isPlanExpired ? (
                           <div className="w-full py-1.5 text-center text-xs font-black text-indigo-600 bg-indigo-100/50 rounded-lg">
                             Current Plan ✓
                           </div>
                         ) : (
                           <div className="w-full py-1.5 text-center text-xs font-black text-slate-700 bg-slate-50 hover:bg-indigo-600 hover:text-white rounded-lg transition-all">
-                            Select Plan
+                            {isCurrent ? 'Reactivate Plan' : 'Select Plan'}
                           </div>
                         )}
                       </div>

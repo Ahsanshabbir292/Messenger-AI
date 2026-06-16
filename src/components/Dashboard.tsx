@@ -4232,7 +4232,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                          {filteredHistory.map((b) => {
+                          {filteredHistory.map((b, idx) => {
                             const isCurrentlySelected = selectedBroadcastId === b.id;
                             const success = b.successCount || 0;
                             const fail = b.failCount || 0;
@@ -4266,7 +4266,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                               : `${success.toLocaleString()} delivered`;
 
                             return (
-                              <React.Fragment key={b.id || Math.random().toString()}>
+                              <React.Fragment key={b.id ? `${b.id}-${idx}` : `bcast-${idx}`}>
                                 <tr 
                                   className={`hover:bg-slate-50/50 transition-colors cursor-pointer text-xs ${
                                     isCurrentlySelected ? 'bg-indigo-50/10' : ''
@@ -5901,7 +5901,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                            theme: 'bg-slate-900 text-white border-slate-850'
                         }
                      ].map((item, i) => {
-                        const isCurrent = currentPlan === item.id;
+                        const isCurrent = currentPlan === item.id && !isPlanExpired;
                         return (
                            <div key={i} className={`p-5 rounded-3xl border transition-all flex flex-col justify-between ${item.theme} ${isCurrent ? 'ring-4 ring-indigo-500/30' : ''}`}>
                               <div>
@@ -5944,7 +5944,7 @@ export default function Dashboard({ onLogout, appUser, currentPath, navigateTo, 
                                    'bg-indigo-600 text-white hover:bg-indigo-700'
                                  }`}
                               >
-                                 {item.cta}
+                                 {isCurrent ? 'Active Plan' : (currentPlan === item.id ? `Reactivate Plan` : item.cta)}
                               </button>
                            </div>
                         );

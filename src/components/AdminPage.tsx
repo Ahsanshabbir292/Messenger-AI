@@ -26,6 +26,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo, onUserUpdate 
   // Inline connection limit input states
   const [isEditingLimit, setIsEditingLimit] = useState(false);
   const [limitInputVal, setLimitInputVal] = useState("");
+  const [confirmExpireEmail, setConfirmExpireEmail] = useState<string | null>(null);
 
   const [stats, setStats] = useState<any>(null);
   const [dbDiag, setDbDiag] = useState<any>(null);
@@ -159,6 +160,7 @@ export default function AdminPage({ appUser, onLogout, navigateTo, onUserUpdate 
   const viewUserDetails = async (email: string) => {
     setLoadingUserDetails(true);
     setIsEditingLimit(false);
+    setConfirmExpireEmail(null);
     try {
       const userRes = await axios.get(`/api/admin/users/${encodeURIComponent(email)}`);
       setSelectedUser(userRes.data.user);
@@ -331,6 +333,35 @@ export default function AdminPage({ appUser, onLogout, navigateTo, onUserUpdate 
        }
     } catch (err: any) {
       addToast(err.response?.data?.error || "Failed to update package/plan", "danger");
+    }
+  };
+
+  // Instantly expire a user's subscription package/plan
+  const handleForceExpirePlan = async (email: string) => {
+    if (!email) return;
+    
+    try {
+      const res = await axios.post(`/api/admin/users/${encodeURIComponent(email)}/expire-plan`);
+      if (res.data.success) {
+        addToast(`Subscription package/plan successfully expired for ${email}`, "success");
+        handleRefresh();
+        setConfirmExpireEmail(null);
+        
+        // Instantly refresh admin's own appUser context if updating self!
+        if (onUserUpdate && appUser?.email?.toLowerCase() === email.toLowerCase()) {
+          onUserUpdate({ 
+            ...appUser, 
+            planExpiresAt: res.data.planExpiresAt,
+            subscriptionStatus: "expired"
+          });
+        }
+
+        if (selectedUser?.email?.toLowerCase() === email.toLowerCase()) {
+          viewUserDetails(email);
+        }
+      }
+    } catch (err: any) {
+      addToast(err.response?.data?.error || "Failed to expire package/plan", "danger");
     }
   };
 
@@ -1478,28 +1509,66 @@ export default function AdminPage({ appUser, onLogout, navigateTo, onUserUpdate 
                   </button>
                 </div>
 
-                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col justify-between h-24">
+                <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 flex flex-col justify-between h-auto min-h-24">
                   <div>
                     <p className="text-[10px] text-slate-500 font-extrabold uppercase">Billing Package</p>
-                    <p className="text-base font-black text-indigo-400 mt-1 capitalize truncate">{selectedUser.plan || 'Free / Trial'}</p>
+                    <div className="flex justify-between items-baseline mt-1 gap-2">
+                      <p className="text-base font-black text-indigo-400 capitalize truncate">{selectedUser.plan || 'Free / Trial'}</p>
+                      <div className="text-[9px] text-slate-400 truncate shrink-0">
+                        {selectedUser.planExpiresAt ? (
+                          new Date(selectedUser.planExpiresAt).getTime() < Date.now() ? (
+                            <span className="text-rose-400 font-extrabold uppercase tracking-wide">🔴 Expired</span>
+                          ) : (
+                            <span className="text-slate-400 font-semibold">{new Date(selectedUser.planExpiresAt).toLocaleDateString()}</span>
+                          )
+                        ) : (
+                          <span className="text-slate-500">No expiry</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => {
-                      setPlanModal({
-                        isOpen: true,
-                        email: selectedUser.email,
-                        currentPlan: selectedUser.plan || 'trial'
-                      });
-                      const initPlan = selectedUser.plan || 'trial';
-                      setSelectedPlan(initPlan);
-                      setPlanDuration(initPlan === 'trial' ? 3 : 30);
-                      setPlanCreditMode('none');
-                      setPlanCustomCredits(0);
-                    }}
-                    className="w-full text-center py-1 mt-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/20 rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer"
-                  >
-                    Change Plan
-                  </button>
+                   {confirmExpireEmail === selectedUser.email ? (
+                    <div className="flex gap-2 mt-3 animate-in fade-in zoom-in-95 duration-150">
+                      <button
+                        onClick={() => handleForceExpirePlan(selectedUser.email)}
+                        className="flex-1 text-center py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer border-none"
+                      >
+                        ⚠️ Confirm Expiry
+                      </button>
+                      <button
+                        onClick={() => setConfirmExpireEmail(null)}
+                        className="flex-1 text-center py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer border-none"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => {
+                          setPlanModal({
+                            isOpen: true,
+                            email: selectedUser.email,
+                            currentPlan: selectedUser.plan || 'trial'
+                          });
+                          const initPlan = selectedUser.plan || 'trial';
+                          setSelectedPlan(initPlan);
+                          setPlanDuration(initPlan === 'trial' ? 3 : 30);
+                          setPlanCreditMode('none');
+                          setPlanCustomCredits(0);
+                        }}
+                        className="flex-1 text-center py-1.5 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/20 rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer border-none"
+                      >
+                        Change Plan
+                      </button>
+                      <button
+                        onClick={() => setConfirmExpireEmail(selectedUser.email)}
+                        className="flex-1 text-center py-1.5 bg-rose-600/10 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/20 rounded-xl text-[9px] font-black tracking-wider uppercase transition-colors cursor-pointer border-none"
+                      >
+                        Expire Package
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 

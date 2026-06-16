@@ -240,36 +240,42 @@ const MacbookLiveSimulator = ({ onAuthClick }: { onAuthClick: () => void }) => {
     let interval: NodeJS.Timeout;
     if (isSending) {
       interval = setInterval(() => {
+        const inc = Math.floor(Math.random() * 2) + 1;
         setSendingStats(prev => {
-          const inc = Math.floor(Math.random() * 2) + 1;
           const nextSent = prev.sent + inc;
           const nextDelivered = prev.delivered + (Math.random() > 0.25 ? inc : inc - 1);
           const nextQueued = Math.max(0, prev.queued - inc);
 
-          // Stagger the list of status updates
-          setLogItems(oldItems => {
-            const updated = [...oldItems];
-            // Find one in sending, set to delivered, choose next queued and set to sending
-            const sendingIdx = updated.findIndex(item => item.status === 'sending');
-            if (sendingIdx !== -1) {
-              updated[sendingIdx].status = 'delivered';
-              updated[sendingIdx].text = 'Delivered & read live - 100% policy-safe';
-            }
-            const queuedIdx = updated.findIndex(item => item.status === 'queued');
-            if (queuedIdx !== -1) {
-              updated[queuedIdx].status = 'sending';
-              updated[queuedIdx].text = 'Dialing token webhook handshake ...';
-            } else {
-              // Append a new simulated contact to keep list endless
-              const newNames = ['Sarah Mitchell', 'Hamza Farooq', 'Alex Ross', 'Sadia Khan', 'John Baker'];
-              const customName = newNames[Math.floor(Math.random() * newNames.length)] + ` (${nextSent})`;
-              return [
-                { id: Date.now(), initials: customName.split(' ').map(n=>n[0]).join(''), name: customName, status: 'sending', text: 'Processing bulk broadcast message...' },
-                ...oldItems.slice(0, 4)
-              ];
-            }
-            return updated;
-          });
+          // Safely execute log list update outside of React state-calculation pass
+          setTimeout(() => {
+            setLogItems(oldItems => {
+              const updated = oldItems.map(item => ({ ...item }));
+              const sendingIdx = updated.findIndex(item => item.status === 'sending');
+              if (sendingIdx !== -1) {
+                updated[sendingIdx].status = 'delivered';
+                updated[sendingIdx].text = 'Delivered & read live - 100% policy-safe';
+              }
+              const queuedIdx = updated.findIndex(item => item.status === 'queued');
+              if (queuedIdx !== -1) {
+                updated[queuedIdx].status = 'sending';
+                updated[queuedIdx].text = 'Dialing token webhook handshake ...';
+              } else {
+                const newNames = ['Sarah Mitchell', 'Hamza Farooq', 'Alex Ross', 'Sadia Khan', 'John Baker'];
+                const customName = newNames[Math.floor(Math.random() * newNames.length)] + ` (${nextSent})`;
+                return [
+                  { 
+                    id: `${Date.now()}_idx_${Math.random().toString(36).substring(2, 9)}`, 
+                    initials: customName.split(' ').map(n=>n[0]).join(''), 
+                    name: customName, 
+                    status: 'sending', 
+                    text: 'Processing bulk broadcast message...' 
+                  },
+                  ...oldItems.slice(0, 4)
+                ];
+              }
+              return updated;
+            });
+          }, 0);
 
           return {
             sent: nextSent,
@@ -284,7 +290,7 @@ const MacbookLiveSimulator = ({ onAuthClick }: { onAuthClick: () => void }) => {
 
   const handlePostChatMessage = () => {
     if (!newChatText.trim()) return;
-    const userMsg = { id: Date.now(), sender: 'user', text: newChatText };
+    const userMsg = { id: `msg_${Date.now()}_idx_${Math.random().toString(36).substring(2, 9)}`, sender: 'user', text: newChatText };
     setChatLog(prev => [...prev, userMsg]);
     setNewChatText('');
 
@@ -295,7 +301,7 @@ const MacbookLiveSimulator = ({ onAuthClick }: { onAuthClick: () => void }) => {
         "Your broadcast action is recorded. Standard compliance algorithms protect your Page from reach blocks.",
         "Yes, our direct Stripe & WhatsApp integration delivers a checkout button within 0.3 seconds!"
       ];
-      const botMsg = { id: Date.now() + 1, sender: 'bot', text: responsePool[Math.floor(Math.random() * responsePool.length)] };
+      const botMsg = { id: `msg_${Date.now()}_idx_${Math.random().toString(36).substring(2, 9)}`, sender: 'bot', text: responsePool[Math.floor(Math.random() * responsePool.length)] };
       setChatLog(prev => [...prev, botMsg]);
     }, 1200);
   };
