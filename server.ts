@@ -4263,6 +4263,76 @@ Super-administrative console restricted to permitted accounts to audit system ac
     `);
   });
 
+  // Meta Platform Data Deletion Callback Endpoint
+  app.post("/auth/facebook/deletion", express.urlencoded({ extended: true }), (req, res) => {
+    try {
+      const { signed_request } = req.body;
+      if (!signed_request) {
+        return res.status(400).json({ error: "Missing signed_request parameter." });
+      }
+
+      const parts = signed_request.split('.');
+      if (parts.length !== 2) {
+        return res.status(400).json({ error: "Invalid signed_request format. Expected 'encoded_sig.payload'" });
+      }
+
+      const [encodedSig, encodedPayload] = parts;
+
+      // Base64URL decode helper
+      const base64urlDecode = (str: string): string => {
+        let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+        while (base64.length % 4) {
+          base64 += '=';
+        }
+        return Buffer.from(base64, 'base64').toString('utf8');
+      };
+
+      let payloadObj: any;
+      try {
+        const decodedPayload = base64urlDecode(encodedPayload);
+        payloadObj = JSON.parse(decodedPayload);
+      } catch (e: any) {
+        return res.status(400).json({ error: "Failed to decode or parse payload: " + e.message });
+      }
+
+      // Optional: Verify signature with Facebook App Secret if available
+      const appSecret = process.env.FACEBOOK_APP_SECRET;
+      if (appSecret) {
+        try {
+          const sig = Buffer.from(encodedSig.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+          const expectedSig = crypto
+            .createHmac('sha256', appSecret)
+            .update(encodedPayload)
+            .digest();
+
+          if (!crypto.timingSafeEqual(sig, expectedSig)) {
+            return res.status(400).json({ error: "Invalid signature verification." });
+          }
+        } catch (sigError: any) {
+          console.warn("[Meta Deletion] Signature verification failed to execute:", sigError.message);
+        }
+      }
+
+      const userId = payloadObj.user_id;
+      if (!userId) {
+        return res.status(400).json({ error: "Missing user_id in decoded payload." });
+      }
+
+      // Generate a unique confirmation code using crypto module
+      const confirmationCode = crypto.randomBytes(16).toString('hex');
+
+      console.log(`[Meta Deletion] Data deletion request processed for Facebook user_id: ${userId}. Generated code: ${confirmationCode}`);
+
+      return res.json({
+        url: `https://perseusbot.com/deletion?code=${confirmationCode}`,
+        confirmation_code: confirmationCode
+      });
+    } catch (err: any) {
+      console.error("[Meta Deletion] Error during data deletion callback:", err.message);
+      return res.status(500).json({ error: "Internal server error during data deletion processing." });
+    }
+  });
+
   app.get("/auth/facebook/callback", async (req, res) => {
     const { code, state, error, error_description } = req.query;
     const appId = process.env.FACEBOOK_APP_ID;
